@@ -1,0 +1,22 @@
+<?xml version="1.0"?>
+<robot xmlns:xacro="http://www.ros.org/wiki/xacro" name="lidar_pattern_04_single_front_center_pitch45">
+  <xacro:include filename="mid360_lidar.urdf.xacro" />
+
+  <!-- Pattern 04: One LiDAR at the center of the front face, pitched forward/down 45 degrees. -->
+  <xacro:property name="deg_to_rad" value="${pi / 180.0}" />
+  <xacro:property name="lidar_x" value="${base_length / 2.0 + mid360_depth / 2.0}" />
+  <xacro:property name="lidar_y" value="0.0" />
+  <xacro:property name="lidar_z" value="${base_center_z}" />
+  <xacro:property name="lidar_roll" value="0.0" />
+  <xacro:property name="lidar_pitch" value="${30.0 * deg_to_rad}" />
+  <xacro:property name="lidar_yaw" value="0.0" />
+
+  <xacro:mid360_lidar
+    prefix="center"
+    x="${lidar_x}"
+    y="${lidar_y}"
+    z="${lidar_z}"
+    roll="${lidar_roll}"
+    pitch="${lidar_pitch}"
+    yaw="${lidar_yaw}" />
+</robot>

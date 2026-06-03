@@ -1,0 +1,22 @@
+services:
+  ai-ship-robot-dev:
+    build:
+      context: .
+      dockerfile: .devcontainer/Dockerfile
+      args:
+        BASE_IMAGE: ${BASE_IMAGE:-ubuntu:22.04}
+        ROS_DISTRO: ${ROS_DISTRO:-humble}
+    image: ai_ship_robot:dev
+    container_name: ai_ship_robot_dev
+    network_mode: host
+    environment:
+      DISPLAY: ${DISPLAY}
+      QT_X11_NO_MITSHM: "1"
+      ROS_DOMAIN_ID: ${ROS_DOMAIN_ID:-0}
+      RMW_IMPLEMENTATION: ${RMW_IMPLEMENTATION:-rmw_fastrtps_cpp}
+      LIBGL_ALWAYS_SOFTWARE: "1"
+    volumes:
+      - .:/workspaces/ai_ship_robot:rw
+      - /tmp/.X11-unix:/tmp/.X11-unix:rw
+    working_dir: /workspaces/ai_ship_robot
+    command: sleep infinity

@@ -1,0 +1,163 @@
+<?xml version="1.0" ?>
+<sdf version="1.6">
+  <world name="lidar_placement">
+    <gravity>0 0 -9.81</gravity>
+    <magnetic_field>6.0e-6 2.3e-5 -4.2e-5</magnetic_field>
+    <atmosphere type="adiabatic" />
+
+    <include>
+      <uri>model://sun</uri>
+    </include>
+
+    <include>
+      <uri>model://ground_plane</uri>
+    </include>
+
+    <model name="dock_wall_north">
+      <static>true</static>
+      <pose>0 5.0 0.75 0 0 0</pose>
+      <link name="link">
+        <collision name="collision">
+          <geometry>
+            <box><size>12.0 0.25 1.5</size></box>
+          </geometry>
+        </collision>
+        <visual name="visual">
+          <geometry>
+            <box><size>12.0 0.25 1.5</size></box>
+          </geometry>
+          <material>
+            <ambient>0.45 0.42 0.38 1</ambient>
+            <diffuse>0.45 0.42 0.38 1</diffuse>
+          </material>
+        </visual>
+      </link>
+    </model>
+
+    <model name="dock_wall_south">
+      <static>true</static>
+      <pose>0 -5.0 0.75 0 0 0</pose>
+      <link name="link">
+        <collision name="collision">
+          <geometry>
+            <box><size>12.0 0.25 1.5</size></box>
+          </geometry>
+        </collision>
+        <visual name="visual">
+          <geometry>
+            <box><size>12.0 0.25 1.5</size></box>
+          </geometry>
+          <material>
+            <ambient>0.45 0.42 0.38 1</ambient>
+            <diffuse>0.45 0.42 0.38 1</diffuse>
+          </material>
+        </visual>
+      </link>
+    </model>
+
+    <model name="dock_wall_east">
+      <static>true</static>
+      <pose>6.0 0 0.75 0 0 0</pose>
+      <link name="link">
+        <collision name="collision">
+          <geometry>
+            <box><size>0.25 10.0 1.5</size></box>
+          </geometry>
+        </collision>
+        <visual name="visual">
+          <geometry>
+            <box><size>0.25 10.0 1.5</size></box>
+          </geometry>
+          <material>
+            <ambient>0.45 0.42 0.38 1</ambient>
+            <diffuse>0.45 0.42 0.38 1</diffuse>
+          </material>
+        </visual>
+      </link>
+    </model>
+
+    <model name="container_red">
+      <static>true</static>
+      <pose>2.0 1.8 0.45 0 0 0.35</pose>
+      <link name="link">
+        <collision name="collision">
+          <geometry>
+            <box><size>1.4 0.8 0.9</size></box>
+          </geometry>
+        </collision>
+        <visual name="visual">
+          <geometry>
+            <box><size>1.4 0.8 0.9</size></box>
+          </geometry>
+          <material>
+            <ambient>0.55 0.08 0.05 1</ambient>
+            <diffuse>0.55 0.08 0.05 1</diffuse>
+          </material>
+        </visual>
+      </link>
+    </model>
+
+    <model name="container_blue">
+      <static>true</static>
+      <pose>-2.3 -1.4 0.55 0 0 -0.45</pose>
+      <link name="link">
+        <collision name="collision">
+          <geometry>
+            <box><size>1.0 1.5 1.1</size></box>
+          </geometry>
+        </collision>
+        <visual name="visual">
+          <geometry>
+            <box><size>1.0 1.5 1.1</size></box>
+          </geometry>
+          <material>
+            <ambient>0.05 0.12 0.55 1</ambient>
+            <diffuse>0.05 0.12 0.55 1</diffuse>
+          </material>
+        </visual>
+      </link>
+    </model>
+
+    <model name="navigation_pillar_1">
+      <static>true</static>
+      <pose>-3.8 2.6 0.7 0 0 0</pose>
+      <link name="link">
+        <collision name="collision">
+          <geometry>
+            <cylinder><radius>0.18</radius><length>1.4</length></cylinder>
+          </geometry>
+        </collision>
+        <visual name="visual">
+          <geometry>
+            <cylinder><radius>0.18</radius><length>1.4</length></cylinder>
+          </geometry>
+          <material>
+            <ambient>0.9 0.75 0.15 1</ambient>
+            <diffuse>0.9 0.75 0.15 1</diffuse>
+          </material>
+        </visual>
+      </link>
+    </model>
+
+    <model name="navigation_pillar_2">
+      <static>true</static>
+      <pose>3.5 -2.8 0.7 0 0 0</pose>
+      <link name="link">
+        <collision name="collision">
+          <geometry>
+            <cylinder><radius>0.22</radius><length>1.4</length></cylinder>
+          </geometry>
+        </collision>
+        <visual name="visual">
+          <geometry>
+            <cylinder><radius>0.22</radius><length>1.4</length></cylinder>
+          </geometry>
+          <material>
+            <ambient>0.9 0.75 0.15 1</ambient>
+            <diffuse>0.9 0.75 0.15 1</diffuse>
+          </material>
+        </visual>
+      </link>
+    </model>
+  </world>
+</sdf>

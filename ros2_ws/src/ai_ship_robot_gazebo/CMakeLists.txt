@@ -1,0 +1,17 @@
+cmake_minimum_required(VERSION 3.8)
+project(ai_ship_robot_gazebo LANGUAGES NONE)
+
+find_package(ament_cmake REQUIRED)
+
+install(
+  DIRECTORY config launch worlds
+  DESTINATION share/${PROJECT_NAME}
+)
+
+install(
+  PROGRAMS scripts/keyboard_drive.py
+  DESTINATION lib/${PROJECT_NAME}
+  RENAME keyboard_drive
+)
+
+ament_package()

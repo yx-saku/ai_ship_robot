@@ -1,0 +1,51 @@
+{
+  "name": "ai-ship-robot-ros2-humble",
+  "build": {
+    "dockerfile": "Dockerfile",
+    "context": "..",
+    "args": {
+      "BASE_IMAGE": "ubuntu:22.04",
+      "ROS_DISTRO": "humble"
+    }
+  },
+  "workspaceFolder": "/workspaces/ai_ship_robot",
+  "remoteUser": "ros",
+  "runArgs": [
+    "--net=host",
+    "-e",
+    "DISPLAY=${localEnv:DISPLAY}",
+    "-e",
+    "QT_X11_NO_MITSHM=1",
+    "-v",
+    "/tmp/.X11-unix:/tmp/.X11-unix:rw"
+  ],
+  "containerEnv": {
+    "ROS_DOMAIN_ID": "0",
+    "RMW_IMPLEMENTATION": "rmw_fastrtps_cpp",
+    "LIBGL_ALWAYS_SOFTWARE": "1"
+  },
+  "postCreateCommand": "bash scripts/bootstrap_workspace.sh",
+  "customizations": {
+    "vscode": {
+      "settings": {
+        "terminal.integrated.defaultProfile.linux": "bash",
+        "terminal.integrated.profiles.linux": {
+          "bash": {
+            "path": "/bin/bash"
+          }
+        }
+      },
+      "extensions": [
+        "ms-vscode.cpptools",
+        "ms-python.python",
+        "kilocode.kilo-code"
+      ]
+    }
+  },
+  "mounts": [
+    "source=${localWorkspaceFolder}/.devcontainer/.config/kilo,target=/home/ros/.config/kilo,type=bind",
+    "source=${localWorkspaceFolder}/.devcontainer/.local/state/kilo,target=/home/ros/.local/state/kilo,type=bind",
+    "source=${localWorkspaceFolder}/.devcontainer/.local/share/kilo,target=/home/ros/.local/share/kilo,type=bind"
+  ],
+  "initializeCommand": "mkdir -p '${localWorkspaceFolder}/.devcontainer/.config/kilo' '${localWorkspaceFolder}/.devcontainer/.local/state/kilo' '${localWorkspaceFolder}/.devcontainer/.local/share/kilo'"
+}
