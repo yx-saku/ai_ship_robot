@@ -13,11 +13,14 @@ Gazebo上でロボット本体とLiDAR配置を確認するための最小ワー
 ├── docker-compose.yml
 ├── ros2_ws/src/
 │   ├── ai_ship_robot_description/ # ロボットURDF/Xacro
-│   └── ai_ship_robot_gazebo/      # Gazebo world、launch、RViz設定
+│   ├── ai_ship_robot_gazebo/      # Gazebo world、launch、RViz設定
+│   ├── ai_ship_robot_slam/        # SLAM起動、センサー正規化、2台LiDAR点群合成
+│   └── ai_ship_robot_fast_lio2/   # 公式FAST-LIO2 ROS 2移植用パッケージ
 └── scripts/
     ├── bootstrap_workspace.sh
     ├── drive_robot.sh
     ├── setup_workspace.sh
+    ├── run_slam.sh
     └── run_simulation.sh
 ```
 
@@ -125,6 +128,84 @@ ros2 topic hz /center_lidar/points
 ros2 topic hz /left_lidar/points
 ros2 topic hz /right_lidar/points
 ros2 topic echo /odom --once
+```
+
+## 3D SLAM検証
+
+SLAMはシミュレーションとは別プロセスで起動します。SLAMから見た入力は、`livox_ros_driver2`に寄せて次に統一します。
+
+```text
+/livox/lidar
+/livox/imu
+```
+
+起動時は`backend`と`sensor-profile`を分けて指定します。
+
+```bash
+bash scripts/run_slam.sh --backend fastlio --sensor-profile sim_single
+```
+
+FAST-LIO backendは`ai_ship_robot_fast_lio2`を起動します。このパッケージは公式FAST-LIO2をROS 2 Humble向けに移植して管理する受け皿です。現時点では公式推定器本体の取り込み前なので、入力経路確認用のplaceholder出力をpublishします。
+
+### センサープロファイル
+
+```text
+sim_single: Gazebo 1台LiDARを /livox/lidar へ、/imu/dataを /livox/imu へ変換。
+sim_dual:   Gazebo 2台LiDARを合成して /livox/lidar へ、/imu/dataを /livox/imu へ変換。
+real_single: 実機MID-360 1台。livox_ros_driver2の /livox/lidar と /livox/imu をそのまま使用。
+real_dual:   実機MID-360 2台。左右点群を合成し、primary IMUだけを /livox/imu として使用。
+```
+
+2台LiDARでは点群をTFで共通frameへ変換して合成し、FAST-LIO2には「1つの仮想Livox LiDAR」として渡します。IMUは合成せず、primary IMUを1つだけ`/livox/imu`へ入れます。secondary IMUは`/livox/diagnostics/secondary_imu`またはrosbag記録用として扱います。
+
+### 公式FAST-LIO2の扱い
+
+有名でないROS 2 forkは使わず、公式`hku-mars/FAST_LIO`のFAST-LIO2を`ai_ship_robot_fast_lio2`へ取り込み、ROS 2 Humble向けに移植します。公式由来commitとローカル変更点は`ros2_ws/src/ai_ship_robot_fast_lio2/UPSTREAM.md`で管理します。
+
+移植中の入力topicです。
+
+```text
+/livox/lidar: sensor_msgs/PointCloud2
+/livox/imu:   sensor_msgs/Imu
+```
+
+移植中の出力topicです。
+
+```text
+/slam/odom
+/slam/path
+/slam/map_points
+```
+
+### 起動例
+
+シミュレーション1台LiDAR構成です。
+
+```bash
+bash scripts/run_simulation.sh --lite --no-rviz
+bash scripts/run_slam.sh --backend fastlio --sensor-profile sim_single --rviz
+```
+
+シミュレーション2台LiDAR構成です。事前に`ai_ship_robot.urdf.xacro`のincludeを`lidar_pattern_dual.urdf.xacro`へ切り替えてください。
+
+```bash
+bash scripts/run_simulation.sh --lite --no-rviz
+bash scripts/run_slam.sh --backend fastlio --sensor-profile sim_dual --rviz
+```
+
+実機ではlivox_ros_driver2を起動し、topic名をプロファイル設定に合わせます。
+
+```bash
+bash scripts/run_slam.sh --backend fastlio --sensor-profile real_single --real-time
+bash scripts/run_slam.sh --backend fastlio --sensor-profile real_dual --real-time
+```
+
+SLAM入力の確認コマンドです。
+
+```bash
+ros2 topic hz /livox/lidar
+ros2 topic hz /livox/imu
+ros2 topic echo /livox/diagnostics/fusion_status --once
 ```
 
 このワークスペースでは、3D SLAM検証向けに車輪物理ではなくGazeboのplanar moveで台車ロボットの平面移動を再現します。`cmd_vel`の`linear.x`、`linear.y`、`angular.z`で、全方位移動、円弧走行、その場回転を操作できます。

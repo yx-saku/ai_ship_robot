@@ -14,15 +14,15 @@ ENV DEBIAN_FRONTEND=noninteractive \
 
 SHELL ["/bin/bash", "-o", "pipefail", "-c"]
 
-RUN apt-get update \
-    && apt-get install -y --no-install-recommends ca-certificates \
-    && rm -rf /var/lib/apt/lists/*
+RUN apt-get update && \
+    apt-get install -y ca-certificates
 
 # # プロキシ下で実行する際に証明書を信頼済みとして登録
 # RUN mkdir -p /usr/share/ca-certificates/cato
 # COPY [ "./cate_root_ca.crt", "/usr/share/ca-certificates/cato/ca.crt" ]
-# RUN echo "cato/ca.crt" >> /etc/ca-certificates.conf \
-#     && update-ca-certificates
+# RUN echo "cato/ca.crt" >> /etc/ca-certificates.conf
+# #  update all
+# RUN update-ca-certificates
 
 RUN apt-get update \
     && apt-get install -y --no-install-recommends \
@@ -47,15 +47,22 @@ RUN apt-get update \
         python3-colcon-common-extensions \
         python3-rosdep \
         ros-${ROS_DISTRO}-ament-cmake \
+        ros-${ROS_DISTRO}-diagnostic-msgs \
         ros-${ROS_DISTRO}-gazebo-plugins \
         ros-${ROS_DISTRO}-gazebo-ros \
         ros-${ROS_DISTRO}-launch \
         ros-${ROS_DISTRO}-launch-ros \
+        ros-${ROS_DISTRO}-message-filters \
+        ros-${ROS_DISTRO}-pcl-conversions \
+        ros-${ROS_DISTRO}-pcl-ros \
         ros-${ROS_DISTRO}-robot-state-publisher \
         ros-${ROS_DISTRO}-ros2launch \
         ros-${ROS_DISTRO}-ros2run \
+        ros-${ROS_DISTRO}-ros2service \
         ros-${ROS_DISTRO}-ros2topic \
         ros-${ROS_DISTRO}-rviz2 \
+        ros-${ROS_DISTRO}-tf2-ros \
+        ros-${ROS_DISTRO}-tf2-sensor-msgs \
         ros-${ROS_DISTRO}-xacro \
     && (rosdep init || true) \
     && rm -rf /var/lib/apt/lists/*
