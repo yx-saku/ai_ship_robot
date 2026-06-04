@@ -32,7 +32,7 @@
 - `scripts/`: 運用スクリプト群
 
 ## Python実行環境
-- Pythonを実行する際は必ず `.kilo/skills/python-module-run/SKILL.md` を使用すること
+- Pythonを実行する際は必ずシステム環境にインストールされたros2 humbleのPythonを使用すること
 - システム既定のPythonを使用することは禁止する
 
 ## C++実行環境

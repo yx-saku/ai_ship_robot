@@ -10,15 +10,16 @@ usage() {
 Usage: bash scripts/run_simulation.sh [OPTIONS]
 
 Options:
-  --build             Build ros2_ws before launching simulation.
-  --lite              Disable Gazebo GUI and halve LiDAR samples.
-  --gui               Enable Gazebo GUI.
-  --no-gui            Disable Gazebo GUI.
+  --build             Run one-time environment setup before launching simulation.
+  --lite              Disable Gazebo Classic GUI and default LiDAR rays to quarter resolution.
+  --gui               Enable Gazebo Classic GUI.
+  --no-gui            Disable Gazebo Classic GUI.
   --rviz              Enable RViz2.
   --no-rviz           Disable RViz2.
-  --half-resolution   Halve horizontal and vertical LiDAR samples.
+  --quarter-resolution Use quarter LiDAR sample density.
+  --half-resolution   Use half LiDAR sample density.
   --full-resolution   Use full LiDAR sample counts.
-  --world PATH        Use a custom Gazebo world.
+  --world PATH        Use a custom Gazebo Classic world.
   --rviz-config PATH  Use a custom RViz config.
   --robot-name NAME   Set the spawned robot name.
   -h, --help          Show this help.
@@ -42,6 +43,8 @@ require_value() {
 
 LAUNCH_ARGS=()
 BUILD_WORKSPACE=false
+LITE_MODE=false
+LIDAR_RESOLUTION_MODE="default"
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -53,7 +56,7 @@ while [[ $# -gt 0 ]]; do
       BUILD_WORKSPACE=true
       ;;
     --lite)
-      LAUNCH_ARGS+=("lite:=true")
+      LITE_MODE=true
       ;;
     --gui)
       LAUNCH_ARGS+=("gui:=true")
@@ -67,11 +70,14 @@ while [[ $# -gt 0 ]]; do
     --no-rviz)
       LAUNCH_ARGS+=("use_rviz:=false")
       ;;
+    --quarter-resolution)
+      LIDAR_RESOLUTION_MODE="quarter"
+      ;;
     --half-resolution)
-      LAUNCH_ARGS+=("half_lidar_resolution:=true")
+      LIDAR_RESOLUTION_MODE="half"
       ;;
     --full-resolution)
-      LAUNCH_ARGS+=("half_lidar_resolution:=false")
+      LIDAR_RESOLUTION_MODE="full"
       ;;
     --world=*)
       LAUNCH_ARGS+=("world:=${1#*=}")
@@ -95,7 +101,7 @@ while [[ $# -gt 0 ]]; do
       LAUNCH_ARGS+=("robot_name:=$(require_value --robot-name "${1:-}")")
       ;;
     *:=*)
-      echo "Do not use ROS 2 launch argument syntax here: $1" >&2
+    echo "Do not use ROS 2 launch argument syntax here: $1" >&2
       echo "Use shell options instead. Run with --help to see available options." >&2
       exit 2
       ;;
@@ -108,6 +114,23 @@ while [[ $# -gt 0 ]]; do
   shift
 done
 
+# lite指定時は1/4解像度を既定値にし、個別オプションがあればそちらを優先する。
+LAUNCH_ARGS+=("lite:=${LITE_MODE}")
+case "${LIDAR_RESOLUTION_MODE}" in
+  quarter)
+    LAUNCH_ARGS+=("half_lidar_resolution:=false" "quarter_lidar_resolution:=true")
+    ;;
+  half)
+    LAUNCH_ARGS+=("half_lidar_resolution:=true" "quarter_lidar_resolution:=false")
+    ;;
+  full)
+    LAUNCH_ARGS+=("half_lidar_resolution:=false" "quarter_lidar_resolution:=false")
+    ;;
+  default)
+    LAUNCH_ARGS+=("half_lidar_resolution:=false" "quarter_lidar_resolution:=false")
+    ;;
+esac
+
 if [[ ! -f "/opt/ros/${ROS_DISTRO}/setup.bash" ]]; then
   echo "Missing /opt/ros/${ROS_DISTRO}/setup.bash. Install ROS 2 ${ROS_DISTRO} first." >&2
   exit 1
@@ -118,12 +141,11 @@ source "/opt/ros/${ROS_DISTRO}/setup.bash"
 set -u
 
 if [[ "${BUILD_WORKSPACE}" == "true" ]]; then
-  ROS_WS="${WORKSPACE_ROOT}/ros2_ws"
-  colcon --log-base "${ROS_WS}/log" build --base-paths "${ROS_WS}/src" --build-base "${ROS_WS}/build" --install-base "${ROS_WS}/install" --symlink-install
+  bash "${SCRIPT_DIR}/install_environment.sh" --workspace-only
 fi
 
 if [[ ! -f "${WORKSPACE_ROOT}/ros2_ws/install/setup.bash" ]]; then
-  echo "Missing ros2_ws/install/setup.bash. Run bash scripts/bootstrap_workspace.sh first." >&2
+  echo "Missing ros2_ws/install/setup.bash. Run bash scripts/install_environment.sh first." >&2
   exit 1
 fi
 

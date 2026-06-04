@@ -5,26 +5,58 @@
     <magnetic_field>6.0e-6 2.3e-5 -4.2e-5</magnetic_field>
     <atmosphere type="adiabatic" />
 
-    <include>
-      <uri>model://sun</uri>
-    </include>
+    <light name="sun" type="directional">
+      <cast_shadows>true</cast_shadows>
+      <pose>0 0 10 0 0 0</pose>
+      <diffuse>0.8 0.8 0.8 1</diffuse>
+      <specular>0.2 0.2 0.2 1</specular>
+      <attenuation>
+        <range>1000</range>
+        <constant>0.9</constant>
+        <linear>0.01</linear>
+        <quadratic>0.001</quadratic>
+      </attenuation>
+      <direction>-0.5 0.1 -0.9</direction>
+    </light>
 
-    <include>
-      <uri>model://ground_plane</uri>
-    </include>
-
-    <model name="dock_wall_north">
+    <model name="ground_plane">
       <static>true</static>
-      <pose>0 5.0 2.5 0 0 0</pose>
       <link name="link">
         <collision name="collision">
           <geometry>
-            <box><size>12.0 0.25 5.0</size></box>
+            <plane>
+              <normal>0 0 1</normal>
+              <size>20 20</size>
+            </plane>
           </geometry>
         </collision>
         <visual name="visual">
           <geometry>
-            <box><size>12.0 0.25 5.0</size></box>
+            <plane>
+              <normal>0 0 1</normal>
+              <size>20 20</size>
+            </plane>
+          </geometry>
+          <material>
+            <ambient>0.30 0.30 0.30 1</ambient>
+            <diffuse>0.55 0.55 0.55 1</diffuse>
+          </material>
+        </visual>
+      </link>
+    </model>
+
+    <model name="dock_wall_north">
+      <static>true</static>
+      <pose>0 5.0 1.0 0 0 0</pose>
+      <link name="link">
+        <collision name="collision">
+          <geometry>
+            <box><size>12.0 0.25 2.0</size></box>
+          </geometry>
+        </collision>
+        <visual name="visual">
+          <geometry>
+            <box><size>12.0 0.25 2.0</size></box>
           </geometry>
           <material>
             <ambient>0.45 0.42 0.38 1</ambient>
@@ -36,16 +68,16 @@
 
     <model name="dock_wall_south">
       <static>true</static>
-      <pose>0 -5.0 2.5 0 0 0</pose>
+      <pose>0 -5.0 1.0 0 0 0</pose>
       <link name="link">
         <collision name="collision">
           <geometry>
-            <box><size>12.0 0.25 5.0</size></box>
+            <box><size>12.0 0.25 2.0</size></box>
           </geometry>
         </collision>
         <visual name="visual">
           <geometry>
-            <box><size>12.0 0.25 5.0</size></box>
+            <box><size>12.0 0.25 2.0</size></box>
           </geometry>
           <material>
             <ambient>0.45 0.42 0.38 1</ambient>
@@ -57,16 +89,16 @@
 
     <model name="dock_wall_east">
       <static>true</static>
-      <pose>6.0 0 2.5 0 0 0</pose>
+      <pose>6.0 0 1.0 0 0 0</pose>
       <link name="link">
         <collision name="collision">
           <geometry>
-            <box><size>0.25 10.0 5.0</size></box>
+            <box><size>0.25 10.0 2.0</size></box>
           </geometry>
         </collision>
         <visual name="visual">
           <geometry>
-            <box><size>0.25 10.0 5.0</size></box>
+            <box><size>0.25 10.0 2.0</size></box>
           </geometry>
           <material>
             <ambient>0.45 0.42 0.38 1</ambient>
@@ -78,7 +110,7 @@
 
     <model name="ceiling">
       <static>true</static>
-      <pose>0 0 5.05 0 0 0</pose>
+      <pose>0 0 2.05 0 0 0</pose>
       <link name="link">
         <collision name="collision">
           <geometry>

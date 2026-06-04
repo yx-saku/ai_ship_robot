@@ -1,2 +1,0 @@
-This directory contains unmodified upstream ROS 1 source snapshots.
-Do not let colcon discover nested package.xml files here.

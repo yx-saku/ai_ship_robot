@@ -14,8 +14,27 @@ ENV DEBIAN_FRONTEND=noninteractive \
 
 SHELL ["/bin/bash", "-o", "pipefail", "-c"]
 
-RUN apt-get update && \
-    apt-get install -y ca-certificates
+# JetPack 6のベースに合わせてUbuntu 22.04から開始し、ROS 2 Humbleは追加依存スクリプトとは別段階で導入する。
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends \
+        ca-certificates \
+        curl \
+        gnupg \
+        locales \
+        software-properties-common \
+        tzdata \
+    && add-apt-repository universe \
+    && locale-gen en_US en_US.UTF-8 ja_JP.UTF-8 \
+    && update-locale LC_ALL=en_US.UTF-8 LANG=en_US.UTF-8 \
+    && install -m 0755 -d /etc/apt/keyrings \
+    && curl -sSL https://raw.githubusercontent.com/ros/rosdistro/master/ros.key \
+        -o /etc/apt/keyrings/ros-archive-keyring.gpg \
+    && echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/ros-archive-keyring.gpg] http://packages.ros.org/ros2/ubuntu $(. /etc/os-release && echo ${UBUNTU_CODENAME}) main" \
+        > /etc/apt/sources.list.d/ros2.list \
+    && apt-get update \
+    && apt-get install -y --no-install-recommends \
+        ros-${ROS_DISTRO}-ros-base \
+    && rm -rf /var/lib/apt/lists/*
 
 # # プロキシ下で実行する際に証明書を信頼済みとして登録
 # RUN mkdir -p /usr/share/ca-certificates/cato
@@ -24,47 +43,10 @@ RUN apt-get update && \
 # #  update all
 # RUN update-ca-certificates
 
-RUN apt-get update \
-    && apt-get install -y --no-install-recommends \
-        curl \
-        locales \
-        sudo \
-        tzdata \
-        git \
-    && locale-gen en_US en_US.UTF-8 ja_JP.UTF-8 \
-    && update-locale LC_ALL=en_US.UTF-8 LANG=en_US.UTF-8 \
-    && rm -rf /var/lib/apt/lists/*
-
-RUN install -m 0755 -d /etc/apt/keyrings \
-    && curl -sSL https://raw.githubusercontent.com/ros/rosdistro/master/ros.key \
-        -o /etc/apt/keyrings/ros-archive-keyring.gpg \
-    && echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/ros-archive-keyring.gpg] http://packages.ros.org/ros2/ubuntu $(. /etc/os-release && echo ${UBUNTU_CODENAME}) main" \
-        > /etc/apt/sources.list.d/ros2.list
-
-RUN apt-get update \
-    && apt-get install -y --no-install-recommends \
-        build-essential \
-        python3-colcon-common-extensions \
-        python3-rosdep \
-        ros-${ROS_DISTRO}-ament-cmake \
-        ros-${ROS_DISTRO}-diagnostic-msgs \
-        ros-${ROS_DISTRO}-gazebo-plugins \
-        ros-${ROS_DISTRO}-gazebo-ros \
-        ros-${ROS_DISTRO}-launch \
-        ros-${ROS_DISTRO}-launch-ros \
-        ros-${ROS_DISTRO}-message-filters \
-        ros-${ROS_DISTRO}-pcl-conversions \
-        ros-${ROS_DISTRO}-pcl-ros \
-        ros-${ROS_DISTRO}-robot-state-publisher \
-        ros-${ROS_DISTRO}-ros2launch \
-        ros-${ROS_DISTRO}-ros2run \
-        ros-${ROS_DISTRO}-ros2service \
-        ros-${ROS_DISTRO}-ros2topic \
-        ros-${ROS_DISTRO}-rviz2 \
-        ros-${ROS_DISTRO}-tf2-ros \
-        ros-${ROS_DISTRO}-tf2-sensor-msgs \
-        ros-${ROS_DISTRO}-xacro \
-    && (rosdep init || true) \
+# 本番Jetsonと同じインストールスクリプトを使い、Docker build時はworkspaceを触らずsystem依存だけを入れる。
+COPY scripts/install_environment.sh /tmp/ai_ship_robot_install_environment.sh
+RUN bash /tmp/ai_ship_robot_install_environment.sh --system-only \
+    && rm -f /tmp/ai_ship_robot_install_environment.sh \
     && rm -rf /var/lib/apt/lists/*
 
 RUN if ! getent group ${USER_GID} >/dev/null; then groupadd --gid ${USER_GID} ${USERNAME}; fi \

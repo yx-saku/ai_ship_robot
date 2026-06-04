@@ -1,6 +1,6 @@
 # AI Ship Robot LiDAR Simulation Workspace
 
-Gazebo上でロボット本体とLiDAR配置を確認するための最小ワークスペースです。地図生成、実機起動、実機インストール用コードは含めていません。
+Gazebo Classic 11上でロボット本体とLiDAR配置を確認するための最小ワークスペースです。`stm32f303ret6/livox_laser_simulation_RO2` のpluginを取り込み、Livox MID-360相当の非反復走査LiDARを再現します。地図生成、実機起動、実機インストール用コードは含めていません。
 
 ## 構成
 
@@ -13,14 +13,13 @@ Gazebo上でロボット本体とLiDAR配置を確認するための最小ワー
 ├── docker-compose.yml
 ├── ros2_ws/src/
 │   ├── ai_ship_robot_description/ # ロボットURDF/Xacro
-│   ├── ai_ship_robot_gazebo/      # Gazebo world、launch、RViz設定
-│   ├── ai_ship_robot_slam/        # SLAM起動、センサー正規化、2台LiDAR点群合成
-│   └── ai_ship_robot_fast_lio2/   # 公式FAST-LIO2 ROS 2移植用パッケージ
+│   └── ai_ship_robot_gazebo/      # Gazebo Classic world、launch、RViz設定
+├── third_party_ws/                # setup時にcloneされる外部ROS workspace
+├── third_party_vendor/            # setup時にcloneされる非ROS依存repo
 └── scripts/
-    ├── bootstrap_workspace.sh
     ├── drive_robot.sh
+    ├── install_environment.sh
     ├── setup_workspace.sh
-    ├── run_slam.sh
     └── run_simulation.sh
 ```
 
@@ -28,15 +27,21 @@ Gazebo上でロボット本体とLiDAR配置を確認するための最小ワー
 
 ## Dev Container
 
-VS Codeでこのフォルダを開き、`Dev Containers: Reopen in Container`を実行します。コンテナ作成後に依存解決とワークスペースビルドが1回だけ自動実行されます。
+VS Codeでこのフォルダを開き、`Dev Containers: Reopen in Container`を実行します。Docker image build時にROS 2 Humbleと追加apt依存は導入されますが、コンテナ作成時に外部repo取得やworkspace buildは自動実行しません。
 
 ```bash
-bash scripts/bootstrap_workspace.sh
+bash scripts/install_environment.sh --workspace-only
 ```
 
-手動で依存解決と再ビルドを行う場合も同じコマンドを使います。
+開発コンテナ内では、初回または再セットアップ時に上記を実行します。`livox_ros_driver2` は upstream の `build.sh humble` で、`ros2_ws` は通常の `colcon build` で順にビルドされます。
 
-新しいshellではROS 2とワークスペースのoverlayが自動で読み込まれます。手動で読み込み直す場合は次を使います。
+本番Jetsonなど、ROS 2 Humble導入済みの実機環境で追加依存導入からworkspace buildまでまとめて行う場合は次を使います。
+
+```bash
+bash scripts/install_environment.sh
+```
+
+新しいshellではROS 2とワークスペースのoverlayが自動で読み込まれます。手動で読み込み直す場合は次を使います。このスクリプトはclone、ビルド、インストールを行いません。
 
 ```bash
 source scripts/setup_workspace.sh
@@ -58,9 +63,9 @@ bash scripts/run_simulation.sh
 
 起動内容は次の通りです。
 
-- Gazebo
+- Gazebo Classic 11
 - ロボットモデル
-- 選択したLivox MID-360相当LiDAR構成
+- `livox_laser_simulation_RO2` pluginによるMID-360相当LiDAR構成
 - RViz2でのロボットモデル、TF、点群表示
 
 RVizを起動しない場合は次を使います。
@@ -69,19 +74,19 @@ RVizを起動しない場合は次を使います。
 bash scripts/run_simulation.sh --no-rviz
 ```
 
-Gazebo GUIを起動しない場合は次を使います。
+Gazebo Classic GUIを起動しない場合は次を使います。
 
 ```bash
 bash scripts/run_simulation.sh --no-gui
 ```
 
-低CPU環境向けにGazebo GUIを切り、LiDARの水平/垂直samplesを半分にする場合は次を使います。
+低CPU環境向けにGazebo Classic GUIを切り、Livox pluginのray数を1/4へ落とす場合は次を使います。
 
 ```bash
 bash scripts/run_simulation.sh --lite
 ```
 
-起動前に`ros2_ws`をビルドする場合は次を使います。
+起動前に環境セットアップを明示的に実行する場合は次を使います。
 
 ```bash
 bash scripts/run_simulation.sh --build
@@ -92,15 +97,15 @@ bash scripts/run_simulation.sh --build
 LiDAR配置は`ros2_ws/src/ai_ship_robot_description/urdf/ai_ship_robot.urdf.xacro`のinclude行を直接編集して切り替えます。
 
 ```xml
-<xacro:include filename="lidar_pattern_04_single_front_center_pitch45.urdf.xacro" />
+<xacro:include filename="lidar_pattern_single.urdf.xacro" />
 ```
 
 選択できる配置パターンは次の4つです。
 
-- `lidar_pattern_01_dual_front_corners_down.urdf.xacro`
-- `lidar_pattern_02_dual_front_corners_down_yaw20.urdf.xacro`
-- `lidar_pattern_03_dual_front_corners_down_yaw38.urdf.xacro`
-- `lidar_pattern_04_single_front_center_pitch45.urdf.xacro`
+- `lidar_pattern_single.urdf.xacro`
+- `lidar_pattern_dual_out20.urdf.xacro`
+- `lidar_pattern_dual_out38.urdf.xacro`
+- `lidar_pattern_dual_updown.urdf.xacro`
 
 LiDAR共通設定は`ros2_ws/src/ai_ship_robot_description/urdf/mid360_lidar.urdf.xacro`にあります。
 
@@ -109,7 +114,9 @@ LiDAR共通設定は`ros2_ws/src/ai_ship_robot_description/urdf/mid360_lidar.urd
 - 本体サイズ: 720mm x 720mm
 - LiDAR: 1台のMID-360相当モデル
 - 点群: `/center_lidar/points`
+- CustomMsg: `/center_lidar/custom`
 - 2台構成時の点群: `/left_lidar/points`、`/right_lidar/points`
+- 2台構成時のCustomMsg: `/left_lidar/custom`、`/right_lidar/custom`
 
 主に調整する値です。
 
@@ -125,90 +132,17 @@ LiDAR共通設定は`ros2_ws/src/ai_ship_robot_description/urdf/mid360_lidar.urd
 ```bash
 ros2 topic list
 ros2 topic hz /center_lidar/points
+ros2 topic echo /center_lidar/custom --once
 ros2 topic hz /left_lidar/points
 ros2 topic hz /right_lidar/points
+ros2 topic hz /imu/data
 ros2 topic echo /odom --once
+ros2 topic echo /clock --once
 ```
 
-## 3D SLAM検証
+## ロボット操作
 
-SLAMはシミュレーションとは別プロセスで起動します。SLAMから見た入力は、`livox_ros_driver2`に寄せて次に統一します。
-
-```text
-/livox/lidar
-/livox/imu
-```
-
-起動時は`backend`と`sensor-profile`を分けて指定します。
-
-```bash
-bash scripts/run_slam.sh --backend fastlio --sensor-profile sim_single
-```
-
-FAST-LIO backendは`ai_ship_robot_fast_lio2`を起動します。このパッケージは公式FAST-LIO2をROS 2 Humble向けに移植して管理する受け皿です。現時点では公式推定器本体の取り込み前なので、入力経路確認用のplaceholder出力をpublishします。
-
-### センサープロファイル
-
-```text
-sim_single: Gazebo 1台LiDARを /livox/lidar へ、/imu/dataを /livox/imu へ変換。
-sim_dual:   Gazebo 2台LiDARを合成して /livox/lidar へ、/imu/dataを /livox/imu へ変換。
-real_single: 実機MID-360 1台。livox_ros_driver2の /livox/lidar と /livox/imu をそのまま使用。
-real_dual:   実機MID-360 2台。左右点群を合成し、primary IMUだけを /livox/imu として使用。
-```
-
-2台LiDARでは点群をTFで共通frameへ変換して合成し、FAST-LIO2には「1つの仮想Livox LiDAR」として渡します。IMUは合成せず、primary IMUを1つだけ`/livox/imu`へ入れます。secondary IMUは`/livox/diagnostics/secondary_imu`またはrosbag記録用として扱います。
-
-### 公式FAST-LIO2の扱い
-
-有名でないROS 2 forkは使わず、公式`hku-mars/FAST_LIO`のFAST-LIO2を`ai_ship_robot_fast_lio2`へ取り込み、ROS 2 Humble向けに移植します。公式由来commitとローカル変更点は`ros2_ws/src/ai_ship_robot_fast_lio2/UPSTREAM.md`で管理します。
-
-移植中の入力topicです。
-
-```text
-/livox/lidar: sensor_msgs/PointCloud2
-/livox/imu:   sensor_msgs/Imu
-```
-
-移植中の出力topicです。
-
-```text
-/slam/odom
-/slam/path
-/slam/map_points
-```
-
-### 起動例
-
-シミュレーション1台LiDAR構成です。
-
-```bash
-bash scripts/run_simulation.sh --lite --no-rviz
-bash scripts/run_slam.sh --backend fastlio --sensor-profile sim_single --rviz
-```
-
-シミュレーション2台LiDAR構成です。事前に`ai_ship_robot.urdf.xacro`のincludeを`lidar_pattern_dual.urdf.xacro`へ切り替えてください。
-
-```bash
-bash scripts/run_simulation.sh --lite --no-rviz
-bash scripts/run_slam.sh --backend fastlio --sensor-profile sim_dual --rviz
-```
-
-実機ではlivox_ros_driver2を起動し、topic名をプロファイル設定に合わせます。
-
-```bash
-bash scripts/run_slam.sh --backend fastlio --sensor-profile real_single --real-time
-bash scripts/run_slam.sh --backend fastlio --sensor-profile real_dual --real-time
-```
-
-SLAM入力の確認コマンドです。
-
-```bash
-ros2 topic hz /livox/lidar
-ros2 topic hz /livox/imu
-ros2 topic echo /livox/diagnostics/fusion_status --once
-```
-
-このワークスペースでは、3D SLAM検証向けに車輪物理ではなくGazeboのplanar moveで台車ロボットの平面移動を再現します。`cmd_vel`の`linear.x`、`linear.y`、`angular.z`で、全方位移動、円弧走行、その場回転を操作できます。
+このワークスペースでは、LiDAR配置検証向けに車輪物理ではなくGazebo Classicの平面移動pluginで台車ロボットの移動を再現します。`cmd_vel`の`linear.x`、`linear.y`、`angular.z`で、全方位移動、円弧走行、その場回転を操作できます。
 
 シミュレーション起動後、別端末で次を実行するとキーボードでロボットを操作できます。
 
@@ -216,9 +150,9 @@ ros2 topic echo /livox/diagnostics/fusion_status --once
 bash scripts/drive_robot.sh
 ```
 
-`drive_robot.sh`は`cmd_vel`をpublishする操作用スクリプトです。GazeboとLiDARは`run_simulation.sh`で起動します。
+`drive_robot.sh`は`cmd_vel`をpublishする操作用スクリプトです。Gazebo ClassicとLiDARは`run_simulation.sh`で起動します。
 
-操作ノードを起動する前に`ros2_ws`をビルドする場合は次を使います。
+操作ノードを起動する前に環境セットアップを明示的に実行する場合は次を使います。
 
 ```bash
 bash scripts/drive_robot.sh --build
@@ -263,7 +197,7 @@ docker compose exec ai-ship-robot-dev bash
 コンテナ内で次を実行します。
 
 ```bash
-bash scripts/bootstrap_workspace.sh
+bash scripts/install_environment.sh --workspace-only
 bash scripts/run_simulation.sh
 ```
 
@@ -275,16 +209,16 @@ docker compose down
 
 ## トラブルシュート
 
-GazeboやRVizが表示されない場合は、ホスト側でX11アクセスを許可してからコンテナを再起動してください。
+Gazebo ClassicやRVizが表示されない場合は、ホスト側でX11アクセスを許可してからコンテナを再起動してください。
 
 ```bash
 xhost +local:docker
 ```
 
-`Missing ros2_ws/install/setup.bash`と表示される場合は、先に依存解決とビルドを実行してください。
+`Missing ros2_ws/install/setup.bash`と表示される場合は、先に環境セットアップを実行してください。
 
 ```bash
-bash scripts/bootstrap_workspace.sh
+bash scripts/install_environment.sh
 ```
 
 Docker build時に`cate_root_ca.crt`が見つからない場合は、リポジトリ直下に社内/プロキシ用CA証明書を`cate_root_ca.crt`という名前で配置してください。

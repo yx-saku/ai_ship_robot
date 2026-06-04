@@ -24,7 +24,6 @@
     "RMW_IMPLEMENTATION": "rmw_fastrtps_cpp",
     "LIBGL_ALWAYS_SOFTWARE": "1"
   },
-  "postCreateCommand": "bash scripts/bootstrap_workspace.sh",
   "customizations": {
     "vscode": {
       "settings": {

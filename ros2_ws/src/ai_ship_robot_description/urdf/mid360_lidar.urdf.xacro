@@ -1,63 +1,68 @@
 <?xml version="1.0"?>
 <robot xmlns:xacro="http://www.ros.org/wiki/xacro" name="mid360_lidar">
   <xacro:arg name="half_lidar_resolution" default="false" />
+  <xacro:arg name="quarter_lidar_resolution" default="false" />
 
   <xacro:property name="mid360_depth" value="0.060" />
   <xacro:property name="mid360_width" value="0.065" />
   <xacro:property name="mid360_height" value="0.065" />
-  <xacro:property name="mid360_horizontal_samples" value="500" />
-  <xacro:property name="mid360_vertical_samples" value="40" />
-  <xacro:property name="mid360_half_horizontal_samples" value="250" />
-  <xacro:property name="mid360_half_vertical_samples" value="20" />
+  <xacro:property name="mid360_samples" value="40000" />
+  <xacro:property name="mid360_downsample" value="1" />
+  <xacro:property name="mid360_half_downsample" value="2" />
+  <xacro:property name="mid360_quarter_downsample" value="4" />
 
   <xacro:macro name="mid360_gazebo_sensor" params="prefix">
     <gazebo reference="${prefix}_lidar_link">
-      <sensor name="${prefix}_livox_mid360" type="ray">
+      <sensor name="${prefix}_lidar_link" type="ray">
         <always_on>true</always_on>
         <visualize>false</visualize>
         <update_rate>10</update_rate>
-        <ray>
-          <scan>
-            <horizontal>
-              <xacro:unless value="$(arg half_lidar_resolution)">
-                <samples>${mid360_horizontal_samples}</samples>
-              </xacro:unless>
-              <xacro:if value="$(arg half_lidar_resolution)">
-                <samples>${mid360_half_horizontal_samples}</samples>
-              </xacro:if>
-              <resolution>1</resolution>
-              <min_angle>-${pi}</min_angle>
-              <max_angle>${pi}</max_angle>
-            </horizontal>
-            <vertical>
-              <xacro:unless value="$(arg half_lidar_resolution)">
-                <samples>${mid360_vertical_samples}</samples>
-              </xacro:unless>
-              <xacro:if value="$(arg half_lidar_resolution)">
-                <samples>${mid360_half_vertical_samples}</samples>
-              </xacro:if>
-              <resolution>1</resolution>
-              <min_angle>${-7.0 * pi / 180.0}</min_angle>
-              <max_angle>${52.0 * pi / 180.0}</max_angle>
-            </vertical>
-          </scan>
-          <range>
-            <min>0.10</min>
-            <max>40.0</max>
-            <resolution>0.02</resolution>
-          </range>
-          <noise>
-            <type>gaussian</type>
-            <mean>0.0</mean>
-            <stddev>0.0</stddev>
-          </noise>
-        </ray>
-        <plugin name="${prefix}_lidar_3d_controller" filename="libgazebo_ros_ray_sensor.so">
-          <ros>
-            <remapping>~/out:=/${prefix}_lidar/points</remapping>
-          </ros>
-          <output_type>sensor_msgs/PointCloud2</output_type>
-          <frame_name>${prefix}_lidar_link</frame_name>
+        <!-- Livox pluginの要求に合わせ、可視化用のray設定とCSV走査設定を同居させる。 -->
+        <plugin name="${prefix}_livox_plugin" filename="libros2_livox.so">
+          <ray>
+            <scan>
+              <horizontal>
+                <samples>100</samples>
+                <resolution>1</resolution>
+                <min_angle>0</min_angle>
+                <max_angle>${2.0 * pi}</max_angle>
+              </horizontal>
+              <vertical>
+                <samples>360</samples>
+                <resolution>1</resolution>
+                <min_angle>${-7.22 * pi / 180.0}</min_angle>
+                <max_angle>${55.22 * pi / 180.0}</max_angle>
+              </vertical>
+            </scan>
+            <range>
+              <min>0.10</min>
+              <max>200.0</max>
+              <resolution>0.002</resolution>
+            </range>
+            <noise>
+              <type>gaussian</type>
+              <mean>0.0</mean>
+              <stddev>0.01</stddev>
+            </noise>
+          </ray>
+          <visualize>false</visualize>
+          <samples>${mid360_samples}</samples>
+          <!-- downsample値だけでLivox pluginの負荷を切り替え、topic構成は維持する。 -->
+          <xacro:if value="$(arg quarter_lidar_resolution)">
+            <downsample>${mid360_quarter_downsample}</downsample>
+          </xacro:if>
+          <xacro:unless value="$(arg half_lidar_resolution)">
+            <xacro:unless value="$(arg quarter_lidar_resolution)">
+              <downsample>${mid360_downsample}</downsample>
+            </xacro:unless>
+          </xacro:unless>
+          <xacro:if value="$(arg half_lidar_resolution)">
+            <downsample>${mid360_half_downsample}</downsample>
+          </xacro:if>
+          <csv_file_name>$(find ros2_livox_simulation)/scan_mode/mid360.csv</csv_file_name>
+          <topic>${prefix}_livox</topic>
+          <custom_topic>/${prefix}_lidar/custom</custom_topic>
+          <pointcloud2_topic>/${prefix}_lidar/points</pointcloud2_topic>
         </plugin>
       </sensor>
     </gazebo>

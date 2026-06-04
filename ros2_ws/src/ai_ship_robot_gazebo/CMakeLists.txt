@@ -9,9 +9,9 @@ install(
 )
 
 install(
-  PROGRAMS scripts/keyboard_drive.py
+  PROGRAMS
+    scripts/keyboard_drive.py
   DESTINATION lib/${PROJECT_NAME}
-  RENAME keyboard_drive
 )
 
 ament_package()

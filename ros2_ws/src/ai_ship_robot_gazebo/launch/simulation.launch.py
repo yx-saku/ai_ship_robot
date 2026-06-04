@@ -15,13 +15,33 @@ def generate_launch_description():
     use_rviz = LaunchConfiguration("use_rviz")
     rviz_config = LaunchConfiguration("rviz_config")
     gui = LaunchConfiguration("gui")
+    verbose = LaunchConfiguration("verbose")
     lite = LaunchConfiguration("lite")
     half_lidar_resolution = LaunchConfiguration("half_lidar_resolution")
+    quarter_lidar_resolution = LaunchConfiguration("quarter_lidar_resolution")
     effective_gui = PythonExpression(["'false' if '", lite, "' == 'true' else '", gui, "'"])
     effective_half_lidar_resolution = PythonExpression(
-        ["'true' if '", lite, "' == 'true' or '", half_lidar_resolution, "' == 'true' else 'false'"]
+        [
+            "'true' if '",
+            half_lidar_resolution,
+            "' == 'true' else 'false'",
+        ]
+    )
+    effective_quarter_lidar_resolution = PythonExpression(
+        [
+            "'true' if '",
+            quarter_lidar_resolution,
+            "' == 'true' or ('",
+            lite,
+            "' == 'true' and '",
+            half_lidar_resolution,
+            "' != 'true' and '",
+            quarter_lidar_resolution,
+            "' != 'true') else 'false'",
+        ]
     )
 
+    # Gazebo Classicでも同じxacro引数でLiDAR負荷を切り替えられるようにする。
     robot_description = ParameterValue(
         Command(
             [
@@ -32,16 +52,23 @@ def generate_launch_description():
                 " use_sim:=true",
                 " half_lidar_resolution:=",
                 effective_half_lidar_resolution,
+                " quarter_lidar_resolution:=",
+                effective_quarter_lidar_resolution,
             ]
         ),
         value_type=str,
     )
 
+    # Gazebo Classicの標準launchを使い、worldとGUI設定だけを明示的に渡す。
     gazebo = IncludeLaunchDescription(
         PythonLaunchDescriptionSource(
             PathJoinSubstitution([FindPackageShare("gazebo_ros"), "launch", "gazebo.launch.py"])
         ),
-        launch_arguments={"world": world, "verbose": "true", "gui": effective_gui}.items(),
+        launch_arguments={
+            "world": world,
+            "gui": effective_gui,
+            "verbose": verbose,
+        }.items(),
     )
 
     robot_state_publisher = Node(
@@ -52,6 +79,7 @@ def generate_launch_description():
         parameters=[{"robot_description": robot_description, "use_sim_time": use_sim_time}],
     )
 
+    # 生成済みrobot_descriptionをClassic側へ直接spawnする。
     spawn_robot = Node(
         package="gazebo_ros",
         executable="spawn_entity.py",
@@ -86,8 +114,10 @@ def generate_launch_description():
             DeclareLaunchArgument("robot_name", default_value="ai_ship_robot"),
             DeclareLaunchArgument("use_rviz", default_value="true"),
             DeclareLaunchArgument("gui", default_value="true"),
+            DeclareLaunchArgument("verbose", default_value="false"),
             DeclareLaunchArgument("lite", default_value="false"),
             DeclareLaunchArgument("half_lidar_resolution", default_value="false"),
+            DeclareLaunchArgument("quarter_lidar_resolution", default_value="false"),
             DeclareLaunchArgument(
                 "rviz_config",
                 default_value=PathJoinSubstitution(

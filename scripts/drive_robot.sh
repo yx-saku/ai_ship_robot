@@ -10,7 +10,7 @@ usage() {
 Usage: bash scripts/drive_robot.sh [OPTIONS]
 
 Options:
-  --build                  Build ros2_ws before starting keyboard drive.
+  --build                  Run one-time environment setup before starting keyboard drive.
   --linear-speed VALUE     Forward/backward speed in m/s. Default: 0.20
   --lateral-speed VALUE    Left/right strafe speed in m/s. Default: 0.20
   --angular-speed VALUE    Yaw speed in rad/s. Default: 0.60
@@ -125,21 +125,20 @@ source "/opt/ros/${ROS_DISTRO}/setup.bash"
 set -u
 
 if [[ "${BUILD_WORKSPACE}" == "true" ]]; then
-  ROS_WS="${WORKSPACE_ROOT}/ros2_ws"
-  colcon --log-base "${ROS_WS}/log" build --base-paths "${ROS_WS}/src" --build-base "${ROS_WS}/build" --install-base "${ROS_WS}/install" --symlink-install
+  bash "${SCRIPT_DIR}/install_environment.sh" --workspace-only
 fi
 
 if [[ ! -f "${WORKSPACE_ROOT}/ros2_ws/install/setup.bash" ]]; then
-  echo "Missing ros2_ws/install/setup.bash. Run bash scripts/bootstrap_workspace.sh first." >&2
+  echo "Missing ros2_ws/install/setup.bash. Run bash scripts/install_environment.sh first." >&2
   exit 1
 fi
 
 source "${SCRIPT_DIR}/setup_workspace.sh"
 
-DRIVE_EXECUTABLE="$(ros2 pkg prefix ai_ship_robot_gazebo)/lib/ai_ship_robot_gazebo/keyboard_drive"
+DRIVE_EXECUTABLE="$(ros2 pkg prefix ai_ship_robot_gazebo)/lib/ai_ship_robot_gazebo/keyboard_drive.py"
 if [[ ! -x "${DRIVE_EXECUTABLE}" ]]; then
   echo "Missing keyboard_drive executable: ${DRIVE_EXECUTABLE}" >&2
-  echo "Run bash scripts/drive_robot.sh --build or bash scripts/bootstrap_workspace.sh first." >&2
+  echo "Run bash scripts/drive_robot.sh --build or bash scripts/install_environment.sh first." >&2
   exit 1
 fi
 
