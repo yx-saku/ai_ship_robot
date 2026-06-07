@@ -66,7 +66,8 @@ RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
     AI_SHIP_ROBOT_BASHRC=/home/${USERNAME}/.bashrc \
     AI_SHIP_ROBOT_ENV_SCRIPT=/home/${USERNAME}/.ai_ship_robot_environment.bash \
     bash /workspaces/ai_ship_robot/scripts/install_environment.sh --system-only \
-    && chown ${USER_UID}:${USER_GID} /home/${USERNAME}/.bashrc /home/${USERNAME}/.ai_ship_robot_environment.bash
+    && mkdir -p /home/${USERNAME}/.ros/log \
+    && chown -R ${USER_UID}:${USER_GID} /home/${USERNAME}/.bashrc /home/${USERNAME}/.ai_ship_robot_environment.bash /home/${USERNAME}/.ros
 
 USER ${USERNAME}
 WORKDIR /workspaces/ai_ship_robot

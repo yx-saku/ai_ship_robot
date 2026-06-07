@@ -49,6 +49,7 @@ cleanup_terminal() {
 }
 
 source_workspace_environment() {
+  local include_overlays="${1:-true}"
   local had_nounset=0
 
   if [[ ! -f "/opt/ros/${ROS_DISTRO}/setup.bash" ]]; then
@@ -62,15 +63,36 @@ source_workspace_environment() {
     set +u
   fi
   source "/opt/ros/${ROS_DISTRO}/setup.bash"
-  if [[ -f "${WORKSPACE_ROOT}/third_party/ws/install/setup.bash" ]]; then
-    source "${WORKSPACE_ROOT}/third_party/ws/install/setup.bash"
-  fi
-  if [[ -f "${WORKSPACE_ROOT}/ros2_ws/install/setup.bash" ]]; then
-    source "${WORKSPACE_ROOT}/ros2_ws/install/setup.bash"
+  if [[ "${include_overlays}" == "true" ]]; then
+    if ! source_overlay_if_current "${WORKSPACE_ROOT}/third_party/ws/install/setup.bash" \
+      || ! source_overlay_if_current "${WORKSPACE_ROOT}/ros2_ws/install/setup.bash"; then
+      if [[ "${had_nounset}" -eq 1 ]]; then
+        set -u
+      fi
+      return 1
+    fi
   fi
   if [[ "${had_nounset}" -eq 1 ]]; then
     set -u
   fi
+}
+
+source_overlay_if_current() {
+  local setup_file="$1"
+
+  if [[ ! -f "${setup_file}" ]]; then
+    return 0
+  fi
+
+  # colconのsetupファイルはunderlayの絶対パスを持つため、ディレクトリ移動後の古い成果物は再buildする。
+  if grep -Fq "${WORKSPACE_ROOT}/third_party_ws" "${setup_file}" \
+    || grep -Fq "${WORKSPACE_ROOT}/third_party_vendor" "${setup_file}"; then
+    echo "Stale workspace setup detected: ${setup_file}" >&2
+    echo "Run bash scripts/drive_robot.sh --build or bash scripts/install_environment.sh --workspace-only." >&2
+    return 1
+  fi
+
+  source "${setup_file}"
 }
 
 trap cleanup_terminal EXIT
@@ -140,7 +162,7 @@ while [[ $# -gt 0 ]]; do
   shift
 done
 
-source_workspace_environment
+source_workspace_environment false
 
 if [[ "${BUILD_WORKSPACE}" == "true" ]]; then
   bash "${SCRIPT_DIR}/install_environment.sh" --workspace-only

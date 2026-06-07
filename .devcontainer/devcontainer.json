@@ -60,7 +60,7 @@
     "source=${localWorkspaceFolder}/.devcontainer/.local/share/kilo,target=/home/ros/.local/share/kilo,type=bind",
     "source=${localWorkspaceFolder}/.devcontainer/.local/apt/cache,target=/var/cache/apt,type=bind",
     "source=${localWorkspaceFolder}/.devcontainer/.local/apt/lists,target=/var/lib/apt/lists,type=bind",
-    "source=${localWorkspaceFolder}/.devcontainer/.local/ros/rosdep,target=/home/ros/.ros/rosdep,type=bind"
+    "source=${localWorkspaceFolder}/.devcontainer/.local/ros,target=/home/ros/.ros,type=bind"
   ],
-  "initializeCommand": "mkdir -p '${localWorkspaceFolder}/.devcontainer/.config/kilo' '${localWorkspaceFolder}/.devcontainer/.local/state/kilo' '${localWorkspaceFolder}/.devcontainer/.local/share/kilo' '${localWorkspaceFolder}/.devcontainer/.local/apt/cache/archives/partial' '${localWorkspaceFolder}/.devcontainer/.local/apt/lists/partial' '${localWorkspaceFolder}/.devcontainer/.local/ros/rosdep'"
+  "initializeCommand": "mkdir -p '${localWorkspaceFolder}/.devcontainer/.config/kilo' '${localWorkspaceFolder}/.devcontainer/.local/state/kilo' '${localWorkspaceFolder}/.devcontainer/.local/share/kilo' '${localWorkspaceFolder}/.devcontainer/.local/apt/cache/archives/partial' '${localWorkspaceFolder}/.devcontainer/.local/apt/lists/partial' '${localWorkspaceFolder}/.devcontainer/.local/ros/rosdep' '${localWorkspaceFolder}/.devcontainer/.local/ros/log'"
 }

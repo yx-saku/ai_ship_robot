@@ -115,22 +115,34 @@ write_shell_environment_setup() {
 export AI_SHIP_ROBOT_WORKSPACE="${WORKSPACE_ROOT}"
 export ROS_DISTRO="\${ROS_DISTRO:-${ROS_DISTRO}}"
 if [ -f "/opt/ros/\${ROS_DISTRO}/setup.bash" ] && [ -f "/opt/ros/\${ROS_DISTRO}/local_setup.bash" ]; then
+  _ai_ship_robot_source_overlay_if_current() {
+    _ai_ship_robot_setup_file="\$1"
+
+    if [ ! -f "\${_ai_ship_robot_setup_file}" ]; then
+      return 0
+    fi
+
+    if grep -Fq "\${AI_SHIP_ROBOT_WORKSPACE}/third_party_ws" "\${_ai_ship_robot_setup_file}" 2>/dev/null \
+      || grep -Fq "\${AI_SHIP_ROBOT_WORKSPACE}/third_party_vendor" "\${_ai_ship_robot_setup_file}" 2>/dev/null; then
+      return 0
+    fi
+
+    source "\${_ai_ship_robot_setup_file}"
+  }
+
   _ai_ship_robot_had_nounset=0
   if [ "\${-}" != "\${-#*u}" ]; then
     _ai_ship_robot_had_nounset=1
     set +u
   fi
   source "/opt/ros/\${ROS_DISTRO}/setup.bash"
-  if [ -f "\${AI_SHIP_ROBOT_WORKSPACE}/third_party/ws/install/setup.bash" ]; then
-    source "\${AI_SHIP_ROBOT_WORKSPACE}/third_party/ws/install/setup.bash"
-  fi
-  if [ -f "\${AI_SHIP_ROBOT_WORKSPACE}/ros2_ws/install/setup.bash" ]; then
-    source "\${AI_SHIP_ROBOT_WORKSPACE}/ros2_ws/install/setup.bash"
-  fi
+  _ai_ship_robot_source_overlay_if_current "\${AI_SHIP_ROBOT_WORKSPACE}/third_party/ws/install/setup.bash"
+  _ai_ship_robot_source_overlay_if_current "\${AI_SHIP_ROBOT_WORKSPACE}/ros2_ws/install/setup.bash"
   if [ "\${_ai_ship_robot_had_nounset}" -eq 1 ]; then
     set -u
   fi
-  unset _ai_ship_robot_had_nounset
+  unset _ai_ship_robot_had_nounset _ai_ship_robot_setup_file
+  unset -f _ai_ship_robot_source_overlay_if_current
 fi
 EOF
 
@@ -570,11 +582,7 @@ patch_ros2_livox_simulation_repo() {
   local target_dir="$1"
   local marker_file="$2"
 
-  if [[ -f "${marker_file}" ]]; then
-    return 0
-  fi
-
-  # topic 名を既存の launch / RViz / URDF と一致させるため、plugin 側に最小限の publish 先拡張だけを入れる。
+  # 既存マーカーがある環境でも追加修正を取り込めるよう、冪等な文字列置換を毎回実行する。
   TARGET_DIR="${target_dir}" python3 <<'PY'
 from pathlib import Path
 import os
@@ -620,6 +628,38 @@ plugin_text = plugin_text.replace(
     "            // Fill the PointCloud point cloud message\n",
     "            // Fill the PointCloud point cloud message\n",
     1,
+)
+
+# ray開始点がminDist分前方にあるため、publishする点群はLiDAR原点基準へ補正する。
+plugin_text = plugin_text.replace(
+    "            // Handle out-of-range data\n"
+    "            if (range >= RangeMax())\n"
+    "            {\n"
+    "                range = 0;\n"
+    "            }\n"
+    "            else if (range <= RangeMin())\n"
+    "            {\n"
+    "                range = 0;\n"
+    "            }\n\n"
+    "            // Calculate point cloud data\n"
+    "            auto rotate_info = pair.second;\n"
+    "            ignition::math::Quaterniond ray;\n"
+    "            ray.Euler(ignition::math::Vector3d(0.0, rotate_info.zenith, rotate_info.azimuth));\n"
+    "            auto axis = ray * ignition::math::Vector3d(1.0, 0.0, 0.0);\n"
+    "            auto point = range * axis;",
+    "            // GazeboのrayはminDistだけ前方から始まるため、LiDAR原点基準の距離へ戻す。\n"
+    "            const auto corrected_range = minDist + range;\n\n"
+    "            // 無効な計測値は原点付近の点として可視化されるため、点群へ追加しない。\n"
+    "            if (corrected_range >= RangeMax() || corrected_range <= RangeMin())\n"
+    "            {\n"
+    "                continue;\n"
+    "            }\n\n"
+    "            // 補正済み距離を使い、ROSへ出す点群をLiDAR frame基準で生成する。\n"
+    "            auto rotate_info = pair.second;\n"
+    "            ignition::math::Quaterniond ray;\n"
+    "            ray.Euler(ignition::math::Vector3d(0.0, rotate_info.zenith, rotate_info.azimuth));\n"
+    "            auto axis = ray * ignition::math::Vector3d(1.0, 0.0, 0.0);\n"
+    "            auto point = corrected_range * axis;",
 )
 plugin_path.write_text(plugin_text, encoding="utf-8")
 PY
@@ -684,6 +724,37 @@ clone_external_repositories() {
   patch_ros2_livox_simulation_repo "${LIVOX_SIM_DIR}" "${LIVOX_SIM_DIR}/.ai_ship_robot_patch_applied"
 }
 
+setup_file_has_stale_third_party_path() {
+  local setup_file="$1"
+
+  [[ -f "${setup_file}" ]] || return 1
+  grep -Fq "${WORKSPACE_ROOT}/third_party_ws" "${setup_file}" \
+    || grep -Fq "${WORKSPACE_ROOT}/third_party_vendor" "${setup_file}"
+}
+
+remove_stale_workspace_artifacts() {
+  local stale_artifacts=0
+
+  if setup_file_has_stale_third_party_path "${THIRD_PARTY_WS}/install/setup.bash" \
+    || setup_file_has_stale_third_party_path "${ROS_WS}/install/setup.bash"; then
+    stale_artifacts=1
+  fi
+
+  if [[ "${stale_artifacts}" -eq 0 ]]; then
+    return 0
+  fi
+
+  # third_party配下へ移動する前の絶対パスを含むcolcon生成物は、source時に旧パスを参照するため再生成する。
+  echo "Remove stale workspace artifacts that reference old third_party paths."
+  rm -rf \
+    "${THIRD_PARTY_WS}/build" \
+    "${THIRD_PARTY_WS}/install" \
+    "${THIRD_PARTY_WS}/log" \
+    "${ROS_WS}/build" \
+    "${ROS_WS}/install" \
+    "${ROS_WS}/log"
+}
+
 build_third_party_workspace() {
   if [[ ! -d "${LIVOX_DRIVER_DIR}" ]]; then
     echo "Missing livox_ros_driver2 repository at ${LIVOX_DRIVER_DIR}" >&2
@@ -703,6 +774,7 @@ build_project_workspace() {
 install_workspace() {
   source_ros2
   clone_external_repositories
+  remove_stale_workspace_artifacts
   prepare_livox_simulation_build_environment
   install_livox_sdk2_if_needed
   prepare_livox_ros_driver2_manifest
