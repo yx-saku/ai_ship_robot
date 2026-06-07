@@ -11,6 +11,15 @@
   <xacro:property name="wheel_separation" value="${base_width - wheel_width}" />
   <xacro:property name="wheel_x_offset" value="${base_length / 2.0 - wheel_radius - 0.02}" />
   <xacro:property name="base_center_z" value="${ground_clearance - wheel_radius + base_height / 2.0}" />
+  <xacro:property name="arm_robot_body_length" value="0.62" />
+  <xacro:property name="arm_robot_body_width" value="0.62" />
+  <xacro:property name="arm_robot_body_height" value="0.74" />
+  <xacro:property name="arm_robot_arm_radius" value="0.05" />
+  <xacro:property name="arm_robot_upper_arm_length" value="0.60" />
+  <xacro:property name="arm_robot_forearm_length" value="0.50" />
+  <xacro:property name="arm_robot_wrist_length" value="0.40" />
+  <xacro:property name="arm_robot_first_arm_pitch" value="${45.0 * pi / 180.0}" />
+  <xacro:property name="arm_robot_second_arm_pitch" value="${115.0 * pi / 180.0}" />
 
   <xacro:macro name="box_inertia" params="mass x y z">
     <inertial>
@@ -85,6 +94,111 @@
     </gazebo>
   </xacro:macro>
 
+  <xacro:macro name="fixed_arm_robot_fixture">
+    <!-- LiDAR遮蔽を見やすくするため、上物本体は台車より一回り小さい箱で高さを強調する。 -->
+    <link name="arm_robot_body_link">
+      <visual>
+        <origin xyz="0 0 0" rpy="0 0 0" />
+        <geometry>
+          <box size="${arm_robot_body_length} ${arm_robot_body_width} ${arm_robot_body_height}" />
+        </geometry>
+        <material name="arm_robot_green">
+          <color rgba="0.10 0.45 0.16 1.0" />
+        </material>
+      </visual>
+      <collision>
+        <origin xyz="0 0 0" rpy="0 0 0" />
+        <geometry>
+          <box size="${arm_robot_body_length} ${arm_robot_body_width} ${arm_robot_body_height}" />
+        </geometry>
+      </collision>
+      <xacro:box_inertia mass="18.0" x="${arm_robot_body_length}" y="${arm_robot_body_width}" z="${arm_robot_body_height}" />
+    </link>
+
+    <joint name="arm_robot_body_joint" type="fixed">
+      <parent link="base_link" />
+      <child link="arm_robot_body_link" />
+      <origin xyz="0 0 ${base_center_z + base_height / 2.0 + arm_robot_body_height / 2.0}" rpy="0 0 0" />
+    </joint>
+
+    <!-- 根元・肘・手首の3節を前方上がりに固定し、LiDARから見える外形を優先して再現する。 -->
+    <link name="arm_robot_upper_arm_link">
+      <visual>
+        <origin xyz="${arm_robot_upper_arm_length * cos(45.0 * pi / 180.0) / 2.0} 0 ${arm_robot_upper_arm_length * sin(45.0 * pi / 180.0) / 2.0}" rpy="0 ${arm_robot_first_arm_pitch} 0" />
+        <geometry>
+          <cylinder radius="${arm_robot_arm_radius}" length="${arm_robot_upper_arm_length}" />
+        </geometry>
+        <material name="arm_robot_blue">
+          <color rgba="0.12 0.42 0.62 1.0" />
+        </material>
+      </visual>
+      <collision>
+        <origin xyz="${arm_robot_upper_arm_length * cos(45.0 * pi / 180.0) / 2.0} 0 ${arm_robot_upper_arm_length * sin(45.0 * pi / 180.0) / 2.0}" rpy="0 ${arm_robot_first_arm_pitch} 0" />
+        <geometry>
+          <cylinder radius="${arm_robot_arm_radius}" length="${arm_robot_upper_arm_length}" />
+        </geometry>
+      </collision>
+      <xacro:cylinder_inertia mass="4.0" radius="${arm_robot_arm_radius}" length="${arm_robot_upper_arm_length}" axis="z" />
+    </link>
+
+    <joint name="arm_robot_shoulder_joint" type="fixed">
+      <parent link="arm_robot_body_link" />
+      <child link="arm_robot_upper_arm_link" />
+      <origin xyz="${arm_robot_body_length / 2.0} -0.10 ${0.20 - arm_robot_body_height / 2.0}" rpy="0 0 0" />
+    </joint>
+
+    <link name="arm_robot_forearm_link">
+      <visual>
+        <origin xyz="${arm_robot_forearm_length * cos(-25.0 * pi / 180.0) / 2.0} 0 ${arm_robot_forearm_length * sin(-25.0 * pi / 180.0) / 2.0}" rpy="0 ${arm_robot_second_arm_pitch} 0" />
+        <geometry>
+          <cylinder radius="${arm_robot_arm_radius}" length="${arm_robot_forearm_length}" />
+        </geometry>
+        <material name="arm_robot_blue">
+          <color rgba="0.12 0.42 0.62 1.0" />
+        </material>
+      </visual>
+      <collision>
+        <origin xyz="${arm_robot_forearm_length * cos(-25.0 * pi / 180.0) / 2.0} 0 ${arm_robot_forearm_length * sin(-25.0 * pi / 180.0) / 2.0}" rpy="0 ${arm_robot_second_arm_pitch} 0" />
+        <geometry>
+          <cylinder radius="${arm_robot_arm_radius}" length="${arm_robot_forearm_length}" />
+        </geometry>
+      </collision>
+      <xacro:cylinder_inertia mass="3.0" radius="${arm_robot_arm_radius}" length="${arm_robot_forearm_length}" axis="z" />
+    </link>
+
+    <!-- 関節位置を各アーム先端へ一致させ、指定された内角と鉛直手首を維持する。 -->
+    <joint name="arm_robot_elbow_joint" type="fixed">
+      <parent link="arm_robot_upper_arm_link" />
+      <child link="arm_robot_forearm_link" />
+      <origin xyz="${arm_robot_upper_arm_length * cos(45.0 * pi / 180.0)} 0 ${arm_robot_upper_arm_length * sin(45.0 * pi / 180.0)}" rpy="0 0 0" />
+    </joint>
+
+    <link name="arm_robot_wrist_link">
+      <visual>
+        <origin xyz="0 0 ${arm_robot_wrist_length / 2.0}" rpy="0 0 0" />
+        <geometry>
+          <cylinder radius="${arm_robot_arm_radius}" length="${arm_robot_wrist_length}" />
+        </geometry>
+        <material name="arm_robot_blue">
+          <color rgba="0.12 0.42 0.62 1.0" />
+        </material>
+      </visual>
+      <collision>
+        <origin xyz="0 0 ${arm_robot_wrist_length / 2.0}" rpy="0 0 0" />
+        <geometry>
+          <cylinder radius="${arm_robot_arm_radius}" length="${arm_robot_wrist_length}" />
+        </geometry>
+      </collision>
+      <xacro:cylinder_inertia mass="2.0" radius="${arm_robot_arm_radius}" length="${arm_robot_wrist_length}" axis="z" />
+    </link>
+
+    <joint name="arm_robot_wrist_joint" type="fixed">
+      <parent link="arm_robot_forearm_link" />
+      <child link="arm_robot_wrist_link" />
+      <origin xyz="${arm_robot_forearm_length * cos(-25.0 * pi / 180.0)} 0 ${arm_robot_forearm_length * sin(-25.0 * pi / 180.0)}" rpy="0 0 0" />
+    </joint>
+  </xacro:macro>
+
   <link name="base_footprint" />
 
   <joint name="base_footprint_joint" type="fixed">
@@ -116,6 +230,7 @@
   <xacro:drive_wheel prefix="left_rear" x_position="${-wheel_x_offset}" y_position="${wheel_separation / 2.0}" />
   <xacro:drive_wheel prefix="right_front" x_position="${wheel_x_offset}" y_position="${-wheel_separation / 2.0}" />
   <xacro:drive_wheel prefix="right_rear" x_position="${-wheel_x_offset}" y_position="${-wheel_separation / 2.0}" />
+  <xacro:fixed_arm_robot_fixture />
 
   <!-- ==================== LiDAR installation pattern ====================
        Edit the filename below to switch LiDAR installation patterns.

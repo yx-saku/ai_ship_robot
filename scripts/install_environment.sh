@@ -6,12 +6,23 @@ DEBIAN_FRONTEND="${DEBIAN_FRONTEND:-noninteractive}"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 WORKSPACE_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
 ROS_WS="${WORKSPACE_ROOT}/ros2_ws"
-THIRD_PARTY_WS="${WORKSPACE_ROOT}/third_party_ws"
+THIRD_PARTY_ROOT="${WORKSPACE_ROOT}/third_party"
+THIRD_PARTY_WS="${THIRD_PARTY_ROOT}/ws"
 THIRD_PARTY_SRC_DIR="${THIRD_PARTY_WS}/src"
 LIVOX_DRIVER_DIR="${THIRD_PARTY_SRC_DIR}/livox_ros_driver2"
 LIVOX_SIM_DIR="${THIRD_PARTY_SRC_DIR}/ros2_livox_simulation"
-LIVOX_SDK_DIR="${WORKSPACE_ROOT}/third_party_vendor/Livox-SDK2"
+LIVOX_SDK_DIR="${THIRD_PARTY_ROOT}/vendor/Livox-SDK2"
+APT_PRIMARY_MIRROR="${APT_PRIMARY_MIRROR:-}"
+APT_PORTS_MIRROR="${APT_PORTS_MIRROR:-}"
+APT_SECURITY_MIRROR="${APT_SECURITY_MIRROR:-}"
+APT_FORCE_IPV4="${APT_FORCE_IPV4:-true}"
+APT_RETRIES="${APT_RETRIES:-3}"
+APT_HTTP_TIMEOUT="${APT_HTTP_TIMEOUT:-20}"
+APT_HTTPS_TIMEOUT="${APT_HTTPS_TIMEOUT:-${APT_HTTP_TIMEOUT}}"
+ROSDEP_UPDATE_MAX_AGE_SECONDS="${ROSDEP_UPDATE_MAX_AGE_SECONDS:-86400}"
 INSTALL_MODE="full"
+APT_UPDATED=0
+ROSDEP_UPDATED=0
 export DEBIAN_FRONTEND
 
 usage() {
@@ -19,12 +30,13 @@ usage() {
 Usage: bash scripts/install_environment.sh [OPTIONS]
 
 Options:
-  --full           追加依存を入れ、外部repo取得とworkspace buildまで実行する。既定値。
-  --system-only    apt/rosdep依存だけを入れる。Docker image build用。
-  --workspace-only 外部repo取得とworkspace buildだけを実行する。開発コンテナ初回セットアップ用。
+  --full           ROS 2 Humble導入、追加依存導入、外部repo取得、workspace buildまで実行する。既定値。
+  --system-only    ROS 2 Humble導入、追加apt依存導入、rosdep初期化/更新まで行う。
+  --workspace-only 外部repo取得、互換symlink、SDK導入、workspace buildを行う。ROS 2導入済み環境向け。
+  --shell-only     aptやbuildは行わず、shell自動読み込み設定だけを更新する。
   -h, --help       このhelpを表示する。
 
-ROS 2 Humbleは /opt/ros/${ROS_DISTRO} にインストール済みであること。
+ --workspace-only 以外は、ROS 2 Humble未導入環境でも実行できる。
 EOF
 }
 
@@ -42,6 +54,9 @@ while [[ $# -gt 0 ]]; do
       ;;
     --workspace-only)
       INSTALL_MODE="workspace-only"
+      ;;
+    --shell-only)
+      INSTALL_MODE="shell-only"
       ;;
     *)
       echo "Unknown option: $1" >&2
@@ -64,7 +79,7 @@ fi
 
 require_ros2() {
   if [[ ! -f "/opt/ros/${ROS_DISTRO}/setup.bash" ]]; then
-    echo "Missing /opt/ros/${ROS_DISTRO}/setup.bash. Install ROS 2 ${ROS_DISTRO} before running this script." >&2
+    echo "Missing /opt/ros/${ROS_DISTRO}/setup.bash. Run this script without --workspace-only first." >&2
     exit 1
   fi
 }
@@ -76,30 +91,356 @@ source_ros2() {
   set -u
 }
 
+write_shell_environment_setup() {
+  local bashrc_path="${AI_SHIP_ROBOT_BASHRC:-${HOME}/.bashrc}"
+  local env_script_path="${AI_SHIP_ROBOT_ENV_SCRIPT:-${HOME}/.ai_ship_robot_environment.bash}"
+  local bashrc_dir=""
+  local env_script_dir=""
+  local begin_marker="# >>> ai_ship_robot environment >>>"
+  local end_marker="# <<< ai_ship_robot environment <<<"
+  local filtered_bashrc=""
+  local updated_bashrc=""
+  local skip_block=0
+  local line=""
+
+  bashrc_dir="$(dirname "${bashrc_path}")"
+  env_script_dir="$(dirname "${env_script_path}")"
+  filtered_bashrc="$(mktemp)"
+  updated_bashrc="$(mktemp)"
+
+  # source処理本体を独立ファイルへ置き、bashrcやprofile側は薄い読み込み口だけにする。
+  mkdir -p "${env_script_dir}"
+  cat > "${env_script_path}" <<EOF
+# This file is managed by scripts/install_environment.sh.
+export AI_SHIP_ROBOT_WORKSPACE="${WORKSPACE_ROOT}"
+export ROS_DISTRO="\${ROS_DISTRO:-${ROS_DISTRO}}"
+if [ -f "/opt/ros/\${ROS_DISTRO}/setup.bash" ] && [ -f "/opt/ros/\${ROS_DISTRO}/local_setup.bash" ]; then
+  _ai_ship_robot_had_nounset=0
+  if [ "\${-}" != "\${-#*u}" ]; then
+    _ai_ship_robot_had_nounset=1
+    set +u
+  fi
+  source "/opt/ros/\${ROS_DISTRO}/setup.bash"
+  if [ -f "\${AI_SHIP_ROBOT_WORKSPACE}/third_party/ws/install/setup.bash" ]; then
+    source "\${AI_SHIP_ROBOT_WORKSPACE}/third_party/ws/install/setup.bash"
+  fi
+  if [ -f "\${AI_SHIP_ROBOT_WORKSPACE}/ros2_ws/install/setup.bash" ]; then
+    source "\${AI_SHIP_ROBOT_WORKSPACE}/ros2_ws/install/setup.bash"
+  fi
+  if [ "\${_ai_ship_robot_had_nounset}" -eq 1 ]; then
+    set -u
+  fi
+  unset _ai_ship_robot_had_nounset
+fi
+EOF
+
+  # 再実行時に設定が重複しないよう、前回の管理ブロックだけを取り除いてから先頭へ最新内容を書き込む。
+  mkdir -p "${bashrc_dir}"
+  touch "${bashrc_path}"
+  while IFS= read -r line || [[ -n "${line}" ]]; do
+    if [[ "${line}" == "${begin_marker}" ]]; then
+      skip_block=1
+      continue
+    fi
+
+    if [[ "${line}" == "${end_marker}" ]]; then
+      skip_block=0
+      continue
+    fi
+
+    if [[ "${skip_block}" -eq 0 ]]; then
+      printf '%s\n' "${line}" >> "${filtered_bashrc}"
+    fi
+  done < "${bashrc_path}"
+
+  # Ubuntu既定のinteractive判定より前に読み込み口を置き、login shell経由でもROS環境を参照できるようにする。
+  {
+    cat <<EOF
+${begin_marker}
+if [ -f "${env_script_path}" ]; then
+  source "${env_script_path}"
+fi
+${end_marker}
+EOF
+    printf '\n'
+    if [[ -s "${filtered_bashrc}" ]]; then
+      cat "${filtered_bashrc}"
+    fi
+  } > "${updated_bashrc}"
+
+  mv "${updated_bashrc}" "${bashrc_path}"
+  rm -f "${filtered_bashrc}"
+  echo "Updated shell environment setup: ${bashrc_path}"
+  echo "Updated shell environment script: ${env_script_path}"
+}
+
+collect_missing_packages() {
+  local -n missing_packages_ref="$1"
+  shift
+
+  local package_name=""
+  local package_status=""
+  local normalized_name=""
+  declare -A installed_packages=()
+
+  missing_packages_ref=()
+
+  # dpkg-queryをpackageごとに起動せず、まとめて状態を取得して再実行時の小さな待ち時間を減らす。
+  while IFS=$'\t' read -r package_name package_status; do
+    if [[ "${package_status}" == "install ok installed" ]]; then
+      normalized_name="${package_name%%:*}"
+      installed_packages["${package_name}"]=1
+      installed_packages["${normalized_name}"]=1
+    fi
+  done < <(dpkg-query -W -f='${Package}\t${Status}\n' "$@" 2>/dev/null || true)
+
+  # aptへ渡す入力順を保ち、不足packageだけをinstall対象にする。
+  for package_name in "$@"; do
+    if [[ "${installed_packages[${package_name}]:-0}" -ne 1 ]]; then
+      missing_packages_ref+=("${package_name}")
+    fi
+  done
+}
+
+locale_generated() {
+  local locale_name="$1"
+
+  locale -a 2>/dev/null | grep -Eqi "^${locale_name}$"
+}
+
+ensure_locales_generated() {
+  local needs_locale_gen=0
+
+  if ! command -v locale-gen >/dev/null 2>&1; then
+    return 0
+  fi
+
+  # 生成済みlocaleを再生成しないことで、再実行時のlocale-gen待ちを避ける。
+  if ! locale_generated "en_US\.utf8" || ! locale_generated "ja_JP\.utf8"; then
+    needs_locale_gen=1
+  fi
+
+  if [[ "${needs_locale_gen}" -eq 1 ]]; then
+    ${SUDO} locale-gen en_US en_US.UTF-8 ja_JP.UTF-8
+  fi
+
+  if [[ ! -f /etc/default/locale ]] || ! grep -Eq '^LANG=en_US\.UTF-8$|^LANG="en_US\.UTF-8"$' /etc/default/locale; then
+    ${SUDO} update-locale LANG=en_US.UTF-8
+  fi
+}
+
+mark_apt_indexes_stale() {
+  APT_UPDATED=0
+}
+
+apt_update_if_needed() {
+  if [[ "${APT_UPDATED}" -eq 1 ]]; then
+    return 0
+  fi
+
+  run_with_safe_apt_locale apt-get update
+  APT_UPDATED=1
+}
+
+run_with_safe_apt_locale() {
+  # locales導入前でもdpkg maintainer scriptが未生成localeを参照しないよう、安全なUTF-8 localeでapt系処理を実行する。
+  ${SUDO} env \
+    DEBIAN_FRONTEND="${DEBIAN_FRONTEND}" \
+    LANG=C.UTF-8 \
+    LC_ALL=C.UTF-8 \
+    "$@"
+}
+
+install_apt_packages_if_missing() {
+  local missing_packages=()
+
+  # 再実行時の待ち時間を減らすため、未導入packageがある時だけapt installを実行する。
+  collect_missing_packages missing_packages "$@"
+
+  if [[ "${#missing_packages[@]}" -eq 0 ]]; then
+    return 0
+  fi
+
+  apt_update_if_needed
+  run_with_safe_apt_locale apt-get install -y --no-install-recommends "${missing_packages[@]}"
+}
+
+write_apt_network_config() {
+  local apt_config_path="/etc/apt/apt.conf.d/99ai-ship-robot-network"
+  local temp_config=""
+
+  temp_config="$(mktemp)"
+
+  # 遅いIPv6経路や不安定な回線でaptが長時間停止しないよう、workspace専用の通信設定を固定する。
+  {
+    printf 'Acquire::Retries "%s";\n' "${APT_RETRIES}"
+    printf 'Acquire::http::Timeout "%s";\n' "${APT_HTTP_TIMEOUT}"
+    printf 'Acquire::https::Timeout "%s";\n' "${APT_HTTPS_TIMEOUT}"
+
+    if [[ "${APT_FORCE_IPV4}" == "true" ]]; then
+      printf 'Acquire::ForceIPv4 "true";\n'
+    fi
+  } > "${temp_config}"
+
+  ${SUDO} install -m 0644 "${temp_config}" "${apt_config_path}"
+  rm -f "${temp_config}"
+}
+
+backup_file_once() {
+  local file_path="$1"
+  local backup_path="${file_path}.ai_ship_robot.bak"
+
+  if [[ -f "${backup_path}" || ! -f "${file_path}" ]]; then
+    return 0
+  fi
+
+  ${SUDO} cp "${file_path}" "${backup_path}"
+}
+
+replace_apt_source_url() {
+  local current_url="$1"
+  local replacement_url="$2"
+  local temp_sources=""
+
+  if [[ -z "${replacement_url}" || ! -f "/etc/apt/sources.list" ]]; then
+    return 0
+  fi
+
+  if ! grep -Fq "${current_url}" /etc/apt/sources.list; then
+    return 0
+  fi
+
+  temp_sources="$(mktemp)"
+  sed "s#${current_url}#${replacement_url%/}#g" /etc/apt/sources.list > "${temp_sources}"
+
+  if cmp -s "${temp_sources}" /etc/apt/sources.list; then
+    rm -f "${temp_sources}"
+    return 0
+  fi
+
+  backup_file_once "/etc/apt/sources.list"
+  ${SUDO} install -m 0644 "${temp_sources}" /etc/apt/sources.list
+  rm -f "${temp_sources}"
+  mark_apt_indexes_stale
+}
+
+configure_ubuntu_apt_mirrors() {
+  # 社内回線と相性の悪いmirrorを避けられるよう、必要時だけsources.listのURLを差し替える。
+  replace_apt_source_url "http://archive.ubuntu.com/ubuntu" "${APT_PRIMARY_MIRROR}"
+  replace_apt_source_url "https://archive.ubuntu.com/ubuntu" "${APT_PRIMARY_MIRROR}"
+  replace_apt_source_url "http://ports.ubuntu.com/ubuntu-ports" "${APT_PORTS_MIRROR}"
+  replace_apt_source_url "https://ports.ubuntu.com/ubuntu-ports" "${APT_PORTS_MIRROR}"
+  replace_apt_source_url "http://security.ubuntu.com/ubuntu" "${APT_SECURITY_MIRROR}"
+  replace_apt_source_url "https://security.ubuntu.com/ubuntu" "${APT_SECURITY_MIRROR}"
+}
+
+apt_source_has_component() {
+  local component_name="$1"
+
+  grep -Eqs "^[[:space:]]*deb .*[[:space:]]${component_name}([[:space:]]|$)" /etc/apt/sources.list /etc/apt/sources.list.d/*.list 2>/dev/null \
+    || grep -Eqs "^[[:space:]]*Components: .*[[:space:]]?${component_name}([[:space:]]|$)" /etc/apt/sources.list.d/*.sources 2>/dev/null
+}
+
+enable_apt_component_in_sources_list() {
+  local component_name="$1"
+  local sources_file="/etc/apt/sources.list"
+  local temp_sources=""
+  local line=""
+  local changed=0
+
+  if apt_source_has_component "${component_name}"; then
+    return 0
+  fi
+
+  if [[ ! -f "${sources_file}" ]]; then
+    echo "Missing ${sources_file}; cannot enable apt component: ${component_name}" >&2
+    return 1
+  fi
+
+  temp_sources="$(mktemp)"
+
+  # software-properties-commonを入れず、Ubuntuのdeb行へ必要なcomponentだけを直接追加して依存導入を軽くする。
+  while IFS= read -r line || [[ -n "${line}" ]]; do
+    if [[ "${line}" =~ ^[[:space:]]*deb[[:space:]] ]] \
+      && [[ "${line}" =~ [[:space:]]main([[:space:]]|$) ]] \
+      && [[ ! "${line}" =~ [[:space:]]${component_name}([[:space:]]|$) ]]; then
+      printf '%s %s\n' "${line}" "${component_name}" >> "${temp_sources}"
+      changed=1
+      continue
+    fi
+
+    printf '%s\n' "${line}" >> "${temp_sources}"
+  done < "${sources_file}"
+
+  if [[ "${changed}" -eq 0 ]]; then
+    rm -f "${temp_sources}"
+    echo "No editable apt source line found for component: ${component_name}" >&2
+    return 1
+  fi
+
+  backup_file_once "${sources_file}"
+  ${SUDO} install -m 0644 "${temp_sources}" "${sources_file}"
+  rm -f "${temp_sources}"
+  mark_apt_indexes_stale
+}
+
+ensure_rosdep_initialized() {
+  if [[ ! -f /etc/ros/rosdep/sources.list.d/20-default.list ]]; then
+    ${SUDO} rosdep init || true
+  fi
+}
+
+rosdep_cache_fresh() {
+  local stamp_file="${HOME}/.ros/rosdep/.ai_ship_robot_updated_at"
+  local cache_dir="${HOME}/.ros/rosdep/sources.cache"
+  local updated_at=""
+  local now=""
+
+  if [[ ! "${ROSDEP_UPDATE_MAX_AGE_SECONDS}" =~ ^[0-9]+$ || "${ROSDEP_UPDATE_MAX_AGE_SECONDS}" -eq 0 ]]; then
+    return 1
+  fi
+
+  if [[ ! -f "${stamp_file}" || ! -d "${cache_dir}" ]]; then
+    return 1
+  fi
+
+  updated_at="$(<"${stamp_file}")"
+  if [[ ! "${updated_at}" =~ ^[0-9]+$ ]]; then
+    return 1
+  fi
+
+  # rosdep cacheをbind mountで保持し、一定時間内の再作成コンテナではネットワーク更新を省略する。
+  now="$(date +%s)"
+  (( now - updated_at < ROSDEP_UPDATE_MAX_AGE_SECONDS ))
+}
+
+ensure_rosdep_updated() {
+  if ! command -v rosdep >/dev/null 2>&1; then
+    return 0
+  fi
+
+  ensure_rosdep_initialized
+
+  if [[ "${ROSDEP_UPDATED}" -eq 1 ]]; then
+    return 0
+  fi
+
+  if rosdep_cache_fresh; then
+    echo "Skip rosdep update because cache is fresh. Set ROSDEP_UPDATE_MAX_AGE_SECONDS=0 to force update."
+    ROSDEP_UPDATED=1
+    return 0
+  fi
+
+  # rosdep indexはworkspace処理前にだけ更新し、system依存導入時の不要なネットワーク待ちを避ける。
+  rosdep update
+  mkdir -p "${HOME}/.ros/rosdep"
+  date +%s > "${HOME}/.ros/rosdep/.ai_ship_robot_updated_at"
+  ROSDEP_UPDATED=1
+}
+
 install_system_dependencies() {
-  local system_packages=(
-    build-essential
-    ca-certificates
-    cmake
-    curl
-    gazebo
-    git
-    libapr1-dev
-    libaprutil1-dev
-    libboost-chrono-dev
-    libboost-dev
-    libeigen3-dev
-    libgazebo-dev
-    libpcl-dev
-    libprotobuf-dev
-    locales
-    protobuf-compiler
-    python3-colcon-common-extensions
-    python3-rosdep
-    sudo
-    tzdata
-  )
   local ros_packages=(
+    "ros-${ROS_DISTRO}-ros-base"
     "ros-${ROS_DISTRO}-ament-cmake"
     "ros-${ROS_DISTRO}-ament-cmake-auto"
     "ros-${ROS_DISTRO}-diagnostic-msgs"
@@ -117,27 +458,100 @@ install_system_dependencies() {
     "ros-${ROS_DISTRO}-ros2service"
     "ros-${ROS_DISTRO}-ros2topic"
     "ros-${ROS_DISTRO}-rosbag2"
+    "ros-${ROS_DISTRO}-rosidl-default-generators"
     "ros-${ROS_DISTRO}-rviz2"
     "ros-${ROS_DISTRO}-tf2-ros"
     "ros-${ROS_DISTRO}-tf2-sensor-msgs"
     "ros-${ROS_DISTRO}-xacro"
   )
+  local system_packages=(
+    build-essential
+    cmake
+    gazebo
+    git
+    libapr1-dev
+    libaprutil1-dev
+    libboost-chrono-dev
+    libboost-dev
+    libeigen3-dev
+    libgazebo-dev
+    libpcl-dev
+    libprotobuf-dev
+    protobuf-compiler
+    python3-colcon-common-extensions
+    python3-rosdep
+    python3-vcstool
+    sudo
+  )
 
-  # 本番Jetsonと開発Dockerで同じ依存リストを使い、ROS 2本体以外の追加packageだけを導入する。
-  ${SUDO} apt-get update
-  ${SUDO} apt-get install -y --no-install-recommends "${system_packages[@]}" "${ros_packages[@]}"
+  # 本番Jetsonと開発Dockerで同じインストールスクリプトを使うため、ROS 2本体と追加依存を同じ場所で導入する。
+  install_apt_packages_if_missing "${system_packages[@]}" "${ros_packages[@]}"
 
-  if command -v locale-gen >/dev/null 2>&1; then
-    ${SUDO} locale-gen en_US en_US.UTF-8 ja_JP.UTF-8
-    ${SUDO} update-locale LC_ALL=en_US.UTF-8 LANG=en_US.UTF-8
-  fi
+  ensure_locales_generated
 
   if command -v rosdep >/dev/null 2>&1; then
-    if [[ ! -f /etc/ros/rosdep/sources.list.d/20-default.list ]]; then
-      ${SUDO} rosdep init || true
-    fi
-    rosdep update
+    # system-onlyではcache更新まで行わず、workspaceのrosdep install直前に必要な場合だけ更新する。
+    ensure_rosdep_initialized
   fi
+}
+
+configure_ros2_apt_repository() {
+  local prerequisite_packages=(
+    ca-certificates
+    curl
+    gnupg
+    locales
+    tzdata
+  )
+  local ros_keyring_path="/etc/apt/keyrings/ros-archive-keyring.gpg"
+  local ros_repo_file="/etc/apt/sources.list.d/ros2.list"
+  local ros_repo_line=""
+
+  ros_repo_line="deb [arch=$(dpkg --print-architecture) signed-by=${ros_keyring_path}] http://packages.ros.org/ros2/ubuntu $(. /etc/os-release && echo ${UBUNTU_CODENAME}) main"
+
+  write_apt_network_config
+  configure_ubuntu_apt_mirrors
+
+  # Dockerと実機で同じ入口に寄せるため、ROS 2 apt repository 設定も install script 側へ集約する。
+  install_apt_packages_if_missing "${prerequisite_packages[@]}"
+
+  # 既存sourcesですでに有効なcomponentは触らず、不要なrepository更新を避ける。
+  if ! apt_source_has_component universe; then
+    enable_apt_component_in_sources_list universe
+  fi
+
+  ${SUDO} install -m 0755 -d /etc/apt/keyrings
+
+  if [[ ! -f "${ros_keyring_path}" ]]; then
+    curl -sSL https://raw.githubusercontent.com/ros/rosdistro/master/ros.key | ${SUDO} tee "${ros_keyring_path}" >/dev/null
+  fi
+
+  if [[ ! -f "${ros_repo_file}" ]] || [[ "$(<"${ros_repo_file}")" != "${ros_repo_line}" ]]; then
+    printf '%s\n' "${ros_repo_line}" | ${SUDO} tee "${ros_repo_file}" >/dev/null
+    mark_apt_indexes_stale
+  fi
+}
+
+prepare_livox_simulation_build_environment() {
+  local multiarch_dir="/usr/lib/$(dpkg-architecture -qDEB_HOST_MULTIARCH)"
+
+  # upstream の固定ライブラリ名依存を減らすため、repoを広く書き換えずに Jammy/Humble 側で互換symlinkを用意する。
+  if [[ -f "${multiarch_dir}/libprotobuf.so" && ! -e "${multiarch_dir}/libprotobuf.so.9" ]]; then
+    ${SUDO} ln -s libprotobuf.so "${multiarch_dir}/libprotobuf.so.9"
+  fi
+
+  # upstream の固定ライブラリ名依存を減らすため、repoを広く書き換えずに Jammy/Humble 側で互換symlinkを用意する。
+  if [[ -f "${multiarch_dir}/libboost_chrono.so" && ! -e "${multiarch_dir}/libboost_chrono.so.1.71.0" ]]; then
+    ${SUDO} ln -s libboost_chrono.so "${multiarch_dir}/libboost_chrono.so.1.71.0"
+  fi
+
+  # upstream の固定 include path を崩さず使えるように、環境側で存在確認だけを行う。
+  if [[ ! -d "/usr/include/gazebo-11/gazebo" ]]; then
+    echo "Missing /usr/include/gazebo-11/gazebo. gazebo development headers are required." >&2
+    return 1
+  fi
+
+  ${SUDO} ldconfig
 }
 
 ensure_git_repo() {
@@ -160,33 +574,12 @@ patch_ros2_livox_simulation_repo() {
     return 0
   fi
 
-  # Jammy/Humbleでのビルド互換と既存topic名維持に必要な最小差分だけを適用する。
+  # topic 名を既存の launch / RViz / URDF と一致させるため、plugin 側に最小限の publish 先拡張だけを入れる。
   TARGET_DIR="${target_dir}" python3 <<'PY'
 from pathlib import Path
 import os
 
 target_dir = Path(os.environ["TARGET_DIR"])
-
-cmake_path = target_dir / "CMakeLists.txt"
-cmake_text = cmake_path.read_text(encoding="utf-8")
-cmake_text = cmake_text.replace(
-    "find_package(ament_cmake REQUIRED)\nfind_package(rclcpp REQUIRED)",
-    "find_package(ament_cmake REQUIRED)\nfind_package(Protobuf REQUIRED)\nfind_package(rclcpp REQUIRED)",
-)
-cmake_text = cmake_text.replace(
-    "find_package(tf2_ros REQUIRED)\nfind_package(geometry_msgs REQUIRED)\nfind_package(rosidl_default_generators REQUIRED)",
-    "find_package(tf2_ros REQUIRED)",
-)
-cmake_text = cmake_text.replace("include_directories(/usr/include/gazebo-11/gazebo)\n", "")
-cmake_text = cmake_text.replace(
-    "target_link_libraries(ros2_livox ${GAZEBO_LIBRARIES} RayPlugin GpuRayPlugin)\n"
-    "ament_target_dependencies(ros2_livox rclcpp std_msgs sensor_msgs geometry_msgs gazebo_dev gazebo_ros tf2_ros livox_ros_driver2 )\n"
-    "target_link_libraries(ros2_livox libprotobuf.so.9)\n"
-    "target_link_libraries(ros2_livox libboost_chrono.so.1.71.0)",
-    "target_link_libraries(ros2_livox ${GAZEBO_LIBRARIES} RayPlugin GpuRayPlugin protobuf::libprotobuf Boost::chrono)\n"
-    "ament_target_dependencies(ros2_livox rclcpp std_msgs sensor_msgs geometry_msgs gazebo_dev gazebo_ros tf2_ros livox_ros_driver2 )",
-)
-cmake_path.write_text(cmake_text, encoding="utf-8")
 
 plugin_path = target_dir / "src" / "livox_points_plugin.cpp"
 plugin_text = plugin_path.read_text(encoding="utf-8")
@@ -216,6 +609,8 @@ plugin_text = plugin_text.replace(
     "        cloud2_pub = node_->create_publisher<sensor_msgs::msg::PointCloud2>(pointcloud2_topic, 10);\n"
     "        custom_pub = node_->create_publisher<livox_ros_driver2::msg::CustomMsg>(custom_topic, 10);",
 )
+
+# 点群の重複追加は環境側では吸収できないため、plugin 実装に限定して最小差分で修正する。
 plugin_text = plugin_text.replace(
     "            // Fill the PointCloud point cloud message\n"
     "            clouds.emplace_back();\n"
@@ -277,11 +672,7 @@ install_rosdeps_for_workspace() {
     return 0
   fi
 
-  if [[ ! -f /etc/ros/rosdep/sources.list.d/20-default.list ]]; then
-    ${SUDO} rosdep init || true
-  fi
-
-  rosdep update
+  ensure_rosdep_updated
   rosdep install --from-paths "${workspace_src}" --ignore-src --rosdistro "${ROS_DISTRO}" -r -y
 }
 
@@ -300,7 +691,7 @@ build_third_party_workspace() {
   fi
 
   # 公式repoの想定手順を優先し、driver自身のbuild scriptでthird-party workspaceを構築する。
-  bash "${LIVOX_DRIVER_DIR}/build.sh" humble
+  bash "${LIVOX_DRIVER_DIR}/build.sh" "${ROS_DISTRO}"
 }
 
 build_project_workspace() {
@@ -312,6 +703,7 @@ build_project_workspace() {
 install_workspace() {
   source_ros2
   clone_external_repositories
+  prepare_livox_simulation_build_environment
   install_livox_sdk2_if_needed
   prepare_livox_ros_driver2_manifest
   install_rosdeps_for_workspace "${THIRD_PARTY_SRC_DIR}"
@@ -325,17 +717,25 @@ install_workspace() {
   build_project_workspace
 }
 
-require_ros2
-
 case "${INSTALL_MODE}" in
   full)
+    configure_ros2_apt_repository
     install_system_dependencies
+    require_ros2
     install_workspace
+    write_shell_environment_setup
     ;;
   system-only)
+    configure_ros2_apt_repository
     install_system_dependencies
+    write_shell_environment_setup
     ;;
   workspace-only)
+    require_ros2
     install_workspace
+    write_shell_environment_setup
+    ;;
+  shell-only)
+    write_shell_environment_setup
     ;;
 esac

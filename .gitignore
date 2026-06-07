@@ -1,8 +1,7 @@
 ros2_ws/build/
 ros2_ws/install/
 ros2_ws/log/
-third_party_ws/
-third_party_vendor/
+third_party/
 
 *.db
 *.db-shm

@@ -1,53 +1,101 @@
 # AI Ship Robot LiDAR Simulation Workspace
 
-Gazebo Classic 11上でロボット本体とLiDAR配置を確認するための最小ワークスペースです。`stm32f303ret6/livox_laser_simulation_RO2` のpluginを取り込み、Livox MID-360相当の非反復走査LiDARを再現します。地図生成、実機起動、実機インストール用コードは含めていません。
+低背な台車ロボットにLiDARを搭載し、Gazebo Classic 11上でLiDAR配置、点群、ロボット移動を確認するためのROS 2 Humbleワークスペースです。
 
-## 構成
+このワークスペースでは、Livox MID-360相当の非反復走査LiDARをシミュレーションし、ロボット周辺の点群取得と配置パターンの比較を行います。台車の移動は車輪機構を厳密に再現せず、全方位移動、円弧走行、その場回転を確認できる簡易移動モデルで扱います。
+
+## 主な内容
+
+- ROS 2 Humble workspace
+- Gazebo Classic 11 simulation
+- RViz2による点群、TF、ロボットモデル表示
+- Livox MID-360相当LiDAR plugin
+- 1台または2台LiDAR配置パターンの切り替え
+- キーボードによるロボット操作
+- 開発コンテナと直接インストールの両方で使える環境構築スクリプト
+
+## ディレクトリ構成
 
 ```text
 .
-├── .devcontainer/
-│   ├── devcontainer.json
-│   └── Dockerfile
-├── cate_root_ca.crt
-├── docker-compose.yml
+├── .devcontainer/                 # VS Code Dev Container設定
+├── docker-compose.yml             # Dockerfile build検証用の最小Compose設定
 ├── ros2_ws/src/
-│   ├── ai_ship_robot_description/ # ロボットURDF/Xacro
-│   └── ai_ship_robot_gazebo/      # Gazebo Classic world、launch、RViz設定
-├── third_party_ws/                # setup時にcloneされる外部ROS workspace
-├── third_party_vendor/            # setup時にcloneされる非ROS依存repo
-└── scripts/
-    ├── drive_robot.sh
-    ├── install_environment.sh
-    ├── setup_workspace.sh
-    └── run_simulation.sh
+│   ├── ai_ship_robot_description/ # ロボットURDF/Xacro、LiDAR配置
+│   └── ai_ship_robot_gazebo/      # Gazebo world、launch、RViz設定、操作ノード
+├── scripts/
+│   ├── install_environment.sh     # 依存導入、外部repo取得、workspace build
+│   ├── run_simulation.sh          # シミュレーション起動
+│   └── drive_robot.sh             # キーボード操作
+└── third_party/
+    ├── ws/                        # セットアップ時にclone/buildされる外部ROS workspace
+    └── vendor/                    # セットアップ時にclone/buildされる外部SDK
 ```
 
-`cate_root_ca.crt`はDocker build時にコンテナ内の信頼済みCA証明書として登録されます。Dev Containerや`docker compose build`の前に、リポジトリ直下へ配置してください。
+## 推奨環境
 
-## Dev Container
+- Ubuntu 22.04相当
+- ROS 2 Humble
+- Gazebo Classic 11
+- VS Code Dev Containers
 
-VS Codeでこのフォルダを開き、`Dev Containers: Reopen in Container`を実行します。Docker image build時にROS 2 Humbleと追加apt依存は導入されますが、コンテナ作成時に外部repo取得やworkspace buildは自動実行しません。
+開発環境ではDev Containerの利用を推奨します。本番環境やJetson上では、Dockerを使わずに `scripts/install_environment.sh` を直接実行する想定です。
+
+## Dev Containerで使う
+
+VS Codeでこのフォルダを開き、`Dev Containers: Reopen in Container` を実行します。
+
+Docker image build時に `scripts/install_environment.sh --system-only` が実行され、ROS 2 Humbleとapt依存がimageへ導入されます。
+
+初回は、コンテナが開いた後に外部repo取得とworkspace buildを実行します。
 
 ```bash
 bash scripts/install_environment.sh --workspace-only
 ```
 
-開発コンテナ内では、初回または再セットアップ時に上記を実行します。`livox_ros_driver2` は upstream の `build.sh humble` で、`ros2_ws` は通常の `colcon build` で順にビルドされます。
-
-本番Jetsonなど、ROS 2 Humble導入済みの実機環境で追加依存導入からworkspace buildまでまとめて行う場合は次を使います。
+すべてをまとめて実行したい場合は次を使います。
 
 ```bash
 bash scripts/install_environment.sh
 ```
 
-新しいshellではROS 2とワークスペースのoverlayが自動で読み込まれます。手動で読み込み直す場合は次を使います。このスクリプトはclone、ビルド、インストールを行いません。
+セットアップ後、新しいターミナルではROS 2とビルド済みworkspace overlayが自動で読み込まれます。現在のターミナルへ反映する場合は次を実行します。
 
 ```bash
-source scripts/setup_workspace.sh
+source ~/.bashrc
 ```
 
-## シミュレーション起動
+## Dockerfile buildを検証する
+
+Dev Containerを開けない場合の切り分けとして、Dockerfileのbuildだけを確認できます。
+
+```bash
+docker compose build
+```
+
+`docker-compose.yml` はbuild検証用の最小構成です。開発環境の起動、volume、環境変数、X11設定はDev Container側で管理します。
+
+## 直接インストールで使う
+
+Dockerを使わない環境では、対象マシン上で次を実行します。
+
+```bash
+bash scripts/install_environment.sh
+```
+
+ROS 2 Humbleとapt依存だけを先に入れる場合は次を使います。
+
+```bash
+bash scripts/install_environment.sh --system-only
+```
+
+外部repo取得、Livox SDK導入、workspace buildだけを実行する場合は次を使います。
+
+```bash
+bash scripts/install_environment.sh --workspace-only
+```
+
+## シミュレーションを起動する
 
 ホスト側でX11表示を許可します。
 
@@ -55,77 +103,90 @@ source scripts/setup_workspace.sh
 xhost +local:docker
 ```
 
-Dev Container内で次を実行します。
+コンテナまたはROS 2環境内で次を実行します。
 
 ```bash
 bash scripts/run_simulation.sh
 ```
 
-起動内容は次の通りです。
-
-- Gazebo Classic 11
-- ロボットモデル
-- `livox_laser_simulation_RO2` pluginによるMID-360相当LiDAR構成
-- RViz2でのロボットモデル、TF、点群表示
-
-RVizを起動しない場合は次を使います。
+主な起動オプションです。
 
 ```bash
 bash scripts/run_simulation.sh --no-rviz
-```
-
-Gazebo Classic GUIを起動しない場合は次を使います。
-
-```bash
 bash scripts/run_simulation.sh --no-gui
-```
-
-低CPU環境向けにGazebo Classic GUIを切り、Livox pluginのray数を1/4へ落とす場合は次を使います。
-
-```bash
 bash scripts/run_simulation.sh --lite
-```
-
-起動前に環境セットアップを明示的に実行する場合は次を使います。
-
-```bash
 bash scripts/run_simulation.sh --build
 ```
 
-## LiDAR配置
+- `--no-rviz`: RViz2を起動しない
+- `--no-gui`: Gazebo Classic GUIを起動しない
+- `--lite`: GUIなし、LiDAR ray数を低減して軽量起動する
+- `--build`: 起動前にworkspace setupを実行する
 
-LiDAR配置は`ros2_ws/src/ai_ship_robot_description/urdf/ai_ship_robot.urdf.xacro`のinclude行を直接編集して切り替えます。
+## ロボットを操作する
+
+シミュレーション起動後、別ターミナルで次を実行します。
+
+```bash
+bash scripts/drive_robot.sh
+```
+
+操作キーです。
+
+- `w` / `i`: 前進成分をON/OFF
+- `s` / `,`: 後進成分をON/OFF
+- `j` / `l`: 左右移動成分をON/OFF
+- `a` / `d`: yaw回転成分をON/OFF
+- `space` / `x` / `k`: 全停止
+- `Q` / `Esc`: 終了
+
+速度を指定する例です。
+
+```bash
+bash scripts/drive_robot.sh --linear-speed 0.15 --lateral-speed 0.15 --angular-speed 0.5
+```
+
+ROS topicを直接publishして操作することもできます。
+
+```bash
+ros2 topic pub /cmd_vel geometry_msgs/msg/Twist \
+  "{linear: {x: 0.2}, angular: {z: 0.25}}" \
+  -r 10
+```
+
+## LiDAR配置を変更する
+
+LiDAR配置は次のXacroで切り替えます。
+
+```text
+ros2_ws/src/ai_ship_robot_description/urdf/ai_ship_robot.urdf.xacro
+```
+
+includeする配置ファイルを変更します。
 
 ```xml
 <xacro:include filename="lidar_pattern_single.urdf.xacro" />
 ```
 
-選択できる配置パターンは次の4つです。
+利用できる配置パターンです。
 
 - `lidar_pattern_single.urdf.xacro`
 - `lidar_pattern_dual_out20.urdf.xacro`
 - `lidar_pattern_dual_out38.urdf.xacro`
 - `lidar_pattern_dual_updown.urdf.xacro`
 
-LiDAR共通設定は`ros2_ws/src/ai_ship_robot_description/urdf/mid360_lidar.urdf.xacro`にあります。
+LiDAR共通設定は次にあります。
 
-現在のデフォルト設定は次の通りです。
-
-- 本体サイズ: 720mm x 720mm
-- LiDAR: 1台のMID-360相当モデル
-- 点群: `/center_lidar/points`
-- CustomMsg: `/center_lidar/custom`
-- 2台構成時の点群: `/left_lidar/points`、`/right_lidar/points`
-- 2台構成時のCustomMsg: `/left_lidar/custom`、`/right_lidar/custom`
-
-主に調整する値です。
-
-```xml
-<xacro:property name="lidar_x" value="${base_length / 2.0 + mid360_depth / 2.0}" />
-<xacro:property name="lidar_y" value="0.0" />
-<xacro:property name="lidar_z" value="${base_center_z}" />
-<xacro:property name="lidar_pitch" value="${45.0 * deg_to_rad}" />
+```text
+ros2_ws/src/ai_ship_robot_description/urdf/mid360_lidar.urdf.xacro
 ```
+
+主な出力topicです。
+
+- 1台構成点群: `/center_lidar/points`
+- 1台構成CustomMsg: `/center_lidar/custom`
+- 2台構成点群: `/left_lidar/points`, `/right_lidar/points`
+- 2台構成CustomMsg: `/left_lidar/custom`, `/right_lidar/custom`
 
 ## 確認コマンド
 
@@ -140,85 +201,35 @@ ros2 topic echo /odom --once
 ros2 topic echo /clock --once
 ```
 
-## ロボット操作
-
-このワークスペースでは、LiDAR配置検証向けに車輪物理ではなくGazebo Classicの平面移動pluginで台車ロボットの移動を再現します。`cmd_vel`の`linear.x`、`linear.y`、`angular.z`で、全方位移動、円弧走行、その場回転を操作できます。
-
-シミュレーション起動後、別端末で次を実行するとキーボードでロボットを操作できます。
-
-```bash
-bash scripts/drive_robot.sh
-```
-
-`drive_robot.sh`は`cmd_vel`をpublishする操作用スクリプトです。Gazebo ClassicとLiDARは`run_simulation.sh`で起動します。
-
-操作ノードを起動する前に環境セットアップを明示的に実行する場合は次を使います。
-
-```bash
-bash scripts/drive_robot.sh --build
-```
-
-操作キーは次の通りです。
-
-- `w` / `i`: 前進成分をON/OFF
-- `s` / `,`: 後進成分をON/OFF
-- `j` / `l`: 左/右横移動成分をON/OFF
-- `a` / `d`: yaw左/右回転成分をON/OFF
-- `space` / `x` / `k`: 全停止
-- `Q` / `Esc`: 終了
-
-並進と旋回は順番にキーを押して組み合わせます。例えば、`w`で前進を開始してから`a`を押すと前進しながら左へ円弧走行します。`a`をもう一度押すとyaw成分だけが解除され、前進のみになります。
-
-速度を変更する例です。
-
-```bash
-bash scripts/drive_robot.sh --linear-speed 0.15 --lateral-speed 0.15 --angular-speed 0.5
-```
-
-ROS topicを直接publishしてロボットを動かす例です。
-
-```bash
-ros2 topic pub /cmd_vel geometry_msgs/msg/Twist \
-  "{linear: {x: 0.2}, angular: {z: 0.25}}" \
-  -r 10
-```
-
-## docker compose
-
-VS Code Dev Containerを使わない場合は、ホスト側で次を実行します。
-
-```bash
-xhost +local:docker
-docker compose build
-docker compose up -d
-docker compose exec ai-ship-robot-dev bash
-```
-
-コンテナ内で次を実行します。
-
-```bash
-bash scripts/install_environment.sh --workspace-only
-bash scripts/run_simulation.sh
-```
-
-停止します。
-
-```bash
-docker compose down
-```
-
 ## トラブルシュート
 
-Gazebo ClassicやRVizが表示されない場合は、ホスト側でX11アクセスを許可してからコンテナを再起動してください。
+Gazebo ClassicやRViz2が表示されない場合は、ホスト側でX11アクセスを許可してからコンテナを再起動します。
 
 ```bash
 xhost +local:docker
 ```
 
-`Missing ros2_ws/install/setup.bash`と表示される場合は、先に環境セットアップを実行してください。
+`Missing /opt/ros/humble/setup.bash` または `Missing ros2_ws/install/setup.bash` が表示される場合は、環境構築またはworkspace buildが未完了です。
 
 ```bash
 bash scripts/install_environment.sh
 ```
 
-Docker build時に`cate_root_ca.crt`が見つからない場合は、リポジトリ直下に社内/プロキシ用CA証明書を`cate_root_ca.crt`という名前で配置してください。
+apt mirrorを明示する場合は、次のように環境変数を指定します。
+
+```bash
+APT_PRIMARY_MIRROR=http://ftp.riken.jp/Linux/ubuntu \
+APT_SECURITY_MIRROR=http://ftp.riken.jp/Linux/ubuntu \
+APT_FORCE_IPV4=true \
+APT_RETRIES=3 \
+APT_HTTP_TIMEOUT=20 \
+bash scripts/install_environment.sh
+```
+
+Jetsonなどarm64環境で `ports.ubuntu.com` を使う場合は、必要に応じて `APT_PORTS_MIRROR` も指定します。
+
+rosdepの情報を強制更新する場合は次を使います。
+
+```bash
+ROSDEP_UPDATE_MAX_AGE_SECONDS=0 bash scripts/install_environment.sh --workspace-only
+```

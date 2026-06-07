@@ -3,9 +3,17 @@
   "build": {
     "dockerfile": "Dockerfile",
     "context": "..",
+    "options": [
+      "--network=host"
+    ],
     "args": {
       "BASE_IMAGE": "ubuntu:22.04",
-      "ROS_DISTRO": "humble"
+      "ROS_DISTRO": "humble",
+      "APT_PRIMARY_MIRROR": "${localEnv:APT_PRIMARY_MIRROR}",
+      "APT_SECURITY_MIRROR": "${localEnv:APT_SECURITY_MIRROR}",
+      "APT_FORCE_IPV4": "${localEnv:APT_FORCE_IPV4:true}",
+      "APT_RETRIES": "${localEnv:APT_RETRIES:3}",
+      "APT_HTTP_TIMEOUT": "${localEnv:APT_HTTP_TIMEOUT:20}"
     }
   },
   "workspaceFolder": "/workspaces/ai_ship_robot",
@@ -20,6 +28,11 @@
     "/tmp/.X11-unix:/tmp/.X11-unix:rw"
   ],
   "containerEnv": {
+    "APT_PRIMARY_MIRROR": "${localEnv:APT_PRIMARY_MIRROR}",
+    "APT_SECURITY_MIRROR": "${localEnv:APT_SECURITY_MIRROR}",
+    "APT_FORCE_IPV4": "${localEnv:APT_FORCE_IPV4:true}",
+    "APT_RETRIES": "${localEnv:APT_RETRIES:3}",
+    "APT_HTTP_TIMEOUT": "${localEnv:APT_HTTP_TIMEOUT:20}",
     "ROS_DOMAIN_ID": "0",
     "RMW_IMPLEMENTATION": "rmw_fastrtps_cpp",
     "LIBGL_ALWAYS_SOFTWARE": "1"
@@ -44,7 +57,10 @@
   "mounts": [
     "source=${localWorkspaceFolder}/.devcontainer/.config/kilo,target=/home/ros/.config/kilo,type=bind",
     "source=${localWorkspaceFolder}/.devcontainer/.local/state/kilo,target=/home/ros/.local/state/kilo,type=bind",
-    "source=${localWorkspaceFolder}/.devcontainer/.local/share/kilo,target=/home/ros/.local/share/kilo,type=bind"
+    "source=${localWorkspaceFolder}/.devcontainer/.local/share/kilo,target=/home/ros/.local/share/kilo,type=bind",
+    "source=${localWorkspaceFolder}/.devcontainer/.local/apt/cache,target=/var/cache/apt,type=bind",
+    "source=${localWorkspaceFolder}/.devcontainer/.local/apt/lists,target=/var/lib/apt/lists,type=bind",
+    "source=${localWorkspaceFolder}/.devcontainer/.local/ros/rosdep,target=/home/ros/.ros/rosdep,type=bind"
   ],
-  "initializeCommand": "mkdir -p '${localWorkspaceFolder}/.devcontainer/.config/kilo' '${localWorkspaceFolder}/.devcontainer/.local/state/kilo' '${localWorkspaceFolder}/.devcontainer/.local/share/kilo'"
+  "initializeCommand": "mkdir -p '${localWorkspaceFolder}/.devcontainer/.config/kilo' '${localWorkspaceFolder}/.devcontainer/.local/state/kilo' '${localWorkspaceFolder}/.devcontainer/.local/share/kilo' '${localWorkspaceFolder}/.devcontainer/.local/apt/cache/archives/partial' '${localWorkspaceFolder}/.devcontainer/.local/apt/lists/partial' '${localWorkspaceFolder}/.devcontainer/.local/ros/rosdep'"
 }

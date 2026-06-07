@@ -41,6 +41,31 @@ require_value() {
   printf '%s' "${value}"
 }
 
+source_workspace_environment() {
+  local had_nounset=0
+
+  if [[ ! -f "/opt/ros/${ROS_DISTRO}/setup.bash" ]]; then
+    echo "Missing /opt/ros/${ROS_DISTRO}/setup.bash. Install ROS 2 ${ROS_DISTRO} first." >&2
+    return 1
+  fi
+
+  # ROS 2本体を先に読み込み、存在するoverlayだけを順番に重ねて実行時環境を作る。
+  if [[ "$-" == *u* ]]; then
+    had_nounset=1
+    set +u
+  fi
+  source "/opt/ros/${ROS_DISTRO}/setup.bash"
+  if [[ -f "${WORKSPACE_ROOT}/third_party/ws/install/setup.bash" ]]; then
+    source "${WORKSPACE_ROOT}/third_party/ws/install/setup.bash"
+  fi
+  if [[ -f "${WORKSPACE_ROOT}/ros2_ws/install/setup.bash" ]]; then
+    source "${WORKSPACE_ROOT}/ros2_ws/install/setup.bash"
+  fi
+  if [[ "${had_nounset}" -eq 1 ]]; then
+    set -u
+  fi
+}
+
 LAUNCH_ARGS=()
 BUILD_WORKSPACE=false
 LITE_MODE=false
@@ -131,14 +156,7 @@ case "${LIDAR_RESOLUTION_MODE}" in
     ;;
 esac
 
-if [[ ! -f "/opt/ros/${ROS_DISTRO}/setup.bash" ]]; then
-  echo "Missing /opt/ros/${ROS_DISTRO}/setup.bash. Install ROS 2 ${ROS_DISTRO} first." >&2
-  exit 1
-fi
-
-set +u
-source "/opt/ros/${ROS_DISTRO}/setup.bash"
-set -u
+source_workspace_environment
 
 if [[ "${BUILD_WORKSPACE}" == "true" ]]; then
   bash "${SCRIPT_DIR}/install_environment.sh" --workspace-only
@@ -149,6 +167,6 @@ if [[ ! -f "${WORKSPACE_ROOT}/ros2_ws/install/setup.bash" ]]; then
   exit 1
 fi
 
-source "${SCRIPT_DIR}/setup_workspace.sh"
+source_workspace_environment
 
 ros2 launch ai_ship_robot_gazebo simulation.launch.py "${LAUNCH_ARGS[@]}"
