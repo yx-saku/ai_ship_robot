@@ -4,7 +4,9 @@ set -euo pipefail
 ROS_DISTRO="${ROS_DISTRO:-humble}"
 DEBIAN_FRONTEND="${DEBIAN_FRONTEND:-noninteractive}"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-WORKSPACE_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
+WORKSPACE_ROOT="$(cd "${SCRIPT_DIR}/../.." && pwd)"
+SYSTEM_DEPENDENCIES_SCRIPT="${SCRIPT_DIR}/system_dependencies.sh"
+SHELL_ENVIRONMENT_SCRIPT="${SCRIPT_DIR}/shell_environment.sh"
 ROS_WS="${WORKSPACE_ROOT}/ros2_ws"
 THIRD_PARTY_ROOT="${WORKSPACE_ROOT}/third_party"
 THIRD_PARTY_WS="${THIRD_PARTY_ROOT}/ws"
@@ -27,11 +29,11 @@ export DEBIAN_FRONTEND
 
 usage() {
   cat <<'EOF'
-Usage: bash scripts/install_environment.sh [OPTIONS]
+Usage: bash scripts/install/environment.sh [OPTIONS]
 
 Options:
   --full           ROS 2 Humble導入、追加依存導入、外部repo取得、workspace buildまで実行する。既定値。
-  --system-only    ROS 2 Humble導入、追加apt依存導入、rosdep初期化/更新まで行う。
+  --system-only    ROS 2 Humble導入、追加apt依存導入、rosdep初期化まで行う。
   --workspace-only 外部repo取得、互換symlink、SDK導入、workspace buildを行う。ROS 2導入済み環境向け。
   --shell-only     aptやbuildは行わず、shell自動読み込み設定だけを更新する。
   -h, --help       このhelpを表示する。
@@ -77,6 +79,16 @@ else
   SUDO="sudo"
 fi
 
+run_system_dependencies_script() {
+  # Dockerfileの重いlayerと通常の手動実行で同じsystem依存導入処理を使う。
+  bash "${SYSTEM_DEPENDENCIES_SCRIPT}"
+}
+
+run_shell_environment_script() {
+  # shell設定だけを独立scriptに分け、system依存導入layerのcacheを壊しにくくする。
+  bash "${SHELL_ENVIRONMENT_SCRIPT}"
+}
+
 require_ros2() {
   if [[ ! -f "/opt/ros/${ROS_DISTRO}/setup.bash" ]]; then
     echo "Missing /opt/ros/${ROS_DISTRO}/setup.bash. Run this script without --workspace-only first." >&2
@@ -111,7 +123,7 @@ write_shell_environment_setup() {
   # source処理本体を独立ファイルへ置き、bashrcやprofile側は薄い読み込み口だけにする。
   mkdir -p "${env_script_dir}"
   cat > "${env_script_path}" <<EOF
-# This file is managed by scripts/install_environment.sh.
+# This file is managed by scripts/install/shell_environment.sh.
 export AI_SHIP_ROBOT_WORKSPACE="${WORKSPACE_ROOT}"
 export ROS_DISTRO="\${ROS_DISTRO:-${ROS_DISTRO}}"
 if [ -f "/opt/ros/\${ROS_DISTRO}/setup.bash" ] && [ -f "/opt/ros/\${ROS_DISTRO}/local_setup.bash" ]; then
@@ -791,23 +803,21 @@ install_workspace() {
 
 case "${INSTALL_MODE}" in
   full)
-    configure_ros2_apt_repository
-    install_system_dependencies
+    run_system_dependencies_script
     require_ros2
     install_workspace
-    write_shell_environment_setup
+    run_shell_environment_script
     ;;
   system-only)
-    configure_ros2_apt_repository
-    install_system_dependencies
-    write_shell_environment_setup
+    run_system_dependencies_script
+    run_shell_environment_script
     ;;
   workspace-only)
     require_ros2
     install_workspace
-    write_shell_environment_setup
+    run_shell_environment_script
     ;;
   shell-only)
-    write_shell_environment_setup
+    run_shell_environment_script
     ;;
 esac

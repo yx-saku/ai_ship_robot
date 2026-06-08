@@ -3,11 +3,12 @@ set -euo pipefail
 
 ROS_DISTRO="${ROS_DISTRO:-humble}"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-WORKSPACE_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
+WORKSPACE_ROOT="$(cd "${SCRIPT_DIR}/../.." && pwd)"
+INSTALL_ENVIRONMENT_SCRIPT="${WORKSPACE_ROOT}/scripts/install/environment.sh"
 
 usage() {
   cat <<'EOF'
-Usage: bash scripts/drive_robot.sh [OPTIONS]
+Usage: bash scripts/app/drive_robot.sh [OPTIONS]
 
 Options:
   --build                  Run one-time environment setup before starting keyboard drive.
@@ -26,7 +27,7 @@ Keys:
   space/x/k: stop all, Q/Esc: quit
 
 This script only publishes cmd_vel. Start Gazebo/LiDAR separately with:
-  bash scripts/run_simulation.sh
+  bash scripts/app/run_simulation.sh
 EOF
 }
 
@@ -88,7 +89,7 @@ source_overlay_if_current() {
   if grep -Fq "${WORKSPACE_ROOT}/third_party_ws" "${setup_file}" \
     || grep -Fq "${WORKSPACE_ROOT}/third_party_vendor" "${setup_file}"; then
     echo "Stale workspace setup detected: ${setup_file}" >&2
-    echo "Run bash scripts/drive_robot.sh --build or bash scripts/install_environment.sh --workspace-only." >&2
+    echo "Run bash scripts/app/drive_robot.sh --build or bash scripts/install/environment.sh --workspace-only." >&2
     return 1
   fi
 
@@ -165,11 +166,11 @@ done
 source_workspace_environment false
 
 if [[ "${BUILD_WORKSPACE}" == "true" ]]; then
-  bash "${SCRIPT_DIR}/install_environment.sh" --workspace-only
+  bash "${INSTALL_ENVIRONMENT_SCRIPT}" --workspace-only
 fi
 
 if [[ ! -f "${WORKSPACE_ROOT}/ros2_ws/install/setup.bash" ]]; then
-  echo "Missing ros2_ws/install/setup.bash. Run bash scripts/install_environment.sh first." >&2
+  echo "Missing ros2_ws/install/setup.bash. Run bash scripts/install/environment.sh first." >&2
   exit 1
 fi
 
@@ -178,7 +179,7 @@ source_workspace_environment
 DRIVE_EXECUTABLE="$(ros2 pkg prefix ai_ship_robot_gazebo)/lib/ai_ship_robot_gazebo/keyboard_drive.py"
 if [[ ! -x "${DRIVE_EXECUTABLE}" ]]; then
   echo "Missing keyboard_drive executable: ${DRIVE_EXECUTABLE}" >&2
-  echo "Run bash scripts/drive_robot.sh --build or bash scripts/install_environment.sh first." >&2
+  echo "Run bash scripts/app/drive_robot.sh --build or bash scripts/install/environment.sh first." >&2
   exit 1
 fi
 

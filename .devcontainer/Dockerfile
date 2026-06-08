@@ -37,8 +37,8 @@ RUN primary_mirror="${APT_PRIMARY_MIRROR%/}" \
     && sed -i "s#http://security.ubuntu.com/ubuntu#${security_mirror}#g" /etc/apt/sources.list
 
 # BuildKitのapt cache mountを使い、VS Code接続とSource Controlに必要な最小packageだけを取得する。
-RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
-    --mount=type=cache,target=/var/lib/apt/lists,sharing=locked \
+RUN --mount=type=cache,id=ai-ship-robot-apt-cache,target=/var/cache/apt,sharing=locked \
+    --mount=type=cache,id=ai-ship-robot-apt-lists,target=/var/lib/apt/lists,sharing=locked \
     rm -f /etc/apt/apt.conf.d/docker-clean \
     && apt-get update \
     && apt-get install -y --no-install-recommends \
@@ -58,14 +58,18 @@ RUN if ! getent group ${USER_GID} >/dev/null; then groupadd --gid ${USER_GID} ${
     && chmod 0440 /etc/sudoers.d/${USERNAME}
 
 # Dev Container imageにsystem依存を焼き込む。問題切り分け時は、この3行のブロックをコメントアウトして手動実行へ戻す。
-RUN mkdir -p /workspaces/ai_ship_robot/scripts
-COPY scripts/install_environment.sh /workspaces/ai_ship_robot/scripts/install_environment.sh
-RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
-    --mount=type=cache,target=/var/lib/apt/lists,sharing=locked \
-    HOME=/home/${USERNAME} \
+RUN mkdir -p /workspaces/ai_ship_robot/scripts/install
+COPY scripts/install/system_dependencies.sh /workspaces/ai_ship_robot/scripts/install/system_dependencies.sh
+RUN --mount=type=cache,id=ai-ship-robot-apt-cache,target=/var/cache/apt,sharing=locked \
+    --mount=type=cache,id=ai-ship-robot-apt-lists,target=/var/lib/apt/lists,sharing=locked \
+    bash /workspaces/ai_ship_robot/scripts/install/system_dependencies.sh
+
+# shell自動読み込み設定は軽い別layerに分け、bashrc修正で重いapt layerが無効化されないようにする。
+COPY scripts/install/shell_environment.sh /workspaces/ai_ship_robot/scripts/install/shell_environment.sh
+RUN HOME=/home/${USERNAME} \
     AI_SHIP_ROBOT_BASHRC=/home/${USERNAME}/.bashrc \
     AI_SHIP_ROBOT_ENV_SCRIPT=/home/${USERNAME}/.ai_ship_robot_environment.bash \
-    bash /workspaces/ai_ship_robot/scripts/install_environment.sh --system-only \
+    bash /workspaces/ai_ship_robot/scripts/install/shell_environment.sh \
     && mkdir -p /home/${USERNAME}/.ros/log \
     && chown -R ${USER_UID}:${USER_GID} /home/${USERNAME}/.bashrc /home/${USERNAME}/.ai_ship_robot_environment.bash /home/${USERNAME}/.ros
 

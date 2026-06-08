@@ -3,11 +3,12 @@ set -euo pipefail
 
 ROS_DISTRO="${ROS_DISTRO:-humble}"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-WORKSPACE_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
+WORKSPACE_ROOT="$(cd "${SCRIPT_DIR}/../.." && pwd)"
+INSTALL_ENVIRONMENT_SCRIPT="${WORKSPACE_ROOT}/scripts/install/environment.sh"
 
 usage() {
   cat <<'EOF'
-Usage: bash scripts/run_simulation.sh [OPTIONS]
+Usage: bash scripts/app/run_simulation.sh [OPTIONS]
 
 Options:
   --build             Run one-time environment setup before launching simulation.
@@ -81,7 +82,7 @@ source_overlay_if_current() {
   if grep -Fq "${WORKSPACE_ROOT}/third_party_ws" "${setup_file}" \
     || grep -Fq "${WORKSPACE_ROOT}/third_party_vendor" "${setup_file}"; then
     echo "Stale workspace setup detected: ${setup_file}" >&2
-    echo "Run bash scripts/run_simulation.sh --build or bash scripts/install_environment.sh --workspace-only." >&2
+    echo "Run bash scripts/app/run_simulation.sh --build or bash scripts/install/environment.sh --workspace-only." >&2
     return 1
   fi
 
@@ -148,7 +149,7 @@ while [[ $# -gt 0 ]]; do
       LAUNCH_ARGS+=("robot_name:=$(require_value --robot-name "${1:-}")")
       ;;
     *:=*)
-    echo "Do not use ROS 2 launch argument syntax here: $1" >&2
+      echo "Do not use ROS 2 launch argument syntax here: $1" >&2
       echo "Use shell options instead. Run with --help to see available options." >&2
       exit 2
       ;;
@@ -181,11 +182,11 @@ esac
 source_workspace_environment false
 
 if [[ "${BUILD_WORKSPACE}" == "true" ]]; then
-  bash "${SCRIPT_DIR}/install_environment.sh" --workspace-only
+  bash "${INSTALL_ENVIRONMENT_SCRIPT}" --workspace-only
 fi
 
 if [[ ! -f "${WORKSPACE_ROOT}/ros2_ws/install/setup.bash" ]]; then
-  echo "Missing ros2_ws/install/setup.bash. Run bash scripts/install_environment.sh first." >&2
+  echo "Missing ros2_ws/install/setup.bash. Run bash scripts/install/environment.sh first." >&2
   exit 1
 fi
 
