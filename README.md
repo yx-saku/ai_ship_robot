@@ -227,6 +227,12 @@ bash scripts/install/environment.sh
 
 Jetsonなどarm64環境で `ports.ubuntu.com` を使う場合は、必要に応じて `APT_PORTS_MIRROR` も指定します。
 
+apt indexを強制更新する場合は次を使います。
+
+```bash
+APT_UPDATE_MAX_AGE_SECONDS=0 bash scripts/install/environment.sh --system-only
+```
+
 rosdepの情報を強制更新する場合は次を使います。
 
 ```bash

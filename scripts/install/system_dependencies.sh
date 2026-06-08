@@ -10,7 +10,9 @@ APT_FORCE_IPV4="${APT_FORCE_IPV4:-true}"
 APT_RETRIES="${APT_RETRIES:-3}"
 APT_HTTP_TIMEOUT="${APT_HTTP_TIMEOUT:-20}"
 APT_HTTPS_TIMEOUT="${APT_HTTPS_TIMEOUT:-${APT_HTTP_TIMEOUT}}"
+APT_UPDATE_MAX_AGE_SECONDS="${APT_UPDATE_MAX_AGE_SECONDS:-86400}"
 APT_UPDATED=0
+APT_INDEXES_STALE=0
 export DEBIAN_FRONTEND
 
 if [[ "$(id -u)" -eq 0 ]]; then
@@ -33,7 +35,40 @@ run_with_safe_apt_locale() {
 }
 
 mark_apt_indexes_stale() {
+  APT_INDEXES_STALE=1
   APT_UPDATED=0
+}
+
+apt_indexes_fresh() {
+  local index_file=""
+  local newest_mtime=0
+  local file_mtime=0
+  local now=0
+  local found_index=0
+
+  if [[ ! "${APT_UPDATE_MAX_AGE_SECONDS}" =~ ^[0-9]+$ || "${APT_UPDATE_MAX_AGE_SECONDS}" -eq 0 ]]; then
+    return 1
+  fi
+
+  # apt listsが残っていて十分新しければ、外部repository確認を省略してbuild待ち時間を減らす。
+  for index_file in /var/lib/apt/lists/*_InRelease /var/lib/apt/lists/*_Release; do
+    if [[ ! -f "${index_file}" ]]; then
+      continue
+    fi
+
+    found_index=1
+    file_mtime="$(stat -c %Y "${index_file}" 2>/dev/null || printf '0')"
+    if [[ "${file_mtime}" -gt "${newest_mtime}" ]]; then
+      newest_mtime="${file_mtime}"
+    fi
+  done
+
+  if [[ "${found_index}" -eq 0 ]]; then
+    return 1
+  fi
+
+  now="$(date +%s)"
+  (( now - newest_mtime < APT_UPDATE_MAX_AGE_SECONDS ))
 }
 
 apt_update_if_needed() {
@@ -41,8 +76,15 @@ apt_update_if_needed() {
     return 0
   fi
 
+  if [[ "${APT_INDEXES_STALE}" -eq 0 ]] && apt_indexes_fresh; then
+    echo "Skip apt-get update because apt indexes are still fresh."
+    APT_UPDATED=1
+    return 0
+  fi
+
   run_with_safe_apt_locale apt-get update
   APT_UPDATED=1
+  APT_INDEXES_STALE=0
 }
 
 backup_file_once() {
@@ -92,6 +134,14 @@ install_apt_packages_if_missing() {
     return 0
   fi
 
+  apt_update_if_needed
+  if run_with_safe_apt_locale apt-get install -y --no-install-recommends "${missing_packages[@]}"; then
+    return 0
+  fi
+
+  # apt listsの鮮度判定が外れた場合に備え、indexを更新して1回だけ再試行する。
+  echo "apt install failed. Refresh apt indexes and retry once." >&2
+  mark_apt_indexes_stale
   apt_update_if_needed
   run_with_safe_apt_locale apt-get install -y --no-install-recommends "${missing_packages[@]}"
 }
