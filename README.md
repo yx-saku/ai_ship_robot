@@ -155,29 +155,28 @@ ros2 topic pub /cmd_vel geometry_msgs/msg/Twist \
 
 ## LiDAR配置を変更する
 
-LiDAR配置は次のXacroで切り替えます。
+LiDAR配置は起動オプションで切り替えます。
 
-```text
-ros2_ws/src/ai_ship_robot_description/urdf/ai_ship_robot.urdf.xacro
+```bash
+bash scripts/app/run_simulation.sh --lidar-pattern lidar_pattern_dual_updown.urdf.xacro
 ```
 
-includeする配置ファイルを変更します。
+利用できる配置パターンは実ファイルから表示できます。
 
-```xml
-<xacro:include filename="lidar_pattern_single.urdf.xacro" />
+```bash
+bash scripts/app/run_simulation.sh --help
 ```
 
-利用できる配置パターンです。
-
-- `lidar_pattern_single.urdf.xacro`
-- `lidar_pattern_dual_out20.urdf.xacro`
-- `lidar_pattern_dual_out38.urdf.xacro`
-- `lidar_pattern_dual_updown.urdf.xacro`
-
-LiDAR共通設定は次にあります。
+LiDAR配置パターンは次のディレクトリにあります。
 
 ```text
-ros2_ws/src/ai_ship_robot_description/urdf/mid360_lidar.urdf.xacro
+ros2_ws/src/ai_ship_robot_description/urdf/lidar/patterns/
+```
+
+LiDAR本体定義と共通設定は次にあります。
+
+```text
+ros2_ws/src/ai_ship_robot_description/urdf/lidar/models/mid360_lidar.urdf.xacro
 ```
 
 主な出力topicです。

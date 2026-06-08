@@ -5,6 +5,24 @@ ROS_DISTRO="${ROS_DISTRO:-humble}"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 WORKSPACE_ROOT="$(cd "${SCRIPT_DIR}/../.." && pwd)"
 INSTALL_ENVIRONMENT_SCRIPT="${WORKSPACE_ROOT}/scripts/install/environment.sh"
+LIDAR_PATTERN_DIR="${WORKSPACE_ROOT}/ros2_ws/src/ai_ship_robot_description/urdf/lidar/patterns"
+
+print_available_lidar_patterns() {
+  local indent="${1:-}"
+  local pattern_file=""
+  local found_pattern=0
+
+  # LiDAR配置候補は実ファイルから列挙し、help表示と実体のずれを防ぐ。
+  for pattern_file in "${LIDAR_PATTERN_DIR}"/lidar_pattern_*.urdf.xacro; do
+    [[ -e "${pattern_file}" ]] || continue
+    echo "${indent}${pattern_file##*/}"
+    found_pattern=1
+  done
+
+  if [[ "${found_pattern}" -eq 0 ]]; then
+    echo "${indent}(no lidar_pattern_*.urdf.xacro files found in ${LIDAR_PATTERN_DIR})"
+  fi
+}
 
 usage() {
   cat <<'EOF'
@@ -17,9 +35,12 @@ Options:
   --no-gui            Disable Gazebo Classic GUI.
   --rviz              Enable RViz2.
   --no-rviz           Disable RViz2.
-  --quarter-resolution Use quarter LiDAR sample density.
-  --half-resolution   Use half LiDAR sample density.
-  --full-resolution   Use full LiDAR sample counts.
+  -4, --quarter-resolution
+                      Use quarter LiDAR sample density.
+  -2, --half-resolution
+                      Use half LiDAR sample density.
+  -1, --full-resolution
+                      Use full LiDAR sample counts.
   --world PATH        Use a custom Gazebo Classic world.
   --rviz-config PATH  Use a custom RViz config.
   --lidar-pattern FILE
@@ -27,12 +48,9 @@ Options:
   --robot-name NAME   Set the spawned robot name.
   -h, --help          Show this help.
 
-LiDAR pattern examples:
-  lidar_pattern_single.urdf.xacro
-  lidar_pattern_dual_out20.urdf.xacro
-  lidar_pattern_dual_out38.urdf.xacro
-  lidar_pattern_dual_updown.urdf.xacro
+Available LiDAR patterns:
 EOF
+  print_available_lidar_patterns "  "
 }
 
 require_value() {
@@ -49,17 +67,17 @@ require_value() {
 
 validate_lidar_pattern_file() {
   local file_name="$1"
-  local pattern_dir="${WORKSPACE_ROOT}/ros2_ws/src/ai_ship_robot_description/urdf"
   local pattern_file=""
 
   # xacroのinclude対象をLiDAR配置ファイル名に限定し、任意パスの読み込みを防ぐ。
   if [[ "${file_name}" == */* || "${file_name}" != lidar_pattern_*.urdf.xacro ]]; then
     echo "Invalid LiDAR pattern file name: ${file_name}" >&2
-    echo "Use a file name like lidar_pattern_single.urdf.xacro." >&2
+    echo "Available LiDAR patterns:" >&2
+    print_available_lidar_patterns "  " >&2
     exit 2
   fi
 
-  if [[ -f "${pattern_dir}/${file_name}" ]]; then
+  if [[ -f "${LIDAR_PATTERN_DIR}/${file_name}" ]]; then
     printf '%s' "${file_name}"
     return 0
   fi
@@ -67,10 +85,7 @@ validate_lidar_pattern_file() {
   # 存在しないパターンはlaunch前に検出し、選択可能なファイル名を表示する。
   echo "Unknown LiDAR pattern file: ${file_name}" >&2
   echo "Available LiDAR patterns:" >&2
-  for pattern_file in "${pattern_dir}"/lidar_pattern_*.urdf.xacro; do
-    [[ -e "${pattern_file}" ]] || continue
-    echo "  ${pattern_file##*/}" >&2
-  done
+  print_available_lidar_patterns "  " >&2
   exit 2
 }
 
@@ -150,13 +165,13 @@ while [[ $# -gt 0 ]]; do
     --no-rviz)
       LAUNCH_ARGS+=("use_rviz:=false")
       ;;
-    --quarter-resolution)
+    -4|--quarter-resolution)
       LIDAR_RESOLUTION_MODE="quarter"
       ;;
-    --half-resolution)
+    -2|--half-resolution)
       LIDAR_RESOLUTION_MODE="half"
       ;;
-    --full-resolution)
+    -1|--full-resolution)
       LIDAR_RESOLUTION_MODE="full"
       ;;
     --world=*)

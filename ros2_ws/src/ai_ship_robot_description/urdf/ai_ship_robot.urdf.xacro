@@ -234,7 +234,7 @@
   <xacro:fixed_arm_robot_fixture />
 
   <!-- 起動時に指定された配置ファイルを読み込み、URDF編集なしでLiDARパターンを切り替える。 -->
-  <xacro:include filename="$(arg lidar_pattern_file)" />
+  <xacro:include filename="lidar/patterns/$(arg lidar_pattern_file)" />
 
   <link name="imu_link">
     <visual>

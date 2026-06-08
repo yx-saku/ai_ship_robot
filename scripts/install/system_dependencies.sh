@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 set -euo pipefail
-
+echo test
 ROS_DISTRO="${ROS_DISTRO:-humble}"
 DEBIAN_FRONTEND="${DEBIAN_FRONTEND:-noninteractive}"
 APT_PRIMARY_MIRROR="${APT_PRIMARY_MIRROR:-}"
