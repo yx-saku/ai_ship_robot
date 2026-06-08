@@ -8,7 +8,7 @@
   <xacro:property name="lidar_y" value="0.0" />
   <xacro:property name="lidar_z" value="${base_center_z}" />
   <xacro:property name="lidar_roll" value="0.0" />
-  <xacro:property name="lidar_pitch" value="${30.0 * deg_to_rad}" />
+  <xacro:property name="lidar_pitch" value="${45.0 * deg_to_rad}" />
   <xacro:property name="lidar_yaw" value="0.0" />
 
   <xacro:mid360_lidar

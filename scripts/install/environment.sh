@@ -602,7 +602,8 @@ import os
 target_dir = Path(os.environ["TARGET_DIR"])
 
 plugin_path = target_dir / "src" / "livox_points_plugin.cpp"
-plugin_text = plugin_path.read_text(encoding="utf-8")
+original_plugin_text = plugin_path.read_text(encoding="utf-8")
+plugin_text = original_plugin_text
 plugin_text = plugin_text.replace(
     "        auto curr_scan_topic = sdf->Get<std::string>(\"topic\");\n"
     "        RCLCPP_INFO(rclcpp::get_logger(\"LivoxPointsPlugin\"), \"ros topic name: %s\", curr_scan_topic.c_str());",
@@ -673,7 +674,8 @@ plugin_text = plugin_text.replace(
     "            auto axis = ray * ignition::math::Vector3d(1.0, 0.0, 0.0);\n"
     "            auto point = corrected_range * axis;",
 )
-plugin_path.write_text(plugin_text, encoding="utf-8")
+if plugin_text != original_plugin_text:
+    plugin_path.write_text(plugin_text, encoding="utf-8")
 PY
 
   touch "${marker_file}"
@@ -688,8 +690,10 @@ prepare_livox_ros_driver2_manifest() {
     return 1
   fi
 
-  # upstream build.shと同じmanifest切替を先に行い、rosdepが依存を読めるようにする。
-  cp "${ros2_manifest}" "${active_manifest}"
+  # upstream build.sh相当のmanifest切替は、内容が変わる場合だけ行いmtime起因の再configureを避ける。
+  if [[ ! -f "${active_manifest}" ]] || ! cmp -s "${ros2_manifest}" "${active_manifest}"; then
+    cp "${ros2_manifest}" "${active_manifest}"
+  fi
 }
 
 install_livox_sdk2_if_needed() {
@@ -772,14 +776,25 @@ build_third_party_workspace() {
     echo "Missing livox_ros_driver2 repository at ${LIVOX_DRIVER_DIR}" >&2
     return 1
   fi
+  if [[ ! -d "${LIVOX_SIM_DIR}" ]]; then
+    echo "Missing ros2_livox_simulation repository at ${LIVOX_SIM_DIR}" >&2
+    return 1
+  fi
 
-  # 公式repoの想定手順を優先し、driver自身のbuild scriptでthird-party workspaceを構築する。
-  bash "${LIVOX_DRIVER_DIR}/build.sh" "${ROS_DISTRO}"
+  # upstream build.shは毎回build/installを削除するため、直接colconを実行してキャッシュを保持する。
+  colcon \
+    --log-base "${THIRD_PARTY_WS}/log" \
+    build \
+    --base-paths "${THIRD_PARTY_SRC_DIR}" \
+    --build-base "${THIRD_PARTY_WS}/build" \
+    --install-base "${THIRD_PARTY_WS}/install" \
+    --cmake-args \
+      -DROS_EDITION=ROS2 \
+      -DDISTRO_ROS="${ROS_DISTRO}"
 }
 
 build_project_workspace() {
-  # install/配下に削除済みpackageが残るのを避けるため、毎回clean buildする。
-  rm -rf "${ROS_WS}/build" "${ROS_WS}/install" "${ROS_WS}/log"
+  # 通常のcolcon buildにして、Python/URDFのみの変更でも既存キャッシュを保持する。
   colcon --log-base "${ROS_WS}/log" build --base-paths "${ROS_WS}/src" --build-base "${ROS_WS}/build" --install-base "${ROS_WS}/install" --symlink-install
 }
 

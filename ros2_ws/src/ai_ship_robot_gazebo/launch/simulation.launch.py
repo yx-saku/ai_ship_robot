@@ -17,6 +17,7 @@ def generate_launch_description():
     gui = LaunchConfiguration("gui")
     verbose = LaunchConfiguration("verbose")
     lite = LaunchConfiguration("lite")
+    lidar_pattern_file = LaunchConfiguration("lidar_pattern_file")
     half_lidar_resolution = LaunchConfiguration("half_lidar_resolution")
     quarter_lidar_resolution = LaunchConfiguration("quarter_lidar_resolution")
     effective_gui = PythonExpression(["'false' if '", lite, "' == 'true' else '", gui, "'"])
@@ -50,6 +51,8 @@ def generate_launch_description():
                     [FindPackageShare("ai_ship_robot_description"), "urdf", "ai_ship_robot.urdf.xacro"]
                 ),
                 " use_sim:=true",
+                " lidar_pattern_file:=",
+                lidar_pattern_file,
                 " half_lidar_resolution:=",
                 effective_half_lidar_resolution,
                 " quarter_lidar_resolution:=",
@@ -116,6 +119,7 @@ def generate_launch_description():
             DeclareLaunchArgument("gui", default_value="true"),
             DeclareLaunchArgument("verbose", default_value="false"),
             DeclareLaunchArgument("lite", default_value="false"),
+            DeclareLaunchArgument("lidar_pattern_file", default_value="lidar_pattern_dual_updown.urdf.xacro"),
             DeclareLaunchArgument("half_lidar_resolution", default_value="false"),
             DeclareLaunchArgument("quarter_lidar_resolution", default_value="false"),
             DeclareLaunchArgument(

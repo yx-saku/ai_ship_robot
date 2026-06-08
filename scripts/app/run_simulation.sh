@@ -22,11 +22,16 @@ Options:
   --full-resolution   Use full LiDAR sample counts.
   --world PATH        Use a custom Gazebo Classic world.
   --rviz-config PATH  Use a custom RViz config.
+  --lidar-pattern FILE
+                      Use a LiDAR pattern xacro file name.
   --robot-name NAME   Set the spawned robot name.
   -h, --help          Show this help.
 
-Edit ros2_ws/src/ai_ship_robot_description/urdf/ai_ship_robot.urdf.xacro
-to select a LiDAR installation pattern.
+LiDAR pattern examples:
+  lidar_pattern_single.urdf.xacro
+  lidar_pattern_dual_out20.urdf.xacro
+  lidar_pattern_dual_out38.urdf.xacro
+  lidar_pattern_dual_updown.urdf.xacro
 EOF
 }
 
@@ -40,6 +45,33 @@ require_value() {
   fi
 
   printf '%s' "${value}"
+}
+
+validate_lidar_pattern_file() {
+  local file_name="$1"
+  local pattern_dir="${WORKSPACE_ROOT}/ros2_ws/src/ai_ship_robot_description/urdf"
+  local pattern_file=""
+
+  # xacroのinclude対象をLiDAR配置ファイル名に限定し、任意パスの読み込みを防ぐ。
+  if [[ "${file_name}" == */* || "${file_name}" != lidar_pattern_*.urdf.xacro ]]; then
+    echo "Invalid LiDAR pattern file name: ${file_name}" >&2
+    echo "Use a file name like lidar_pattern_single.urdf.xacro." >&2
+    exit 2
+  fi
+
+  if [[ -f "${pattern_dir}/${file_name}" ]]; then
+    printf '%s' "${file_name}"
+    return 0
+  fi
+
+  # 存在しないパターンはlaunch前に検出し、選択可能なファイル名を表示する。
+  echo "Unknown LiDAR pattern file: ${file_name}" >&2
+  echo "Available LiDAR patterns:" >&2
+  for pattern_file in "${pattern_dir}"/lidar_pattern_*.urdf.xacro; do
+    [[ -e "${pattern_file}" ]] || continue
+    echo "  ${pattern_file##*/}" >&2
+  done
+  exit 2
 }
 
 source_workspace_environment() {
@@ -140,6 +172,13 @@ while [[ $# -gt 0 ]]; do
     --rviz-config)
       shift
       LAUNCH_ARGS+=("rviz_config:=$(require_value --rviz-config "${1:-}")")
+      ;;
+    --lidar-pattern=*)
+      LAUNCH_ARGS+=("lidar_pattern_file:=$(validate_lidar_pattern_file "${1#*=}")")
+      ;;
+    --lidar-pattern)
+      shift
+      LAUNCH_ARGS+=("lidar_pattern_file:=$(validate_lidar_pattern_file "$(require_value --lidar-pattern "${1:-}")")")
       ;;
     --robot-name=*)
       LAUNCH_ARGS+=("robot_name:=${1#*=}")

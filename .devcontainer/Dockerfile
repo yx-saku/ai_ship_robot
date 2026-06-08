@@ -42,6 +42,7 @@ RUN --mount=type=cache,id=ai-ship-robot-apt-cache,target=/var/cache/apt,sharing=
     rm -f /etc/apt/apt.conf.d/docker-clean \
     && apt-get update \
     && apt-get install -y --no-install-recommends \
+        ca-certificates \
         git \
         python3 \
         sudo
