@@ -1,0 +1,83 @@
+Panels:
+  - Class: rviz_common/Displays
+    Name: Displays
+  - Class: rviz_common/Selection
+    Name: Selection
+  - Class: rviz_common/Tool Properties
+    Name: Tool Properties
+Visualization Manager:
+  Class: ""
+  Displays:
+    - Class: rviz_default_plugins/Grid
+      Enabled: true
+      Name: Grid
+      Plane Cell Count: 40
+      Cell Size: 1
+    - Class: rviz_default_plugins/TF
+      Enabled: true
+      Name: TF
+      Show Axes: true
+      Show Names: true
+    - Class: rviz_default_plugins/RobotModel
+      Enabled: true
+      Name: Robot Model
+      Description Topic:
+        Value: /robot_description
+    - Class: rviz_default_plugins/PointCloud2
+      Enabled: true
+      Name: Fused Input Points
+      Size (m): 0.03
+      Style: Points
+      Topic:
+        Depth: 5
+        Durability Policy: Volatile
+        History Policy: Keep Last
+        Reliability Policy: Best Effort
+        Value: /slam/points
+    - Class: rviz_default_plugins/PointCloud2
+      Enabled: true
+      Name: GLIM Aligned Points
+      Size (m): 0.03
+      Style: Points
+      Topic:
+        Value: /glim/aligned_points
+    - Class: rviz_default_plugins/PointCloud2
+      Enabled: true
+      Name: GLIM Map
+      Size (m): 0.03
+      Style: Points
+      Topic:
+        Value: /glim/map
+    - Class: rviz_default_plugins/Odometry
+      Enabled: true
+      Name: Gazebo Odom
+      Topic:
+        Value: /odom
+      Shape:
+        Value: Arrow
+    - Class: rviz_default_plugins/Odometry
+      Enabled: true
+      Name: GLIM Odom
+      Topic:
+        Value: /glim/odom
+      Shape:
+        Value: Arrow
+    - Class: rviz_default_plugins/Odometry
+      Enabled: true
+      Name: GLIM Corrected Odom
+      Topic:
+        Value: /glim/odom_corrected
+      Shape:
+        Value: Arrow
+  Enabled: true
+  Global Options:
+    Fixed Frame: map
+  Name: root
+  Tools:
+    - Class: rviz_default_plugins/Interact
+    - Class: rviz_default_plugins/MoveCamera
+    - Class: rviz_default_plugins/Select
+  Value: true
+Window Geometry:
+  Height: 900
+  Width: 1400

@@ -1,6 +1,5 @@
 #!/usr/bin/env bash
 set -euo pipefail
-echo test
 ROS_DISTRO="${ROS_DISTRO:-humble}"
 DEBIAN_FRONTEND="${DEBIAN_FRONTEND:-noninteractive}"
 APT_PRIMARY_MIRROR="${APT_PRIMARY_MIRROR:-}"
@@ -11,9 +10,78 @@ APT_RETRIES="${APT_RETRIES:-3}"
 APT_HTTP_TIMEOUT="${APT_HTTP_TIMEOUT:-20}"
 APT_HTTPS_TIMEOUT="${APT_HTTPS_TIMEOUT:-${APT_HTTP_TIMEOUT}}"
 APT_UPDATE_MAX_AGE_SECONDS="${APT_UPDATE_MAX_AGE_SECONDS:-86400}"
+INSTALL_GROUPS="${AI_SHIP_ROBOT_INSTALL_GROUPS:-base,simulation,glim,dev-test}"
 APT_UPDATED=0
 APT_INDEXES_STALE=0
 export DEBIAN_FRONTEND
+
+usage() {
+  cat <<'EOF'
+Usage: bash scripts/install/system_dependencies.sh [OPTIONS]
+
+Options:
+  --groups LIST   Install dependency groups. Available groups: base, simulation, glim, dev-test.
+                  LIST is comma-separated. The base group is added automatically.
+  -h, --help      Show this help.
+EOF
+}
+
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    -h|--help)
+      usage
+      exit 0
+      ;;
+    --groups=*)
+      INSTALL_GROUPS="${1#*=}"
+      ;;
+    --groups)
+      shift
+      if [[ -z "${1:-}" || "${1:-}" == --* ]]; then
+        echo "--groups requires a comma-separated value." >&2
+        exit 2
+      fi
+      INSTALL_GROUPS="$1"
+      ;;
+    *)
+      echo "Unknown option: $1" >&2
+      echo "Run with --help to see available options." >&2
+      exit 2
+      ;;
+  esac
+  shift
+done
+
+declare -A SELECTED_GROUPS=()
+
+select_install_groups() {
+  local raw_groups="$1"
+  local group_name=""
+
+  IFS=',' read -ra requested_groups <<< "${raw_groups}"
+  for group_name in "${requested_groups[@]}"; do
+    group_name="${group_name//[[:space:]]/}"
+    [[ -n "${group_name}" ]] || continue
+    case "${group_name}" in
+      base|simulation|glim|dev-test)
+        SELECTED_GROUPS["${group_name}"]=1
+        ;;
+      *)
+        echo "Unknown install group: ${group_name}" >&2
+        echo "Available groups: base, simulation, glim, dev-test" >&2
+        exit 2
+        ;;
+    esac
+  done
+
+  # 共通ROS環境は全profileの土台なので、明示されていない場合も必ず含める。
+  SELECTED_GROUPS[base]=1
+}
+
+group_selected() {
+  local group_name="$1"
+  [[ "${SELECTED_GROUPS[${group_name}]:-0}" -eq 1 ]]
+}
 
 if [[ "$(id -u)" -eq 0 ]]; then
   SUDO=""
@@ -322,57 +390,98 @@ configure_ros2_apt_repository() {
   fi
 }
 
-install_system_dependencies() {
-  local ros_packages=(
-    "ros-${ROS_DISTRO}-ros-base"
-    "ros-${ROS_DISTRO}-ament-cmake"
-    "ros-${ROS_DISTRO}-ament-cmake-auto"
-    "ros-${ROS_DISTRO}-diagnostic-msgs"
-    "ros-${ROS_DISTRO}-gazebo-dev"
-    "ros-${ROS_DISTRO}-gazebo-plugins"
-    "ros-${ROS_DISTRO}-gazebo-ros"
-    "ros-${ROS_DISTRO}-launch"
-    "ros-${ROS_DISTRO}-launch-ros"
-    "ros-${ROS_DISTRO}-message-filters"
-    "ros-${ROS_DISTRO}-pcl-conversions"
-    "ros-${ROS_DISTRO}-pcl-ros"
-    "ros-${ROS_DISTRO}-robot-state-publisher"
-    "ros-${ROS_DISTRO}-ros2launch"
-    "ros-${ROS_DISTRO}-ros2run"
-    "ros-${ROS_DISTRO}-ros2service"
-    "ros-${ROS_DISTRO}-ros2topic"
-    "ros-${ROS_DISTRO}-rosbag2"
-    "ros-${ROS_DISTRO}-rosidl-default-generators"
-    "ros-${ROS_DISTRO}-rviz2"
-    "ros-${ROS_DISTRO}-tf2-ros"
-    "ros-${ROS_DISTRO}-tf2-sensor-msgs"
-    "ros-${ROS_DISTRO}-xacro"
-  )
-  local system_packages=(
+install_base_packages() {
+  local packages=(
     build-essential
     cmake
-    gazebo
     git
-    libapr1-dev
-    libaprutil1-dev
-    libboost-chrono-dev
-    libboost-dev
     libeigen3-dev
-    libgazebo-dev
-    libpcl-dev
-    libprotobuf-dev
-    protobuf-compiler
     python3-colcon-common-extensions
     python3-rosdep
     python3-vcstool
     sudo
+    "ros-${ROS_DISTRO}-ament-cmake"
+    "ros-${ROS_DISTRO}-ament-cmake-auto"
+    "ros-${ROS_DISTRO}-diagnostic-msgs"
+    "ros-${ROS_DISTRO}-geometry-msgs"
+    "ros-${ROS_DISTRO}-launch"
+    "ros-${ROS_DISTRO}-launch-ros"
+    "ros-${ROS_DISTRO}-nav-msgs"
+    "ros-${ROS_DISTRO}-robot-state-publisher"
+    "ros-${ROS_DISTRO}-ros-base"
+    "ros-${ROS_DISTRO}-ros2launch"
+    "ros-${ROS_DISTRO}-ros2run"
+    "ros-${ROS_DISTRO}-ros2service"
+    "ros-${ROS_DISTRO}-ros2topic"
+    "ros-${ROS_DISTRO}-sensor-msgs"
+    "ros-${ROS_DISTRO}-std-msgs"
+    "ros-${ROS_DISTRO}-tf2-ros"
+    "ros-${ROS_DISTRO}-xacro"
   )
 
-  # ROS/Gazebo/build系の重いapt導入はこのscriptに限定し、Dockerfileのcache invalidation範囲を狭める。
-  install_apt_packages_if_missing "${system_packages[@]}" "${ros_packages[@]}"
+  # 実機・開発・シミュレーションで共通に使う最小限のROS/build環境を導入する。
+  install_apt_packages_if_missing "${packages[@]}"
+}
+
+install_simulation_packages() {
+  local packages=(
+    gazebo
+    libapr1-dev
+    libaprutil1-dev
+    libboost-chrono-dev
+    libboost-dev
+    libgazebo-dev
+    libprotobuf-dev
+    protobuf-compiler
+    "ros-${ROS_DISTRO}-gazebo-dev"
+    "ros-${ROS_DISTRO}-gazebo-plugins"
+    "ros-${ROS_DISTRO}-gazebo-ros"
+    "ros-${ROS_DISTRO}-rviz2"
+  )
+
+  # Gazebo ClassicとLivoxシミュレーションのビルドに必要な依存は実機環境へ入れない。
+  install_apt_packages_if_missing "${packages[@]}"
+}
+
+install_glim_packages() {
+  local packages=(
+    libboost-all-dev
+    libgomp1
+    libpcl-dev
+    libtbb-dev
+    "ros-${ROS_DISTRO}-message-filters"
+    "ros-${ROS_DISTRO}-pcl-conversions"
+    "ros-${ROS_DISTRO}-pcl-ros"
+    "ros-${ROS_DISTRO}-rosbag2"
+    "ros-${ROS_DISTRO}-tf2-sensor-msgs"
+  )
+
+  # glimと点群統合ノードで使う点群処理・同期・TF変換系の依存をまとめる。
+  install_apt_packages_if_missing "${packages[@]}"
+}
+
+install_dev_test_packages() {
+  local packages=(
+    clang-format
+    "ros-${ROS_DISTRO}-ament-cmake-gtest"
+    "ros-${ROS_DISTRO}-ament-lint-auto"
+    "ros-${ROS_DISTRO}-ament-lint-common"
+    "ros-${ROS_DISTRO}-launch-testing"
+  )
+
+  # 開発時の検証ツールは運用環境から外せるように独立グループにする。
+  install_apt_packages_if_missing "${packages[@]}"
+}
+
+install_system_dependencies() {
+  group_selected base && install_base_packages
+  group_selected simulation && install_simulation_packages
+  group_selected glim && install_glim_packages
+  group_selected dev-test && install_dev_test_packages
   ensure_locales_generated
   ensure_rosdep_initialized
 }
 
+select_install_groups "${INSTALL_GROUPS}"
 configure_ros2_apt_repository
 install_system_dependencies

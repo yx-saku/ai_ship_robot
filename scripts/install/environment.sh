@@ -14,6 +14,17 @@ THIRD_PARTY_SRC_DIR="${THIRD_PARTY_WS}/src"
 LIVOX_DRIVER_DIR="${THIRD_PARTY_SRC_DIR}/livox_ros_driver2"
 LIVOX_SIM_DIR="${THIRD_PARTY_SRC_DIR}/ros2_livox_simulation"
 LIVOX_SDK_DIR="${THIRD_PARTY_ROOT}/vendor/Livox-SDK2"
+GTSAM_DIR="${THIRD_PARTY_SRC_DIR}/gtsam"
+GLIM_DIR="${THIRD_PARTY_SRC_DIR}/glim"
+GLIM_ROS2_DIR="${THIRD_PARTY_SRC_DIR}/glim_ros2"
+GTSAM_POINTS_DIR="${THIRD_PARTY_SRC_DIR}/gtsam_points"
+LIVOX_DRIVER_REF="13eb05e4e6dd7a765b934d0c5fd6236676a57b49"
+LIVOX_SIM_REF="58ae16b43cc90423d3f8dc2ae3018a7c178c330a"
+LIVOX_SDK_REF="f5d9375f84efe2b15bc0a052d3e18482ed13adf4"
+GTSAM_REF="4f66a491ffc83cf092d0d818b11dc35135521612"
+GTSAM_POINTS_REF="42e811a50e421390c206b486572b88a024734146"
+GLIM_REF="25ad190776f05f6a8d7438686197294f73c5f868"
+GLIM_ROS2_REF="a62811dc3ab73076f4a43fc21005f96cd712903c"
 APT_PRIMARY_MIRROR="${APT_PRIMARY_MIRROR:-}"
 APT_PORTS_MIRROR="${APT_PORTS_MIRROR:-}"
 APT_SECURITY_MIRROR="${APT_SECURITY_MIRROR:-}"
@@ -23,9 +34,13 @@ APT_HTTP_TIMEOUT="${APT_HTTP_TIMEOUT:-20}"
 APT_HTTPS_TIMEOUT="${APT_HTTPS_TIMEOUT:-${APT_HTTP_TIMEOUT}}"
 ROSDEP_UPDATE_MAX_AGE_SECONDS="${ROSDEP_UPDATE_MAX_AGE_SECONDS:-86400}"
 INSTALL_MODE="full"
+INSTALL_PROFILE="dev"
+INSTALL_GROUPS=""
 APT_UPDATED=0
 ROSDEP_UPDATED=0
 export DEBIAN_FRONTEND
+
+declare -A SELECTED_GROUPS=()
 
 usage() {
   cat <<'EOF'
@@ -36,10 +51,80 @@ Options:
   --system-only    ROS 2 Humble導入、追加apt依存導入、rosdep初期化まで行う。
   --workspace-only 外部repo取得、互換symlink、SDK導入、workspace buildを行う。ROS 2導入済み環境向け。
   --shell-only     aptやbuildは行わず、shell自動読み込み設定だけを更新する。
+  --profile NAME   Install profile: real, simulation, slam-sim, dev. 既定値はdev。
+  --groups LIST    Comma-separated groups: base, simulation, glim, dev-test. --profileより優先する。
   -h, --help       このhelpを表示する。
 
- --workspace-only 以外は、ROS 2 Humble未導入環境でも実行できる。
+  --workspace-only 以外は、ROS 2 Humble未導入環境でも実行できる。
 EOF
+}
+
+profile_to_groups() {
+  local profile_name="$1"
+
+  case "${profile_name}" in
+    real)
+      printf '%s' "base,glim"
+      ;;
+    simulation)
+      printf '%s' "base,simulation"
+      ;;
+    slam-sim)
+      printf '%s' "base,simulation,glim"
+      ;;
+    dev)
+      printf '%s' "base,simulation,glim,dev-test"
+      ;;
+    *)
+      echo "Unknown install profile: ${profile_name}" >&2
+      echo "Available profiles: real, simulation, slam-sim, dev" >&2
+      exit 2
+      ;;
+  esac
+}
+
+select_install_groups() {
+  local raw_groups="$1"
+  local group_name=""
+  local selected_list=()
+
+  SELECTED_GROUPS=()
+  IFS=',' read -ra selected_list <<< "${raw_groups}"
+  for group_name in "${selected_list[@]}"; do
+    group_name="${group_name//[[:space:]]/}"
+    [[ -n "${group_name}" ]] || continue
+    case "${group_name}" in
+      base|simulation|glim|dev-test)
+        SELECTED_GROUPS["${group_name}"]=1
+        ;;
+      *)
+        echo "Unknown install group: ${group_name}" >&2
+        echo "Available groups: base, simulation, glim, dev-test" >&2
+        exit 2
+        ;;
+    esac
+  done
+
+  # ROS 2本体やbuildツールは全構成の土台なので、他group指定時も自動で含める。
+  SELECTED_GROUPS[base]=1
+}
+
+group_selected() {
+  local group_name="$1"
+  [[ "${SELECTED_GROUPS[${group_name}]:-0}" -eq 1 ]]
+}
+
+selected_groups_csv() {
+  local groups=()
+  local group_name=""
+
+  for group_name in base simulation glim dev-test; do
+    if group_selected "${group_name}"; then
+      groups+=("${group_name}")
+    fi
+  done
+
+  (IFS=','; printf '%s' "${groups[*]}")
 }
 
 while [[ $# -gt 0 ]]; do
@@ -60,6 +145,28 @@ while [[ $# -gt 0 ]]; do
     --shell-only)
       INSTALL_MODE="shell-only"
       ;;
+    --profile=*)
+      INSTALL_PROFILE="${1#*=}"
+      ;;
+    --profile)
+      shift
+      if [[ -z "${1:-}" || "${1:-}" == --* ]]; then
+        echo "--profile requires a value." >&2
+        exit 2
+      fi
+      INSTALL_PROFILE="$1"
+      ;;
+    --groups=*)
+      INSTALL_GROUPS="${1#*=}"
+      ;;
+    --groups)
+      shift
+      if [[ -z "${1:-}" || "${1:-}" == --* ]]; then
+        echo "--groups requires a comma-separated value." >&2
+        exit 2
+      fi
+      INSTALL_GROUPS="$1"
+      ;;
     *)
       echo "Unknown option: $1" >&2
       echo "Run with --help to see available options." >&2
@@ -68,6 +175,11 @@ while [[ $# -gt 0 ]]; do
   esac
   shift
 done
+
+if [[ -z "${INSTALL_GROUPS}" ]]; then
+  INSTALL_GROUPS="$(profile_to_groups "${INSTALL_PROFILE}")"
+fi
+select_install_groups "${INSTALL_GROUPS}"
 
 if [[ "$(id -u)" -eq 0 ]]; then
   SUDO=""
@@ -81,7 +193,7 @@ fi
 
 run_system_dependencies_script() {
   # Dockerfileの重いlayerと通常の手動実行で同じsystem依存導入処理を使う。
-  bash "${SYSTEM_DEPENDENCIES_SCRIPT}"
+  bash "${SYSTEM_DEPENDENCIES_SCRIPT}" --groups "$(selected_groups_csv)"
 }
 
 run_shell_environment_script() {
@@ -462,54 +574,94 @@ ensure_rosdep_updated() {
   ROSDEP_UPDATED=1
 }
 
-install_system_dependencies() {
-  local ros_packages=(
-    "ros-${ROS_DISTRO}-ros-base"
-    "ros-${ROS_DISTRO}-ament-cmake"
-    "ros-${ROS_DISTRO}-ament-cmake-auto"
-    "ros-${ROS_DISTRO}-diagnostic-msgs"
-    "ros-${ROS_DISTRO}-gazebo-dev"
-    "ros-${ROS_DISTRO}-gazebo-plugins"
-    "ros-${ROS_DISTRO}-gazebo-ros"
-    "ros-${ROS_DISTRO}-launch"
-    "ros-${ROS_DISTRO}-launch-ros"
-    "ros-${ROS_DISTRO}-message-filters"
-    "ros-${ROS_DISTRO}-pcl-conversions"
-    "ros-${ROS_DISTRO}-pcl-ros"
-    "ros-${ROS_DISTRO}-robot-state-publisher"
-    "ros-${ROS_DISTRO}-ros2launch"
-    "ros-${ROS_DISTRO}-ros2run"
-    "ros-${ROS_DISTRO}-ros2service"
-    "ros-${ROS_DISTRO}-ros2topic"
-    "ros-${ROS_DISTRO}-rosbag2"
-    "ros-${ROS_DISTRO}-rosidl-default-generators"
-    "ros-${ROS_DISTRO}-rviz2"
-    "ros-${ROS_DISTRO}-tf2-ros"
-    "ros-${ROS_DISTRO}-tf2-sensor-msgs"
-    "ros-${ROS_DISTRO}-xacro"
-  )
-  local system_packages=(
+install_base_packages() {
+  local packages=(
     build-essential
     cmake
-    gazebo
     git
-    libapr1-dev
-    libaprutil1-dev
-    libboost-chrono-dev
-    libboost-dev
     libeigen3-dev
-    libgazebo-dev
-    libpcl-dev
-    libprotobuf-dev
-    protobuf-compiler
     python3-colcon-common-extensions
     python3-rosdep
     python3-vcstool
     sudo
+    "ros-${ROS_DISTRO}-ament-cmake"
+    "ros-${ROS_DISTRO}-ament-cmake-auto"
+    "ros-${ROS_DISTRO}-diagnostic-msgs"
+    "ros-${ROS_DISTRO}-geometry-msgs"
+    "ros-${ROS_DISTRO}-launch"
+    "ros-${ROS_DISTRO}-launch-ros"
+    "ros-${ROS_DISTRO}-nav-msgs"
+    "ros-${ROS_DISTRO}-robot-state-publisher"
+    "ros-${ROS_DISTRO}-ros-base"
+    "ros-${ROS_DISTRO}-ros2launch"
+    "ros-${ROS_DISTRO}-ros2run"
+    "ros-${ROS_DISTRO}-ros2service"
+    "ros-${ROS_DISTRO}-ros2topic"
+    "ros-${ROS_DISTRO}-sensor-msgs"
+    "ros-${ROS_DISTRO}-std-msgs"
+    "ros-${ROS_DISTRO}-tf2-ros"
+    "ros-${ROS_DISTRO}-xacro"
   )
 
-  # 本番Jetsonと開発Dockerで同じインストールスクリプトを使うため、ROS 2本体と追加依存を同じ場所で導入する。
-  install_apt_packages_if_missing "${system_packages[@]}" "${ros_packages[@]}"
+  # 実機・開発・シミュレーションの共通土台だけを導入する。
+  install_apt_packages_if_missing "${packages[@]}"
+}
+
+install_simulation_packages() {
+  local packages=(
+    gazebo
+    libapr1-dev
+    libaprutil1-dev
+    libboost-chrono-dev
+    libboost-dev
+    libgazebo-dev
+    libprotobuf-dev
+    protobuf-compiler
+    "ros-${ROS_DISTRO}-gazebo-dev"
+    "ros-${ROS_DISTRO}-gazebo-plugins"
+    "ros-${ROS_DISTRO}-gazebo-ros"
+    "ros-${ROS_DISTRO}-rviz2"
+  )
+
+  # Gazebo/Livoxシミュレーション専用の依存は選択時だけ導入する。
+  install_apt_packages_if_missing "${packages[@]}"
+}
+
+install_glim_packages() {
+  local packages=(
+    libboost-all-dev
+    libgomp1
+    libpcl-dev
+    libtbb-dev
+    "ros-${ROS_DISTRO}-message-filters"
+    "ros-${ROS_DISTRO}-pcl-conversions"
+    "ros-${ROS_DISTRO}-pcl-ros"
+    "ros-${ROS_DISTRO}-rosbag2"
+    "ros-${ROS_DISTRO}-tf2-sensor-msgs"
+  )
+
+  # glimと点群統合ノードが必要とする点群処理系依存をまとめる。
+  install_apt_packages_if_missing "${packages[@]}"
+}
+
+install_dev_test_packages() {
+  local packages=(
+    clang-format
+    "ros-${ROS_DISTRO}-ament-cmake-gtest"
+    "ros-${ROS_DISTRO}-ament-lint-auto"
+    "ros-${ROS_DISTRO}-ament-lint-common"
+    "ros-${ROS_DISTRO}-launch-testing"
+  )
+
+  # 開発・テスト用途の補助依存は運用profileから外せるように分ける。
+  install_apt_packages_if_missing "${packages[@]}"
+}
+
+install_system_dependencies() {
+  group_selected base && install_base_packages
+  group_selected simulation && install_simulation_packages
+  group_selected glim && install_glim_packages
+  group_selected dev-test && install_dev_test_packages
 
   ensure_locales_generated
 
@@ -581,20 +733,36 @@ prepare_livox_simulation_build_environment() {
 ensure_git_repo() {
   local target_dir="$1"
   local repo_url="$2"
+  local expected_ref="$3"
+  local current_ref=""
 
   if [[ -d "${target_dir}/.git" ]]; then
+    current_ref="$(git -C "${target_dir}" rev-parse HEAD)"
+    if [[ "${current_ref}" != "${expected_ref}" ]]; then
+      echo "Unexpected repository revision at ${target_dir}" >&2
+      echo "  expected: ${expected_ref}" >&2
+      echo "  current : ${current_ref}" >&2
+      echo "Remove the directory or update the pinned ref after validating the new revision." >&2
+      return 1
+    fi
     return 0
   fi
 
+  # 外部repoは検証済みcommit SHAに固定し、default branchの更新でビルドや挙動が変わらないようにする。
   mkdir -p "$(dirname "${target_dir}")"
-  git clone --depth 1 "${repo_url}" "${target_dir}"
+  git init "${target_dir}"
+  git -C "${target_dir}" remote add origin "${repo_url}"
+  git -C "${target_dir}" fetch --depth 1 origin "${expected_ref}"
+  git -C "${target_dir}" checkout --detach FETCH_HEAD
 }
 
 patch_ros2_livox_simulation_repo() {
   local target_dir="$1"
   local marker_file="$2"
 
-  # 既存マーカーがある環境でも追加修正を取り込めるよう、冪等な文字列置換を毎回実行する。
+  # 非公式Livox Gazebo pluginは、本プロジェクトで必要な「CustomMsgとPointCloud2を別topicへ出す」「LiDAR原点基準の点群を出す」挙動を標準機能として持たない。
+  # upstream forkを作ると追跡対象が増えるため、検証済みcommitに対して最小限の文字列patchを冪等適用し、変更範囲をこの関数に閉じ込める。
+  # upstream側でtopic分離とray原点補正が正式対応された場合は、このpatchを削除してURDF側のplugin設定だけで運用する。
   TARGET_DIR="${target_dir}" python3 <<'PY'
 from pathlib import Path
 import os
@@ -681,6 +849,20 @@ PY
   touch "${marker_file}"
 }
 
+patch_gtsam_points_repo() {
+  local target_dir="$1"
+  local migration_header="${target_dir}/include/gtsam_points/util/gtsam_migration.hpp"
+
+  if [[ ! -f "${migration_header}" ]]; then
+    echo "Missing gtsam_points migration header: ${migration_header}" >&2
+    return 1
+  fi
+
+  # gtsam_pointsの検証済みrevisionはUbuntu 22.04標準Boostでboost::none_tをconstexpr変数にできず、ビルドが失敗する。
+  # APIや実行時挙動を変えず、該当変数のconstexpr指定だけを外す最小patchにする。upstreamがBoost 1.74互換修正を取り込んだrevisionへ更新したら削除する。
+  sed -i 's/constexpr auto NoneValue = boost::none;/const auto NoneValue = boost::none;/' "${migration_header}"
+}
+
 prepare_livox_ros_driver2_manifest() {
   local ros2_manifest="${LIVOX_DRIVER_DIR}/package_ROS2.xml"
   local active_manifest="${LIVOX_DRIVER_DIR}/package.xml"
@@ -724,6 +906,10 @@ install_livox_sdk2_if_needed() {
 install_rosdeps_for_workspace() {
   local workspace_src="$1"
 
+  if [[ ! -d "${workspace_src}" ]]; then
+    return 0
+  fi
+
   if ! command -v rosdep >/dev/null 2>&1; then
     return 0
   fi
@@ -732,12 +918,49 @@ install_rosdeps_for_workspace() {
   rosdep install --from-paths "${workspace_src}" --ignore-src --rosdistro "${ROS_DISTRO}" -r -y
 }
 
-clone_external_repositories() {
-  # 外部repoはgit管理外の専用領域に置き、upstreamの構成をできるだけ維持する。
-  ensure_git_repo "${LIVOX_DRIVER_DIR}" "https://github.com/Livox-SDK/livox_ros_driver2.git"
-  ensure_git_repo "${LIVOX_SIM_DIR}" "https://github.com/stm32f303ret6/livox_laser_simulation_RO2.git"
-  ensure_git_repo "${LIVOX_SDK_DIR}" "https://github.com/Livox-SDK/Livox-SDK2.git"
+install_rosdeps_for_paths() {
+  local paths=("$@")
+  local existing_paths=()
+  local path=""
+
+  if ! command -v rosdep >/dev/null 2>&1; then
+    return 0
+  fi
+
+  for path in "${paths[@]}"; do
+    if [[ -d "${path}" ]]; then
+      existing_paths+=("${path}")
+    fi
+  done
+
+  if [[ "${#existing_paths[@]}" -eq 0 ]]; then
+    return 0
+  fi
+
+  ensure_rosdep_updated
+  rosdep install --from-paths "${existing_paths[@]}" --ignore-src --rosdistro "${ROS_DISTRO}" -r -y
+}
+
+clone_simulation_repositories() {
+  # Livox実機driver/SDKは公式repoを使う。simulation pluginだけはLivox MID-360非反復走査をGazebo Classicで再現するための非公式repoで、simulation group限定に閉じる。
+  ensure_git_repo "${LIVOX_DRIVER_DIR}" "https://github.com/Livox-SDK/livox_ros_driver2.git" "${LIVOX_DRIVER_REF}"
+  ensure_git_repo "${LIVOX_SIM_DIR}" "https://github.com/stm32f303ret6/livox_laser_simulation_RO2.git" "${LIVOX_SIM_REF}"
+  ensure_git_repo "${LIVOX_SDK_DIR}" "https://github.com/Livox-SDK/Livox-SDK2.git" "${LIVOX_SDK_REF}"
   patch_ros2_livox_simulation_repo "${LIVOX_SIM_DIR}" "${LIVOX_SIM_DIR}/.ai_ship_robot_patch_applied"
+}
+
+clone_glim_repositories() {
+  # GLIM公式READMEで案内される構成を使い、GLIM本体・ROS 2 wrapper・点群factorライブラリを同じ検証済みrevisionに固定する。
+  ensure_git_repo "${GTSAM_DIR}" "https://github.com/borglab/gtsam.git" "${GTSAM_REF}"
+  ensure_git_repo "${GTSAM_POINTS_DIR}" "https://github.com/koide3/gtsam_points.git" "${GTSAM_POINTS_REF}"
+  ensure_git_repo "${GLIM_DIR}" "https://github.com/koide3/glim.git" "${GLIM_REF}"
+  ensure_git_repo "${GLIM_ROS2_DIR}" "https://github.com/koide3/glim_ros2.git" "${GLIM_ROS2_REF}"
+  patch_gtsam_points_repo "${GTSAM_POINTS_DIR}"
+}
+
+clone_external_repositories() {
+  group_selected simulation && clone_simulation_repositories
+  group_selected glim && clone_glim_repositories
 }
 
 setup_file_has_stale_third_party_path() {
@@ -771,26 +994,103 @@ remove_stale_workspace_artifacts() {
     "${ROS_WS}/log"
 }
 
-build_third_party_workspace() {
-  if [[ ! -d "${LIVOX_DRIVER_DIR}" ]]; then
-    echo "Missing livox_ros_driver2 repository at ${LIVOX_DRIVER_DIR}" >&2
-    return 1
+selected_third_party_paths() {
+  local paths=()
+
+  if group_selected simulation; then
+    paths+=("${LIVOX_DRIVER_DIR}" "${LIVOX_SIM_DIR}")
   fi
-  if [[ ! -d "${LIVOX_SIM_DIR}" ]]; then
-    echo "Missing ros2_livox_simulation repository at ${LIVOX_SIM_DIR}" >&2
-    return 1
+  if group_selected glim; then
+    paths+=("${GTSAM_DIR}" "${GTSAM_POINTS_DIR}" "${GLIM_DIR}" "${GLIM_ROS2_DIR}")
   fi
 
-  # upstream build.shは毎回build/installを削除するため、直接colconを実行してキャッシュを保持する。
+  printf '%s\n' "${paths[@]}"
+}
+
+build_third_party_paths() {
+  local cxx_standard="$1"
+  shift
+  local paths=("$@")
+
+  if [[ "${#paths[@]}" -eq 0 ]]; then
+    return 0
+  fi
+
+  # 依存関係を既に満たしているrepo群だけを渡し、colconの並列configureで未install依存を参照しないようにする。
   colcon \
     --log-base "${THIRD_PARTY_WS}/log" \
     build \
-    --base-paths "${THIRD_PARTY_SRC_DIR}" \
+    --base-paths "${paths[@]}" \
     --build-base "${THIRD_PARTY_WS}/build" \
     --install-base "${THIRD_PARTY_WS}/install" \
     --cmake-args \
+      -DGTSAM_BUILD_EXAMPLES_ALWAYS=OFF \
+      -DGTSAM_BUILD_TESTS=OFF \
+      -DGTSAM_BUILD_UNSTABLE=ON \
+      -DGTSAM_USE_SYSTEM_EIGEN=ON \
+      -DGTSAM_WITH_TBB=OFF \
+      -DBUILD_WITH_CUDA=OFF \
+      -DBUILD_WITH_VIEWER=OFF \
+      -DBUILD_WITH_OPENCV=OFF \
+      -DCMAKE_CXX_STANDARD="${cxx_standard}" \
       -DROS_EDITION=ROS2 \
       -DDISTRO_ROS="${ROS_DISTRO}"
+
+  if [[ -f "${THIRD_PARTY_WS}/install/setup.bash" ]]; then
+    # 直前にinstallされたCMake configを後続repoのfind_packageから見つけられるようoverlayを更新する。
+    set +u
+    source "${THIRD_PARTY_WS}/install/setup.bash"
+    set -u
+  fi
+}
+
+build_third_party_workspace() {
+  local third_party_paths=()
+
+  mapfile -t third_party_paths < <(selected_third_party_paths)
+  if [[ "${#third_party_paths[@]}" -eq 0 ]]; then
+    return 0
+  fi
+
+  if group_selected simulation; then
+    if [[ ! -d "${LIVOX_DRIVER_DIR}" ]]; then
+      echo "Missing livox_ros_driver2 repository at ${LIVOX_DRIVER_DIR}" >&2
+      return 1
+    fi
+    if [[ ! -d "${LIVOX_SIM_DIR}" ]]; then
+      echo "Missing ros2_livox_simulation repository at ${LIVOX_SIM_DIR}" >&2
+      return 1
+    fi
+  fi
+  if group_selected glim; then
+    if [[ ! -d "${GTSAM_DIR}" ]]; then
+      echo "Missing GTSAM repository at ${GTSAM_DIR}" >&2
+      return 1
+    fi
+    if [[ ! -d "${GTSAM_POINTS_DIR}" ]]; then
+      echo "Missing gtsam_points repository at ${GTSAM_POINTS_DIR}" >&2
+      return 1
+    fi
+    if [[ ! -d "${GLIM_DIR}" ]]; then
+      echo "Missing glim repository at ${GLIM_DIR}" >&2
+      return 1
+    fi
+    if [[ ! -d "${GLIM_ROS2_DIR}" ]]; then
+      echo "Missing glim_ros2 repository at ${GLIM_ROS2_DIR}" >&2
+      return 1
+    fi
+  fi
+
+  if group_selected simulation; then
+    build_third_party_paths 17 "${LIVOX_DRIVER_DIR}" "${LIVOX_SIM_DIR}"
+  fi
+
+  if group_selected glim; then
+    build_third_party_paths 17 "${GTSAM_DIR}"
+    build_third_party_paths 20 "${GTSAM_POINTS_DIR}"
+    build_third_party_paths 20 "${GLIM_DIR}"
+    build_third_party_paths 20 "${GLIM_ROS2_DIR}"
+  fi
 }
 
 build_project_workspace() {
@@ -802,16 +1102,20 @@ install_workspace() {
   source_ros2
   clone_external_repositories
   remove_stale_workspace_artifacts
-  prepare_livox_simulation_build_environment
-  install_livox_sdk2_if_needed
-  prepare_livox_ros_driver2_manifest
-  install_rosdeps_for_workspace "${THIRD_PARTY_SRC_DIR}"
+  if group_selected simulation; then
+    prepare_livox_simulation_build_environment
+    install_livox_sdk2_if_needed
+    prepare_livox_ros_driver2_manifest
+  fi
+  install_rosdeps_for_paths $(selected_third_party_paths)
   build_third_party_workspace
 
   # third_party overlayを重ねてからプロジェクトworkspaceのrosdep解決とビルドを行う。
-  set +u
-  source "${THIRD_PARTY_WS}/install/setup.bash"
-  set -u
+  if [[ -f "${THIRD_PARTY_WS}/install/setup.bash" ]]; then
+    set +u
+    source "${THIRD_PARTY_WS}/install/setup.bash"
+    set -u
+  fi
   install_rosdeps_for_workspace "${ROS_WS}/src"
   build_project_workspace
 }

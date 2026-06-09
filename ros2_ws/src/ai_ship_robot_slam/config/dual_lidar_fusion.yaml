@@ -1,0 +1,10 @@
+dual_lidar_pointcloud_fusion_node:
+  ros__parameters:
+    left_points_topic: /left_lidar/points
+    right_points_topic: /right_lidar/points
+    output_points_topic: /slam/points
+    target_frame: base_link
+    sync_queue_size: 10
+    max_stamp_delta_sec: 0.05
+    tf_timeout_sec: 0.1
+    voxel_leaf_size: 0.03
