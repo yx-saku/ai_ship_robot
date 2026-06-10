@@ -1,0 +1,236 @@
+未解消のwarning
+gtsam_points / glim build時:
+Including gtsam_points/util/running_statistics.hpp is deprecated
+→ 動作には影響しない可能性が高いですが、方針上は解消対象です。
+
+GLIM起動時:
+param sub_mapping/submap_target_num_points not found
+param global_mapping/submap_voxel_resolution_max not found
+param global_mapping/submap_voxel_resolution_dmin not found
+param global_mapping/submap_voxel_resolution_dmax not found
+→ config_sub_mapping_cpu.json / config_global_mapping_cpu.json に明示値を追加すれば解消できます。
+
+GLIM起動時:
+per-point timestamps are not given!!
+use pseudo per-point timestamps based on the order of points
+→ global_shutter_lidar: true だけでは抑制できていません。融合点群にper-point time fieldを付与するか、GLIM側設定/入力形式を見直す必要があります。
+
+Gazebo起動時:
+Failed to create secure directory (/home/ros/.config/pulse): Permission denied
+ALSA ... Could not open playback device
+→ 音声系なのでSLAMには影響しにくいですが、方針上は環境変数やPulse設定で抑制した方がよいです。
+
+
+
+
+
+
+
+
+
+
+
+$ ./scripts/app/sim/run_simulation.sh --lite --build
+$ ./scripts/app/run_glim_slam.sh
+-- main project dir: /workspaces/ai_ship_robot/third_party/vendor/Livox-SDK2
+-- main project dir: /workspaces/ai_ship_robot/third_party/vendor/Livox-SDK2/samples
+-- Configuring done
+-- Generating done
+-- Build files have been written to: /workspaces/ai_ship_robot/third_party/vendor/Livox-SDK2/build
+Consolidate compiler generated dependencies of target livox_lidar_sdk_shared
+Consolidate compiler generated dependencies of target livox_lidar_sdk_static
+[ 63%] Built target livox_lidar_sdk_static
+[ 84%] Built target livox_lidar_sdk_shared
+Consolidate compiler generated dependencies of target livox_lidar_quick_start
+Consolidate compiler generated dependencies of target logger
+Consolidate compiler generated dependencies of target multi_lidars_upgrade
+Consolidate compiler generated dependencies of target debug_point_cloud
+Consolidate compiler generated dependencies of target lidar_cmd_observer
+Consolidate compiler generated dependencies of target livox_lidar_rmc_time_sync
+[ 88%] Built target livox_lidar_quick_start
+[ 89%] Built target debug_point_cloud
+[ 91%] Built target multi_lidars_upgrade
+[ 95%] Built target livox_lidar_rmc_time_sync
+[ 97%] Built target lidar_cmd_observer
+[100%] Built target logger
+-- Install configuration: "Release"
+-- Installing: /usr/local/lib/liblivox_lidar_sdk_static.a
+-- Installing: /usr/local/include/livox_lidar_def.h
+-- Installing: /usr/local/include/livox_lidar_api.h
+-- Installing: /usr/local/include/livox_lidar_cfg.h
+-- Installing: /usr/local/lib/liblivox_lidar_sdk_shared.so
+Skip rosdep update because cache is fresh. Set ROSDEP_UPDATE_MAX_AGE_SECONDS=0 to force update.
+#All required rosdeps installed successfully
+Starting >>> livox_ros_driver2
+Finished <<< livox_ros_driver2 [0.22s]                    
+Starting >>> ros2_livox_simulation
+Finished <<< ros2_livox_simulation [0.08s]                  
+
+Summary: 2 packages finished [0.40s]
+Starting >>> gtsam   
+Finished <<< gtsam [0.32s]                    
+
+Summary: 1 package finished [0.40s]
+Starting >>> gtsam_points
+--- stderr: gtsam_points                               
+In file included from /workspaces/ai_ship_robot/third_party/ws/src/gtsam_points/include/gtsam_points/ann/incremental_covariance_voxelmap.hpp:6,
+                 from /workspaces/ai_ship_robot/third_party/ws/src/gtsam_points/include/gtsam_points/ann/ivox_covariance_estimation.hpp:7,
+                 from /workspaces/ai_ship_robot/third_party/ws/src/gtsam_points/src/gtsam_points/factors/integrated_ct_icp_factor.cpp:5:
+/workspaces/ai_ship_robot/third_party/ws/src/gtsam_points/include/gtsam_points/util/runnning_statistics.hpp:7:149: note: ‘#pragma message: Including gtsam_points/util/running_statistics.hpp is deprecated. Please include gtsam_points/util/running_statistics.hpp instead.’
+    7 | #pragma message("Including gtsam_points/util/running_statistics.hpp is deprecated. Please include gtsam_points/util/running_statistics.hpp instead.")
+      |                                                                                                                                                     ^
+In file included from /workspaces/ai_ship_robot/third_party/ws/src/gtsam_points/include/gtsam_points/ann/incremental_covariance_voxelmap.hpp:6,
+                 from /workspaces/ai_ship_robot/third_party/ws/src/gtsam_points/include/gtsam_points/ann/ivox_covariance_estimation.hpp:7,
+                 from /workspaces/ai_ship_robot/third_party/ws/src/gtsam_points/src/gtsam_points/factors/integrated_icp_factor.cpp:5:
+/workspaces/ai_ship_robot/third_party/ws/src/gtsam_points/include/gtsam_points/util/runnning_statistics.hpp:7:149: note: ‘#pragma message: Including gtsam_points/util/running_statistics.hpp is deprecated. Please include gtsam_points/util/running_statistics.hpp instead.’
+    7 | #pragma message("Including gtsam_points/util/running_statistics.hpp is deprecated. Please include gtsam_points/util/running_statistics.hpp instead.")
+      |                                                                                                                                                     ^
+In file included from /workspaces/ai_ship_robot/third_party/ws/src/gtsam_points/include/gtsam_points/ann/incremental_covariance_voxelmap.hpp:6,
+                 from /workspaces/ai_ship_robot/third_party/ws/src/gtsam_points/include/gtsam_points/ann/ivox_covariance_estimation.hpp:7,
+                 from /workspaces/ai_ship_robot/third_party/ws/src/gtsam_points/src/gtsam_points/factors/integrated_gicp_factor.cpp:5:
+/workspaces/ai_ship_robot/third_party/ws/src/gtsam_points/include/gtsam_points/util/runnning_statistics.hpp:7:149: note: ‘#pragma message: Including gtsam_points/util/running_statistics.hpp is deprecated. Please include gtsam_points/util/running_statistics.hpp instead.’
+    7 | #pragma message("Including gtsam_points/util/running_statistics.hpp is deprecated. Please include gtsam_points/util/running_statistics.hpp instead.")
+      |                                                                                                                                                     ^
+In file included from /workspaces/ai_ship_robot/third_party/ws/src/gtsam_points/include/gtsam_points/ann/incremental_covariance_voxelmap.hpp:6,
+                 from /workspaces/ai_ship_robot/third_party/ws/src/gtsam_points/include/gtsam_points/ann/ivox_covariance_estimation.hpp:7,
+                 from /workspaces/ai_ship_robot/third_party/ws/src/gtsam_points/src/gtsam_points/factors/integrated_ct_gicp_factor.cpp:5:
+/workspaces/ai_ship_robot/third_party/ws/src/gtsam_points/include/gtsam_points/util/runnning_statistics.hpp:7:149: note: ‘#pragma message: Including gtsam_points/util/running_statistics.hpp is deprecated. Please include gtsam_points/util/running_statistics.hpp instead.’
+    7 | #pragma message("Including gtsam_points/util/running_statistics.hpp is deprecated. Please include gtsam_points/util/running_statistics.hpp instead.")
+      |                                                                                                                                                     ^
+---
+Finished <<< gtsam_points [28.0s]
+
+Summary: 1 package finished [28.1s]
+  1 package had stderr output: gtsam_points
+Starting >>> glim    
+[Processing: glim]                              
+--- stderr: glim                             
+In file included from /workspaces/ai_ship_robot/third_party/ws/install/gtsam_points/include/gtsam_points/ann/incremental_covariance_voxelmap.hpp:6,
+                 from /workspaces/ai_ship_robot/third_party/ws/install/gtsam_points/include/gtsam_points/ann/ivox_covariance_estimation.hpp:7,
+                 from /workspaces/ai_ship_robot/third_party/ws/src/glim/src/glim/odometry/odometry_estimation_ct.cpp:12:
+/workspaces/ai_ship_robot/third_party/ws/install/gtsam_points/include/gtsam_points/util/runnning_statistics.hpp:7:149: note: ‘#pragma message: Including gtsam_points/util/running_statistics.hpp is deprecated. Please include gtsam_points/util/running_statistics.hpp instead.’
+    7 | #pragma message("Including gtsam_points/util/running_statistics.hpp is deprecated. Please include gtsam_points/util/running_statistics.hpp instead.")
+      |                                                                                                                                                     ^
+In file included from /workspaces/ai_ship_robot/third_party/ws/src/glim/include/glim/common/imu_validation.hpp:6,
+                 from /workspaces/ai_ship_robot/third_party/ws/src/glim/src/glim/odometry/odometry_estimation_imu.cpp:16:
+/workspaces/ai_ship_robot/third_party/ws/install/gtsam_points/include/gtsam_points/util/runnning_statistics.hpp:7:149: note: ‘#pragma message: Including gtsam_points/util/running_statistics.hpp is deprecated. Please include gtsam_points/util/running_statistics.hpp instead.’
+    7 | #pragma message("Including gtsam_points/util/running_statistics.hpp is deprecated. Please include gtsam_points/util/running_statistics.hpp instead.")
+      |                                                                                                                                                     ^
+---
+Finished <<< glim [30.2s]
+
+Summary: 1 package finished [30.3s]
+  1 package had stderr output: glim
+Starting >>> glim_ros
+Finished <<< glim_ros [1.23s]                    
+
+Summary: 1 package finished [1.30s]
+#All required rosdeps installed successfully
+Starting >>> ai_ship_robot_description
+Starting >>> ai_ship_robot_slam
+Finished <<< ai_ship_robot_description [0.06s]
+Starting >>> ai_ship_robot_gazebo
+Finished <<< ai_ship_robot_slam [0.09s]
+Finished <<< ai_ship_robot_gazebo [0.06s]                  
+
+Summary: 3 packages finished [0.22s]
+Updated shell environment setup: /home/ros/.bashrc
+Updated shell environment script: /home/ros/.ai_ship_robot_environment.bash
+If the build reports missing apt/CMake dependencies, rerun scripts/install/install.sh and, for simulation, scripts/install/install_sim.sh.
+[INFO] [launch]: All log files can be found below /home/ros/.ros/log/2026-06-09-12-01-54-924032-yokoyama-main-3018
+[INFO] [launch]: Default logging verbosity is set to INFO
+[INFO] [gzserver-1]: process started with pid [3020]
+[INFO] [robot_state_publisher-2]: process started with pid [3022]
+[INFO] [spawn_entity.py-3]: process started with pid [3024]
+[INFO] [dual_lidar_pointcloud_fusion_node-4]: process started with pid [3026]
+[INFO] [glim_rosnode-5]: process started with pid [3028]
+[INFO] [rviz2-6]: process started with pid [3030]
+[glim_rosnode-5] [2026-06-09 12:01:55.178] [glim] [info] config_path: /workspaces/ai_ship_robot/ros2_ws/install/ai_ship_robot_slam/share/ai_ship_robot_slam/config/glim_sim
+[glim_rosnode-5] [2026-06-09 12:01:55.178] [glim] [info] load libodometry_estimation_cpu.so
+[glim_rosnode-5] [2026-06-09 12:01:55.179] [glim] [info] load libsub_mapping.so
+[glim_rosnode-5] [2026-06-09 12:01:55.179] [glim] [warning] param sub_mapping/submap_target_num_points not found
+[glim_rosnode-5] [2026-06-09 12:01:55.179] [glim] [warning] use default_value=-1
+[glim_rosnode-5] [2026-06-09 12:01:55.179] [glim] [info] load libglobal_mapping.so
+[glim_rosnode-5] [2026-06-09 12:01:55.180] [glim] [warning] param global_mapping/submap_voxel_resolution_max not found
+[glim_rosnode-5] [2026-06-09 12:01:55.180] [glim] [warning] use default_value=0.5
+[glim_rosnode-5] [2026-06-09 12:01:55.180] [glim] [warning] param global_mapping/submap_voxel_resolution_dmin not found
+[glim_rosnode-5] [2026-06-09 12:01:55.180] [glim] [warning] use default_value=5
+[glim_rosnode-5] [2026-06-09 12:01:55.180] [glim] [warning] param global_mapping/submap_voxel_resolution_dmax not found
+[glim_rosnode-5] [2026-06-09 12:01:55.180] [glim] [warning] use default_value=20
+[glim_rosnode-5] [2026-06-09 12:01:55.180] [glim] [info] load librviz_viewer.so
+[robot_state_publisher-2] [INFO] [1780974115.183738365] [robot_state_publisher]: got segment arm_robot_body_link
+[robot_state_publisher-2] [INFO] [1780974115.183878287] [robot_state_publisher]: got segment arm_robot_forearm_link
+[robot_state_publisher-2] [INFO] [1780974115.183886724] [robot_state_publisher]: got segment arm_robot_upper_arm_link
+[robot_state_publisher-2] [INFO] [1780974115.183889155] [robot_state_publisher]: got segment arm_robot_wrist_link
+[robot_state_publisher-2] [INFO] [1780974115.183891326] [robot_state_publisher]: got segment base_footprint
+[robot_state_publisher-2] [INFO] [1780974115.183893362] [robot_state_publisher]: got segment base_link
+[robot_state_publisher-2] [INFO] [1780974115.183895325] [robot_state_publisher]: got segment imu_link
+[robot_state_publisher-2] [INFO] [1780974115.183897136] [robot_state_publisher]: got segment left_front_wheel_link
+[robot_state_publisher-2] [INFO] [1780974115.183899065] [robot_state_publisher]: got segment left_lidar_link
+[robot_state_publisher-2] [INFO] [1780974115.183901012] [robot_state_publisher]: got segment left_rear_wheel_link
+[robot_state_publisher-2] [INFO] [1780974115.183902856] [robot_state_publisher]: got segment right_front_wheel_link
+[robot_state_publisher-2] [INFO] [1780974115.183904738] [robot_state_publisher]: got segment right_lidar_link
+[robot_state_publisher-2] [INFO] [1780974115.183906633] [robot_state_publisher]: got segment right_rear_wheel_link
+[dual_lidar_pointcloud_fusion_node-4] [INFO] [1780974115.193679505] [dual_lidar_pointcloud_fusion_node]: Fuse point clouds: left=/left_lidar/points right=/right_lidar/points output=/slam/points target_frame=base_link
+[spawn_entity.py-3] [INFO] [1780974115.445294598] [spawn_entity]: Spawn Entity started
+[spawn_entity.py-3] [INFO] [1780974115.445563293] [spawn_entity]: Loading entity published on topic robot_description
+[spawn_entity.py-3] [INFO] [1780974115.447991141] [spawn_entity]: Waiting for entity xml on robot_description
+[spawn_entity.py-3] [INFO] [1780974115.460304328] [spawn_entity]: Waiting for service /spawn_entity, timeout = 30
+[spawn_entity.py-3] [INFO] [1780974115.460502688] [spawn_entity]: Waiting for service /spawn_entity
+[rviz2-6] [INFO] [1780974115.492087619] [rviz2]: Stereo is NOT SUPPORTED
+[rviz2-6] [INFO] [1780974115.492171601] [rviz2]: OpenGl version: 4.5 (GLSL 4.5)
+[rviz2-6] [INFO] [1780974115.536200186] [rviz2]: Stereo is NOT SUPPORTED
+[gzserver-1] ALSA lib confmisc.c:855:(parse_card) cannot find card '0'
+[gzserver-1] ALSA lib conf.c:5178:(_snd_config_evaluate) function snd_func_card_inum returned error: No such file or directory
+[gzserver-1] ALSA lib confmisc.c:422:(snd_func_concat) error evaluating strings
+[gzserver-1] ALSA lib conf.c:5178:(_snd_config_evaluate) function snd_func_concat returned error: No such file or directory
+[gzserver-1] ALSA lib confmisc.c:1334:(snd_func_refer) error evaluating name
+[gzserver-1] ALSA lib conf.c:5178:(_snd_config_evaluate) function snd_func_refer returned error: No such file or directory
+[gzserver-1] ALSA lib conf.c:5701:(snd_config_expand) Evaluate error: No such file or directory
+[gzserver-1] ALSA lib pcm.c:2664:(snd_pcm_open_noupdate) Unknown PCM default
+[gzserver-1] AL lib: (EE) ALCplaybackAlsa_open: Could not open playback device 'default': No such file or directory
+[spawn_entity.py-3] [INFO] [1780974115.969549541] [spawn_entity]: Calling service /spawn_entity
+[gzserver-1] [INFO] [1780974116.136688094] [gazebo_ros_imu_sensor]: <initial_orientation_as_reference> is unset, using default value of false to comply with REP 145 (world as orientation reference)
+[gzserver-1] [INFO] [1780974116.217440033] [LivoxPointsPlugin]: load csv file name: /workspaces/ai_ship_robot/third_party/ws/install/ros2_livox_simulation/share/ros2_livox_simulation/scan_mode/mid360.csv
+[gzserver-1] cannot convert str:
+[gzserver-1] data size:800000
+[gzserver-1] [INFO] [1780974116.937019940] [LivoxPointsPlugin]: custom topic name: /left_lidar/custom
+[gzserver-1] [INFO] [1780974116.937046478] [LivoxPointsPlugin]: pointcloud2 topic name: /left_lidar/points
+[gzserver-1] [INFO] [1780974116.937048845] [LivoxPointsPlugin]: ros topic name: left_livox
+[gzserver-1] [INFO] [1780974116.984127858] [LivoxPointsPlugin]: scan info size: 800000
+[gzserver-1] [INFO] [1780974116.985143747] [LivoxPointsPlugin]: sample: 40000
+[gzserver-1] [INFO] [1780974116.985171132] [LivoxPointsPlugin]: downsample: 4
+[spawn_entity.py-3] [INFO] [1780974118.066350294] [spawn_entity]: Spawn status: SpawnEntity: Successfully spawned entity [ai_ship_robot_glim_1115]
+[gzserver-1] [INFO] [1780974118.071460919] [LivoxPointsPlugin]: load csv file name: /workspaces/ai_ship_robot/third_party/ws/install/ros2_livox_simulation/share/ros2_livox_simulation/scan_mode/mid360.csv
+[INFO] [spawn_entity.py-3]: process has finished cleanly [pid 3024]
+[gzserver-1] cannot convert str:
+[gzserver-1] data size:800000
+[gzserver-1] [INFO] [1780974118.779855472] [LivoxPointsPlugin]: custom topic name: /right_lidar/custom
+[gzserver-1] [INFO] [1780974118.779876845] [LivoxPointsPlugin]: pointcloud2 topic name: /right_lidar/points
+[gzserver-1] [INFO] [1780974118.779878886] [LivoxPointsPlugin]: ros topic name: right_livox
+[gzserver-1] [INFO] [1780974118.822663644] [LivoxPointsPlugin]: scan info size: 800000
+[gzserver-1] [INFO] [1780974118.822996008] [LivoxPointsPlugin]: sample: 40000
+[gzserver-1] [INFO] [1780974118.823002345] [LivoxPointsPlugin]: downsample: 4
+[gzserver-1] [INFO] [1780974120.084376028] [gazebo_ros_planar_move]: Subscribed to [/cmd_vel]
+[gzserver-1] [INFO] [1780974120.086134763] [gazebo_ros_planar_move]: Advertise odometry on [/odom]
+[gzserver-1] [INFO] [1780974120.089104929] [gazebo_ros_planar_move]: Publishing odom transforms between [odom] and [base_footprint]
+[glim_rosnode-5] [2026-06-09 12:02:00.105] [glim] [warning] per-point timestamps are not given!!
+[glim_rosnode-5] [2026-06-09 12:02:00.105] [glim] [warning] use pseudo per-point timestamps based on the order of points
+[rviz2-6] [INFO] [1780974124.459774446] [slam_rviz2]: Message Filter dropping message: frame 'base_link' at time 1.400 for reason 'discarding message because the queue is full'
+[rviz2-6] [INFO] [1780974124.459936898] [slam_rviz2]: Message Filter dropping message: frame 'odom' at time 1.996 for reason 'discarding message because the queue is full'
+[glim_rosnode-5] [2026-06-09 12:02:05.566] [odom] [info] estimate initial IMU state
+[glim_rosnode-5] Initial error: 2189.15, values: 90
+[glim_rosnode-5] iter      cost      cost_change    lambda  success iter_time
+[glim_rosnode-5]    0  1.786332e-01    2.19e+03    1.00e-05     1    4.94e-04
+[glim_rosnode-5]    1  1.785277e-01    1.06e-04    1.00e-06     1    4.91e-04
+[glim_rosnode-5]    2  1.785277e-01   -1.64e-11    1.00e-07     1    4.67e-04
+[glim_rosnode-5] [2026-06-09 12:02:05.571] [odom] [info] initial IMU state estimation result
+[glim_rosnode-5] [2026-06-09 12:02:05.571] [odom] [info] T_world_imu=se3(0.000141,0.000219,-0.057565,-0.000061,-0.000022,-0.000057,1.000000)
+[glim_rosnode-5] [2026-06-09 12:02:05.571] [odom] [info] v_world_imu=vec(-0.000401,0.000290,0.000789)
+[glim_rosnode-5] [2026-06-09 12:02:05.571] [odom] [info] imu_bias=vec(0.000028,-0.000021,-0.000014,-0.000076,-0.000091,0.000022)
+[rviz2-6] [INFO] [1780974129.195293982] [slam_rviz2]: Message Filter dropping message: frame 'odom' at time 4.496 for reason 'discarding message because the queue is full'
+[rviz2-6] [INFO] [1780974133.867595735] [slam_rviz2]: Message Filter dropping message: frame 'odom' at time 6.996 for reason 'discarding message because the queue is full'
+[rviz2-6] [INFO] [1780974138.667405779] [slam_rviz2]: Message Filter dropping message: frame 'odom' at time 9.496 for reason 'discarding message because the queue is full'
+[rviz2-6] [INFO] [1780974143.032380963] [slam_rviz2]: Message Filter dropping message: frame 'base_link' at time 2.200 for reason 'the timestamp on the message is earlier than all the data in the transform cache'
+[rviz2-6] [INFO] [1780974143.435226728] [slam_rviz2]: Message Filter dropping message: frame 'odom' at time 11.996 for reason 'discarding message because the queue is full'
+[rviz2-6] [INFO] [1780974148.171449952] [slam_rviz2]: Message Filter dropping message: frame 'odom' at time 14.496 for reason 'discarding message because the queue is full'
