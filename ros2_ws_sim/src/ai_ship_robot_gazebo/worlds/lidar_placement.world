@@ -1,0 +1,665 @@
+<?xml version="1.0" ?>
+<sdf version="1.6">
+  <world name="lidar_placement">
+    <gravity>0 0 -9.81</gravity>
+    <magnetic_field>6.0e-6 2.3e-5 -4.2e-5</magnetic_field>
+    <atmosphere type="adiabatic" />
+
+    <light name="sun" type="directional">
+      <cast_shadows>true</cast_shadows>
+      <pose>0 0 10 0 0 0</pose>
+      <diffuse>0.8 0.8 0.8 1</diffuse>
+      <specular>0.2 0.2 0.2 1</specular>
+      <attenuation>
+        <range>1000</range>
+        <constant>0.9</constant>
+        <linear>0.01</linear>
+        <quadratic>0.001</quadratic>
+      </attenuation>
+      <direction>-0.5 0.1 -0.9</direction>
+    </light>
+
+    <model name="ground_with_defects">
+      <static>true</static>
+      <!-- 穴部分だけ床タイルを抜き、LiDAR rayが地面に当たらない領域を作る。 -->
+      <link name="ground_tiles">
+        <collision name="south_area_collision">
+          <pose>0 -3.125 -0.01 0 0 0</pose>
+          <geometry>
+            <box><size>12.0 3.75 0.02</size></box>
+          </geometry>
+        </collision>
+        <visual name="south_area_visual">
+          <pose>0 -3.125 -0.01 0 0 0</pose>
+          <geometry>
+            <box><size>12.0 3.75 0.02</size></box>
+          </geometry>
+          <material>
+            <ambient>0.30 0.30 0.30 1</ambient>
+            <diffuse>0.55 0.55 0.55 1</diffuse>
+          </material>
+        </visual>
+        <collision name="center_area_collision">
+          <pose>0 0 -0.01 0 0 0</pose>
+          <geometry>
+            <box><size>12.0 2.30 0.02</size></box>
+          </geometry>
+        </collision>
+        <visual name="center_area_visual">
+          <pose>0 0 -0.01 0 0 0</pose>
+          <geometry>
+            <box><size>12.0 2.30 0.02</size></box>
+          </geometry>
+          <material>
+            <ambient>0.30 0.30 0.30 1</ambient>
+            <diffuse>0.55 0.55 0.55 1</diffuse>
+          </material>
+        </visual>
+        <collision name="north_area_collision">
+          <pose>0 3.375 -0.01 0 0 0</pose>
+          <geometry>
+            <box><size>12.0 3.25 0.02</size></box>
+          </geometry>
+        </collision>
+        <visual name="north_area_visual">
+          <pose>0 3.375 -0.01 0 0 0</pose>
+          <geometry>
+            <box><size>12.0 3.25 0.02</size></box>
+          </geometry>
+          <material>
+            <ambient>0.30 0.30 0.30 1</ambient>
+            <diffuse>0.55 0.55 0.55 1</diffuse>
+          </material>
+        </visual>
+
+        <!-- 右側の溝帯だけ床面を抜き、溝の幅に応じて残る床面を補う。 -->
+        <collision name="south_hole_row_left_collision">
+          <pose>-2.525 -1.2 -0.01 0 0 0</pose>
+          <geometry><box><size>6.95 0.10 0.02</size></box></geometry>
+        </collision>
+        <visual name="south_hole_row_left_visual">
+          <pose>-2.525 -1.2 -0.01 0 0 0</pose>
+          <geometry><box><size>6.95 0.10 0.02</size></box></geometry>
+          <material><ambient>0.30 0.30 0.30 1</ambient><diffuse>0.55 0.55 0.55 1</diffuse></material>
+        </visual>
+        <collision name="south_hole_row_mid_1_collision">
+          <pose>1.55 -1.2 -0.01 0 0 0</pose>
+          <geometry><box><size>0.20 0.10 0.02</size></box></geometry>
+        </collision>
+        <visual name="south_hole_row_mid_1_visual">
+          <pose>1.55 -1.2 -0.01 0 0 0</pose>
+          <geometry><box><size>0.20 0.10 0.02</size></box></geometry>
+          <material><ambient>0.30 0.30 0.30 1</ambient><diffuse>0.55 0.55 0.55 1</diffuse></material>
+        </visual>
+        <collision name="south_hole_row_mid_2_collision">
+          <pose>2.25 -1.2 -0.01 0 0 0</pose>
+          <geometry><box><size>0.20 0.10 0.02</size></box></geometry>
+        </collision>
+        <visual name="south_hole_row_mid_2_visual">
+          <pose>2.25 -1.2 -0.01 0 0 0</pose>
+          <geometry><box><size>0.20 0.10 0.02</size></box></geometry>
+          <material><ambient>0.30 0.30 0.30 1</ambient><diffuse>0.55 0.55 0.55 1</diffuse></material>
+        </visual>
+        <collision name="south_hole_row_right_collision">
+          <pose>4.425 -1.2 -0.01 0 0 0</pose>
+          <geometry><box><size>3.15 0.10 0.02</size></box></geometry>
+        </collision>
+        <visual name="south_hole_row_right_visual">
+          <pose>4.425 -1.2 -0.01 0 0 0</pose>
+          <geometry><box><size>3.15 0.10 0.02</size></box></geometry>
+          <material><ambient>0.30 0.30 0.30 1</ambient><diffuse>0.55 0.55 0.55 1</diffuse></material>
+        </visual>
+        <collision name="groove_50mm_lower_shoulder_collision">
+          <pose>1.9 -1.2375 -0.01 0 0 0</pose>
+          <geometry><box><size>0.50 0.025 0.02</size></box></geometry>
+        </collision>
+        <visual name="groove_50mm_lower_shoulder_visual">
+          <pose>1.9 -1.2375 -0.01 0 0 0</pose>
+          <geometry><box><size>0.50 0.025 0.02</size></box></geometry>
+          <material><ambient>0.30 0.30 0.30 1</ambient><diffuse>0.55 0.55 0.55 1</diffuse></material>
+        </visual>
+        <collision name="groove_50mm_upper_shoulder_collision">
+          <pose>1.9 -1.1625 -0.01 0 0 0</pose>
+          <geometry><box><size>0.50 0.025 0.02</size></box></geometry>
+        </collision>
+        <visual name="groove_50mm_upper_shoulder_visual">
+          <pose>1.9 -1.1625 -0.01 0 0 0</pose>
+          <geometry><box><size>0.50 0.025 0.02</size></box></geometry>
+          <material><ambient>0.30 0.30 0.30 1</ambient><diffuse>0.55 0.55 0.55 1</diffuse></material>
+        </visual>
+        <collision name="groove_30mm_lower_shoulder_collision">
+          <pose>2.6 -1.2325 -0.01 0 0 0</pose>
+          <geometry><box><size>0.50 0.035 0.02</size></box></geometry>
+        </collision>
+        <visual name="groove_30mm_lower_shoulder_visual">
+          <pose>2.6 -1.2325 -0.01 0 0 0</pose>
+          <geometry><box><size>0.50 0.035 0.02</size></box></geometry>
+          <material><ambient>0.30 0.30 0.30 1</ambient><diffuse>0.55 0.55 0.55 1</diffuse></material>
+        </visual>
+        <collision name="groove_30mm_upper_shoulder_collision">
+          <pose>2.6 -1.1675 -0.01 0 0 0</pose>
+          <geometry><box><size>0.50 0.035 0.02</size></box></geometry>
+        </collision>
+        <visual name="groove_30mm_upper_shoulder_visual">
+          <pose>2.6 -1.1675 -0.01 0 0 0</pose>
+          <geometry><box><size>0.50 0.035 0.02</size></box></geometry>
+          <material><ambient>0.30 0.30 0.30 1</ambient><diffuse>0.55 0.55 0.55 1</diffuse></material>
+        </visual>
+
+        <!-- 左側の穴列は2列にまとめ、右側の溝と干渉しない位置へ寄せる。 -->
+        <collision name="north_hole_row_left_collision">
+          <pose>-2.425 1.2 -0.01 0 0 0</pose>
+          <geometry><box><size>7.15 0.10 0.02</size></box></geometry>
+        </collision>
+        <visual name="north_hole_row_left_visual">
+          <pose>-2.425 1.2 -0.01 0 0 0</pose>
+          <geometry><box><size>7.15 0.10 0.02</size></box></geometry>
+          <material><ambient>0.30 0.30 0.30 1</ambient><diffuse>0.55 0.55 0.55 1</diffuse></material>
+        </visual>
+        <collision name="north_hole_row_mid_1_collision">
+          <pose>1.5125 1.2 -0.01 0 0 0</pose>
+          <geometry><box><size>0.525 0.10 0.02</size></box></geometry>
+        </collision>
+        <visual name="north_hole_row_mid_1_visual">
+          <pose>1.5125 1.2 -0.01 0 0 0</pose>
+          <geometry><box><size>0.525 0.10 0.02</size></box></geometry>
+          <material><ambient>0.30 0.30 0.30 1</ambient><diffuse>0.55 0.55 0.55 1</diffuse></material>
+        </visual>
+        <collision name="north_hole_row_mid_2_collision">
+          <pose>2.105 1.2 -0.01 0 0 0</pose>
+          <geometry><box><size>0.56 0.10 0.02</size></box></geometry>
+        </collision>
+        <visual name="north_hole_row_mid_2_visual">
+          <pose>2.105 1.2 -0.01 0 0 0</pose>
+          <geometry><box><size>0.56 0.10 0.02</size></box></geometry>
+          <material><ambient>0.30 0.30 0.30 1</ambient><diffuse>0.55 0.55 0.55 1</diffuse></material>
+        </visual>
+        <collision name="north_hole_row_right_collision">
+          <pose>4.2075 1.2 -0.01 0 0 0</pose>
+          <geometry><box><size>3.585 0.10 0.02</size></box></geometry>
+        </collision>
+        <visual name="north_hole_row_right_visual">
+          <pose>4.2075 1.2 -0.01 0 0 0</pose>
+          <geometry><box><size>3.585 0.10 0.02</size></box></geometry>
+          <material><ambient>0.30 0.30 0.30 1</ambient><diffuse>0.55 0.55 0.55 1</diffuse></material>
+        </visual>
+        <collision name="open_square_hole_50mm_lower_shoulder_collision">
+          <pose>1.8 1.1625 -0.01 0 0 0</pose>
+          <geometry><box><size>0.05 0.025 0.02</size></box></geometry>
+        </collision>
+        <visual name="open_square_hole_50mm_lower_shoulder_visual">
+          <pose>1.8 1.1625 -0.01 0 0 0</pose>
+          <geometry><box><size>0.05 0.025 0.02</size></box></geometry>
+          <material><ambient>0.30 0.30 0.30 1</ambient><diffuse>0.55 0.55 0.55 1</diffuse></material>
+        </visual>
+        <collision name="open_square_hole_50mm_upper_shoulder_collision">
+          <pose>1.8 1.2375 -0.01 0 0 0</pose>
+          <geometry><box><size>0.05 0.025 0.02</size></box></geometry>
+        </collision>
+        <visual name="open_square_hole_50mm_upper_shoulder_visual">
+          <pose>1.8 1.2375 -0.01 0 0 0</pose>
+          <geometry><box><size>0.05 0.025 0.02</size></box></geometry>
+          <material><ambient>0.30 0.30 0.30 1</ambient><diffuse>0.55 0.55 0.55 1</diffuse></material>
+        </visual>
+        <collision name="open_square_hole_30mm_lower_shoulder_collision">
+          <pose>2.4 1.1675 -0.01 0 0 0</pose>
+          <geometry><box><size>0.03 0.035 0.02</size></box></geometry>
+        </collision>
+        <visual name="open_square_hole_30mm_lower_shoulder_visual">
+          <pose>2.4 1.1675 -0.01 0 0 0</pose>
+          <geometry><box><size>0.03 0.035 0.02</size></box></geometry>
+          <material><ambient>0.30 0.30 0.30 1</ambient><diffuse>0.55 0.55 0.55 1</diffuse></material>
+        </visual>
+        <collision name="open_square_hole_30mm_upper_shoulder_collision">
+          <pose>2.4 1.2325 -0.01 0 0 0</pose>
+          <geometry><box><size>0.03 0.035 0.02</size></box></geometry>
+        </collision>
+        <visual name="open_square_hole_30mm_upper_shoulder_visual">
+          <pose>2.4 1.2325 -0.01 0 0 0</pose>
+          <geometry><box><size>0.03 0.035 0.02</size></box></geometry>
+          <material><ambient>0.30 0.30 0.30 1</ambient><diffuse>0.55 0.55 0.55 1</diffuse></material>
+        </visual>
+        <collision name="left_hole_between_rows_collision">
+          <pose>0 1.45 -0.01 0 0 0</pose>
+          <geometry><box><size>12.0 0.40 0.02</size></box></geometry>
+        </collision>
+        <visual name="left_hole_between_rows_visual">
+          <pose>0 1.45 -0.01 0 0 0</pose>
+          <geometry><box><size>12.0 0.40 0.02</size></box></geometry>
+          <material><ambient>0.30 0.30 0.30 1</ambient><diffuse>0.55 0.55 0.55 1</diffuse></material>
+        </visual>
+        <collision name="left_lined_hole_row_left_collision">
+          <pose>-2.425 1.7 -0.01 0 0 0</pose>
+          <geometry><box><size>7.15 0.10 0.02</size></box></geometry>
+        </collision>
+        <visual name="left_lined_hole_row_left_visual">
+          <pose>-2.425 1.7 -0.01 0 0 0</pose>
+          <geometry><box><size>7.15 0.10 0.02</size></box></geometry>
+          <material><ambient>0.30 0.30 0.30 1</ambient><diffuse>0.55 0.55 0.55 1</diffuse></material>
+        </visual>
+        <collision name="left_lined_hole_row_mid_1_collision">
+          <pose>1.5125 1.7 -0.01 0 0 0</pose>
+          <geometry><box><size>0.525 0.10 0.02</size></box></geometry>
+        </collision>
+        <visual name="left_lined_hole_row_mid_1_visual">
+          <pose>1.5125 1.7 -0.01 0 0 0</pose>
+          <geometry><box><size>0.525 0.10 0.02</size></box></geometry>
+          <material><ambient>0.30 0.30 0.30 1</ambient><diffuse>0.55 0.55 0.55 1</diffuse></material>
+        </visual>
+        <collision name="left_lined_hole_row_mid_2_collision">
+          <pose>2.105 1.7 -0.01 0 0 0</pose>
+          <geometry><box><size>0.56 0.10 0.02</size></box></geometry>
+        </collision>
+        <visual name="left_lined_hole_row_mid_2_visual">
+          <pose>2.105 1.7 -0.01 0 0 0</pose>
+          <geometry><box><size>0.56 0.10 0.02</size></box></geometry>
+          <material><ambient>0.30 0.30 0.30 1</ambient><diffuse>0.55 0.55 0.55 1</diffuse></material>
+        </visual>
+        <collision name="left_lined_hole_row_right_collision">
+          <pose>4.2075 1.7 -0.01 0 0 0</pose>
+          <geometry><box><size>3.585 0.10 0.02</size></box></geometry>
+        </collision>
+        <visual name="left_lined_hole_row_right_visual">
+          <pose>4.2075 1.7 -0.01 0 0 0</pose>
+          <geometry><box><size>3.585 0.10 0.02</size></box></geometry>
+          <material><ambient>0.30 0.30 0.30 1</ambient><diffuse>0.55 0.55 0.55 1</diffuse></material>
+        </visual>
+        <collision name="lined_square_hole_50mm_lower_shoulder_collision">
+          <pose>1.8 1.6625 -0.01 0 0 0</pose>
+          <geometry><box><size>0.05 0.025 0.02</size></box></geometry>
+        </collision>
+        <visual name="lined_square_hole_50mm_lower_shoulder_visual">
+          <pose>1.8 1.6625 -0.01 0 0 0</pose>
+          <geometry><box><size>0.05 0.025 0.02</size></box></geometry>
+          <material><ambient>0.30 0.30 0.30 1</ambient><diffuse>0.55 0.55 0.55 1</diffuse></material>
+        </visual>
+        <collision name="lined_square_hole_50mm_upper_shoulder_collision">
+          <pose>1.8 1.7375 -0.01 0 0 0</pose>
+          <geometry><box><size>0.05 0.025 0.02</size></box></geometry>
+        </collision>
+        <visual name="lined_square_hole_50mm_upper_shoulder_visual">
+          <pose>1.8 1.7375 -0.01 0 0 0</pose>
+          <geometry><box><size>0.05 0.025 0.02</size></box></geometry>
+          <material><ambient>0.30 0.30 0.30 1</ambient><diffuse>0.55 0.55 0.55 1</diffuse></material>
+        </visual>
+        <collision name="lined_square_hole_30mm_lower_shoulder_collision">
+          <pose>2.4 1.6675 -0.01 0 0 0</pose>
+          <geometry><box><size>0.03 0.035 0.02</size></box></geometry>
+        </collision>
+        <visual name="lined_square_hole_30mm_lower_shoulder_visual">
+          <pose>2.4 1.6675 -0.01 0 0 0</pose>
+          <geometry><box><size>0.03 0.035 0.02</size></box></geometry>
+          <material><ambient>0.30 0.30 0.30 1</ambient><diffuse>0.55 0.55 0.55 1</diffuse></material>
+        </visual>
+        <collision name="lined_square_hole_30mm_upper_shoulder_collision">
+          <pose>2.4 1.7325 -0.01 0 0 0</pose>
+          <geometry><box><size>0.03 0.035 0.02</size></box></geometry>
+        </collision>
+        <visual name="lined_square_hole_30mm_upper_shoulder_visual">
+          <pose>2.4 1.7325 -0.01 0 0 0</pose>
+          <geometry><box><size>0.03 0.035 0.02</size></box></geometry>
+          <material><ambient>0.30 0.30 0.30 1</ambient><diffuse>0.55 0.55 0.55 1</diffuse></material>
+        </visual>
+      </link>
+
+      <!-- 右側には長辺500mm、深さ30mmの溝を3種類配置する。 -->
+      <link name="groove_100mm">
+        <pose>1.2 -1.2 0 0 0 0</pose>
+        <collision name="bottom_collision"><pose>0 0 -0.035 0 0 0</pose><geometry><box><size>0.50 0.10 0.01</size></box></geometry></collision>
+        <visual name="bottom_visual"><pose>0 0 -0.035 0 0 0</pose><geometry><box><size>0.50 0.10 0.01</size></box></geometry><material><ambient>0.12 0.12 0.12 1</ambient><diffuse>0.18 0.18 0.18 1</diffuse></material></visual>
+        <collision name="long_wall_low_collision"><pose>0 -0.045 -0.015 0 0 0</pose><geometry><box><size>0.50 0.01 0.03</size></box></geometry></collision>
+        <visual name="long_wall_low_visual"><pose>0 -0.045 -0.015 0 0 0</pose><geometry><box><size>0.50 0.01 0.03</size></box></geometry><material><ambient>0.12 0.12 0.12 1</ambient><diffuse>0.18 0.18 0.18 1</diffuse></material></visual>
+        <collision name="long_wall_high_collision"><pose>0 0.045 -0.015 0 0 0</pose><geometry><box><size>0.50 0.01 0.03</size></box></geometry></collision>
+        <visual name="long_wall_high_visual"><pose>0 0.045 -0.015 0 0 0</pose><geometry><box><size>0.50 0.01 0.03</size></box></geometry><material><ambient>0.12 0.12 0.12 1</ambient><diffuse>0.18 0.18 0.18 1</diffuse></material></visual>
+        <collision name="end_wall_front_collision"><pose>0.245 0 -0.015 0 0 0</pose><geometry><box><size>0.01 0.10 0.03</size></box></geometry></collision>
+        <visual name="end_wall_front_visual"><pose>0.245 0 -0.015 0 0 0</pose><geometry><box><size>0.01 0.10 0.03</size></box></geometry><material><ambient>0.12 0.12 0.12 1</ambient><diffuse>0.18 0.18 0.18 1</diffuse></material></visual>
+        <collision name="end_wall_back_collision"><pose>-0.245 0 -0.015 0 0 0</pose><geometry><box><size>0.01 0.10 0.03</size></box></geometry></collision>
+        <visual name="end_wall_back_visual"><pose>-0.245 0 -0.015 0 0 0</pose><geometry><box><size>0.01 0.10 0.03</size></box></geometry><material><ambient>0.12 0.12 0.12 1</ambient><diffuse>0.18 0.18 0.18 1</diffuse></material></visual>
+      </link>
+      <link name="groove_50mm">
+        <pose>1.9 -1.2 0 0 0 0</pose>
+        <collision name="bottom_collision"><pose>0 0 -0.035 0 0 0</pose><geometry><box><size>0.50 0.05 0.01</size></box></geometry></collision>
+        <visual name="bottom_visual"><pose>0 0 -0.035 0 0 0</pose><geometry><box><size>0.50 0.05 0.01</size></box></geometry><material><ambient>0.12 0.12 0.12 1</ambient><diffuse>0.18 0.18 0.18 1</diffuse></material></visual>
+        <collision name="long_wall_low_collision"><pose>0 -0.020 -0.015 0 0 0</pose><geometry><box><size>0.50 0.01 0.03</size></box></geometry></collision>
+        <visual name="long_wall_low_visual"><pose>0 -0.020 -0.015 0 0 0</pose><geometry><box><size>0.50 0.01 0.03</size></box></geometry><material><ambient>0.12 0.12 0.12 1</ambient><diffuse>0.18 0.18 0.18 1</diffuse></material></visual>
+        <collision name="long_wall_high_collision"><pose>0 0.020 -0.015 0 0 0</pose><geometry><box><size>0.50 0.01 0.03</size></box></geometry></collision>
+        <visual name="long_wall_high_visual"><pose>0 0.020 -0.015 0 0 0</pose><geometry><box><size>0.50 0.01 0.03</size></box></geometry><material><ambient>0.12 0.12 0.12 1</ambient><diffuse>0.18 0.18 0.18 1</diffuse></material></visual>
+        <collision name="end_wall_front_collision"><pose>0.245 0 -0.015 0 0 0</pose><geometry><box><size>0.01 0.05 0.03</size></box></geometry></collision>
+        <visual name="end_wall_front_visual"><pose>0.245 0 -0.015 0 0 0</pose><geometry><box><size>0.01 0.05 0.03</size></box></geometry><material><ambient>0.12 0.12 0.12 1</ambient><diffuse>0.18 0.18 0.18 1</diffuse></material></visual>
+        <collision name="end_wall_back_collision"><pose>-0.245 0 -0.015 0 0 0</pose><geometry><box><size>0.01 0.05 0.03</size></box></geometry></collision>
+        <visual name="end_wall_back_visual"><pose>-0.245 0 -0.015 0 0 0</pose><geometry><box><size>0.01 0.05 0.03</size></box></geometry><material><ambient>0.12 0.12 0.12 1</ambient><diffuse>0.18 0.18 0.18 1</diffuse></material></visual>
+      </link>
+      <link name="groove_30mm">
+        <pose>2.6 -1.2 0 0 0 0</pose>
+        <collision name="bottom_collision"><pose>0 0 -0.035 0 0 0</pose><geometry><box><size>0.50 0.03 0.01</size></box></geometry></collision>
+        <visual name="bottom_visual"><pose>0 0 -0.035 0 0 0</pose><geometry><box><size>0.50 0.03 0.01</size></box></geometry><material><ambient>0.12 0.12 0.12 1</ambient><diffuse>0.18 0.18 0.18 1</diffuse></material></visual>
+        <collision name="long_wall_low_collision"><pose>0 -0.010 -0.015 0 0 0</pose><geometry><box><size>0.50 0.01 0.03</size></box></geometry></collision>
+        <visual name="long_wall_low_visual"><pose>0 -0.010 -0.015 0 0 0</pose><geometry><box><size>0.50 0.01 0.03</size></box></geometry><material><ambient>0.12 0.12 0.12 1</ambient><diffuse>0.18 0.18 0.18 1</diffuse></material></visual>
+        <collision name="long_wall_high_collision"><pose>0 0.010 -0.015 0 0 0</pose><geometry><box><size>0.50 0.01 0.03</size></box></geometry></collision>
+        <visual name="long_wall_high_visual"><pose>0 0.010 -0.015 0 0 0</pose><geometry><box><size>0.50 0.01 0.03</size></box></geometry><material><ambient>0.12 0.12 0.12 1</ambient><diffuse>0.18 0.18 0.18 1</diffuse></material></visual>
+        <collision name="end_wall_front_collision"><pose>0.245 0 -0.015 0 0 0</pose><geometry><box><size>0.01 0.03 0.03</size></box></geometry></collision>
+        <visual name="end_wall_front_visual"><pose>0.245 0 -0.015 0 0 0</pose><geometry><box><size>0.01 0.03 0.03</size></box></geometry><material><ambient>0.12 0.12 0.12 1</ambient><diffuse>0.18 0.18 0.18 1</diffuse></material></visual>
+        <collision name="end_wall_back_collision"><pose>-0.245 0 -0.015 0 0 0</pose><geometry><box><size>0.01 0.03 0.03</size></box></geometry></collision>
+        <visual name="end_wall_back_visual"><pose>-0.245 0 -0.015 0 0 0</pose><geometry><box><size>0.01 0.03 0.03</size></box></geometry><material><ambient>0.12 0.12 0.12 1</ambient><diffuse>0.18 0.18 0.18 1</diffuse></material></visual>
+      </link>
+
+      <!-- 左側1列目は床面だけを正方形に抜いた穴。追加形状は置かない。 -->
+
+      <!-- 左側2列目は4辺を直方体壁で囲った正方形穴。壁は床面から1m下へ伸ばす。 -->
+      <link name="lined_square_hole_100mm">
+        <pose>1.2 1.7 0 0 0 0</pose>
+        <collision name="south_wall_collision"><pose>0 -0.054 -0.50 0 0 0</pose><geometry><box><size>0.116 0.008 1.0</size></box></geometry></collision>
+        <visual name="south_wall_visual"><pose>0 -0.054 -0.50 0 0 0</pose><geometry><box><size>0.116 0.008 1.0</size></box></geometry><material><ambient>0.12 0.12 0.12 1</ambient><diffuse>0.18 0.18 0.18 1</diffuse></material></visual>
+        <collision name="north_wall_collision"><pose>0 0.054 -0.50 0 0 0</pose><geometry><box><size>0.116 0.008 1.0</size></box></geometry></collision>
+        <visual name="north_wall_visual"><pose>0 0.054 -0.50 0 0 0</pose><geometry><box><size>0.116 0.008 1.0</size></box></geometry><material><ambient>0.12 0.12 0.12 1</ambient><diffuse>0.18 0.18 0.18 1</diffuse></material></visual>
+        <collision name="west_wall_collision"><pose>-0.054 0 -0.50 0 0 0</pose><geometry><box><size>0.008 0.100 1.0</size></box></geometry></collision>
+        <visual name="west_wall_visual"><pose>-0.054 0 -0.50 0 0 0</pose><geometry><box><size>0.008 0.100 1.0</size></box></geometry><material><ambient>0.12 0.12 0.12 1</ambient><diffuse>0.18 0.18 0.18 1</diffuse></material></visual>
+        <collision name="east_wall_collision"><pose>0.054 0 -0.50 0 0 0</pose><geometry><box><size>0.008 0.100 1.0</size></box></geometry></collision>
+        <visual name="east_wall_visual"><pose>0.054 0 -0.50 0 0 0</pose><geometry><box><size>0.008 0.100 1.0</size></box></geometry><material><ambient>0.12 0.12 0.12 1</ambient><diffuse>0.18 0.18 0.18 1</diffuse></material></visual>
+      </link>
+      <link name="lined_square_hole_50mm">
+        <pose>1.8 1.7 0 0 0 0</pose>
+        <collision name="south_wall_collision"><pose>0 -0.029 -0.50 0 0 0</pose><geometry><box><size>0.066 0.008 1.0</size></box></geometry></collision>
+        <visual name="south_wall_visual"><pose>0 -0.029 -0.50 0 0 0</pose><geometry><box><size>0.066 0.008 1.0</size></box></geometry><material><ambient>0.12 0.12 0.12 1</ambient><diffuse>0.18 0.18 0.18 1</diffuse></material></visual>
+        <collision name="north_wall_collision"><pose>0 0.029 -0.50 0 0 0</pose><geometry><box><size>0.066 0.008 1.0</size></box></geometry></collision>
+        <visual name="north_wall_visual"><pose>0 0.029 -0.50 0 0 0</pose><geometry><box><size>0.066 0.008 1.0</size></box></geometry><material><ambient>0.12 0.12 0.12 1</ambient><diffuse>0.18 0.18 0.18 1</diffuse></material></visual>
+        <collision name="west_wall_collision"><pose>-0.029 0 -0.50 0 0 0</pose><geometry><box><size>0.008 0.050 1.0</size></box></geometry></collision>
+        <visual name="west_wall_visual"><pose>-0.029 0 -0.50 0 0 0</pose><geometry><box><size>0.008 0.050 1.0</size></box></geometry><material><ambient>0.12 0.12 0.12 1</ambient><diffuse>0.18 0.18 0.18 1</diffuse></material></visual>
+        <collision name="east_wall_collision"><pose>0.029 0 -0.50 0 0 0</pose><geometry><box><size>0.008 0.050 1.0</size></box></geometry></collision>
+        <visual name="east_wall_visual"><pose>0.029 0 -0.50 0 0 0</pose><geometry><box><size>0.008 0.050 1.0</size></box></geometry><material><ambient>0.12 0.12 0.12 1</ambient><diffuse>0.18 0.18 0.18 1</diffuse></material></visual>
+      </link>
+      <link name="lined_square_hole_30mm">
+        <pose>2.4 1.7 0 0 0 0</pose>
+        <collision name="south_wall_collision"><pose>0 -0.019 -0.50 0 0 0</pose><geometry><box><size>0.046 0.008 1.0</size></box></geometry></collision>
+        <visual name="south_wall_visual"><pose>0 -0.019 -0.50 0 0 0</pose><geometry><box><size>0.046 0.008 1.0</size></box></geometry><material><ambient>0.12 0.12 0.12 1</ambient><diffuse>0.18 0.18 0.18 1</diffuse></material></visual>
+        <collision name="north_wall_collision"><pose>0 0.019 -0.50 0 0 0</pose><geometry><box><size>0.046 0.008 1.0</size></box></geometry></collision>
+        <visual name="north_wall_visual"><pose>0 0.019 -0.50 0 0 0</pose><geometry><box><size>0.046 0.008 1.0</size></box></geometry><material><ambient>0.12 0.12 0.12 1</ambient><diffuse>0.18 0.18 0.18 1</diffuse></material></visual>
+        <collision name="west_wall_collision"><pose>-0.019 0 -0.50 0 0 0</pose><geometry><box><size>0.008 0.030 1.0</size></box></geometry></collision>
+        <visual name="west_wall_visual"><pose>-0.019 0 -0.50 0 0 0</pose><geometry><box><size>0.008 0.030 1.0</size></box></geometry><material><ambient>0.12 0.12 0.12 1</ambient><diffuse>0.18 0.18 0.18 1</diffuse></material></visual>
+        <collision name="east_wall_collision"><pose>0.019 0 -0.50 0 0 0</pose><geometry><box><size>0.008 0.030 1.0</size></box></geometry></collision>
+        <visual name="east_wall_visual"><pose>0.019 0 -0.50 0 0 0</pose><geometry><box><size>0.008 0.030 1.0</size></box></geometry><material><ambient>0.12 0.12 0.12 1</ambient><diffuse>0.18 0.18 0.18 1</diffuse></material></visual>
+      </link>
+
+      <!-- ロボット前方に30mm段差を置き、低い出っ張りの検出を確認する。 -->
+      <link name="floor_bump">
+        <pose>2.85 0 0.015 0 0 0</pose>
+        <collision name="collision"><geometry><box><size>0.03 0.50 0.03</size></box></geometry></collision>
+        <visual name="visual">
+          <geometry><box><size>0.03 0.50 0.03</size></box></geometry>
+          <material><ambient>0.45 0.30 0.12 1</ambient><diffuse>0.60 0.40 0.16 1</diffuse></material>
+        </visual>
+      </link>
+    </model>
+
+    <model name="dock_wall_north">
+      <static>true</static>
+      <pose>0 5.0 1.0 0 0 0</pose>
+      <link name="link">
+        <collision name="collision">
+          <geometry>
+            <box><size>12.0 0.25 2.0</size></box>
+          </geometry>
+        </collision>
+        <visual name="visual">
+          <geometry>
+            <box><size>12.0 0.25 2.0</size></box>
+          </geometry>
+          <material>
+            <ambient>0.45 0.42 0.38 1</ambient>
+            <diffuse>0.45 0.42 0.38 1</diffuse>
+          </material>
+        </visual>
+      </link>
+    </model>
+
+    <model name="dock_wall_south">
+      <static>true</static>
+      <pose>0 -5.0 1.0 0 0 0</pose>
+      <link name="link">
+        <collision name="collision">
+          <geometry>
+            <box><size>12.0 0.25 2.0</size></box>
+          </geometry>
+        </collision>
+        <visual name="visual">
+          <geometry>
+            <box><size>12.0 0.25 2.0</size></box>
+          </geometry>
+          <material>
+            <ambient>0.45 0.42 0.38 1</ambient>
+            <diffuse>0.45 0.42 0.38 1</diffuse>
+          </material>
+        </visual>
+      </link>
+    </model>
+
+    <model name="dock_wall_east">
+      <static>true</static>
+      <pose>6.0 0 1.0 0 0 0</pose>
+      <link name="link">
+        <collision name="collision">
+          <geometry>
+            <box><size>0.25 10.0 2.0</size></box>
+          </geometry>
+        </collision>
+        <visual name="visual">
+          <geometry>
+            <box><size>0.25 10.0 2.0</size></box>
+          </geometry>
+          <material>
+            <ambient>0.45 0.42 0.38 1</ambient>
+            <diffuse>0.45 0.42 0.38 1</diffuse>
+          </material>
+        </visual>
+      </link>
+    </model>
+
+    <model name="ceiling">
+      <static>true</static>
+      <pose>0 0 2.05 0 0 0</pose>
+      <link name="link">
+        <collision name="collision">
+          <geometry>
+            <box><size>12.0 10.25 0.10</size></box>
+          </geometry>
+        </collision>
+        <visual name="visual">
+          <geometry>
+            <box><size>12.0 10.25 0.10</size></box>
+          </geometry>
+          <material>
+            <ambient>0.35 0.35 0.38 0</ambient>
+            <diffuse>0.35 0.35 0.38 0</diffuse>
+          </material>
+          <transparency>1.0</transparency>
+        </visual>
+      </link>
+    </model>
+
+    <model name="ceiling_disk_1">
+      <static>true</static>
+      <pose>1.8 -0.90 1.885 0 0 0</pose>
+      <link name="disk_link">
+        <pose>0 0 0 1.57079632679 0 0</pose>
+        <visual name="disk_visual">
+          <geometry>
+            <cylinder>
+              <radius>0.15</radius>
+              <length>0.03</length>
+            </cylinder>
+          </geometry>
+          <material>
+            <ambient>0.15 0.35 0.45 1</ambient>
+            <diffuse>0.15 0.35 0.45 1</diffuse>
+          </material>
+        </visual>
+        <collision name="disk_collision">
+          <geometry>
+            <cylinder>
+              <radius>0.15</radius>
+              <length>0.03</length>
+            </cylinder>
+          </geometry>
+        </collision>
+      </link>
+      <link name="brace_left_link">
+        <pose>-0.06 0 0.10 0 1.57079632679 0.72</pose>
+        <visual name="brace_left_visual">
+          <geometry>
+            <box><size>0.21 0.03 0.03</size></box>
+          </geometry>
+          <material>
+            <ambient>0.15 0.35 0.45 1</ambient>
+            <diffuse>0.15 0.35 0.45 1</diffuse>
+          </material>
+        </visual>
+        <collision name="brace_left_collision">
+          <geometry>
+            <box><size>0.21 0.03 0.03</size></box>
+          </geometry>
+        </collision>
+      </link>
+      <link name="brace_right_link">
+        <pose>0.06 0 0.10 0 1.57079632679 -0.72</pose>
+        <visual name="brace_right_visual">
+          <geometry>
+            <box><size>0.21 0.03 0.03</size></box>
+          </geometry>
+          <material>
+            <ambient>0.15 0.35 0.45 1</ambient>
+            <diffuse>0.15 0.35 0.45 1</diffuse>
+          </material>
+        </visual>
+        <collision name="brace_right_collision">
+          <geometry>
+            <box><size>0.21 0.03 0.03</size></box>
+          </geometry>
+        </collision>
+      </link>
+    </model>
+
+    <model name="ceiling_disk_2">
+      <static>true</static>
+      <pose>2.7 0.0 1.885 0 0 0</pose>
+      <link name="disk_link">
+        <pose>0 0 0 1.57079632679 0 1.57079632679</pose>
+        <visual name="disk_visual">
+          <geometry>
+            <cylinder>
+              <radius>0.15</radius>
+              <length>0.03</length>
+            </cylinder>
+          </geometry>
+          <material>
+            <ambient>0.15 0.35 0.45 1</ambient>
+            <diffuse>0.15 0.35 0.45 1</diffuse>
+          </material>
+        </visual>
+        <collision name="disk_collision">
+          <geometry>
+            <cylinder>
+              <radius>0.15</radius>
+              <length>0.03</length>
+            </cylinder>
+          </geometry>
+        </collision>
+      </link>
+      <link name="brace_left_link">
+        <pose>-0.06 0 0.10 0 1.57079632679 0.72</pose>
+        <visual name="brace_left_visual">
+          <geometry>
+            <box><size>0.21 0.03 0.03</size></box>
+          </geometry>
+          <material>
+            <ambient>0.15 0.35 0.45 1</ambient>
+            <diffuse>0.15 0.35 0.45 1</diffuse>
+          </material>
+        </visual>
+        <collision name="brace_left_collision">
+          <geometry>
+            <box><size>0.21 0.03 0.03</size></box>
+          </geometry>
+        </collision>
+      </link>
+      <link name="brace_right_link">
+        <pose>0.06 0 0.10 0 1.57079632679 -0.72</pose>
+        <visual name="brace_right_visual">
+          <geometry>
+            <box><size>0.21 0.03 0.03</size></box>
+          </geometry>
+          <material>
+            <ambient>0.15 0.35 0.45 1</ambient>
+            <diffuse>0.15 0.35 0.45 1</diffuse>
+          </material>
+        </visual>
+        <collision name="brace_right_collision">
+          <geometry>
+            <box><size>0.21 0.03 0.03</size></box>
+          </geometry>
+        </collision>
+      </link>
+    </model>
+
+    <model name="ceiling_disk_3">
+      <static>true</static>
+      <pose>3.6 0.90 1.885 0 0 0</pose>
+      <link name="disk_link">
+        <pose>0 0 0 1.57079632679 0 0.78539816339</pose>
+        <visual name="disk_visual">
+          <geometry>
+            <cylinder>
+              <radius>0.15</radius>
+              <length>0.03</length>
+            </cylinder>
+          </geometry>
+          <material>
+            <ambient>0.15 0.35 0.45 1</ambient>
+            <diffuse>0.15 0.35 0.45 1</diffuse>
+          </material>
+        </visual>
+        <collision name="disk_collision">
+          <geometry>
+            <cylinder>
+              <radius>0.15</radius>
+              <length>0.03</length>
+            </cylinder>
+          </geometry>
+        </collision>
+      </link>
+      <link name="brace_left_link">
+        <pose>-0.06 0 0.10 0 1.57079632679 0.72</pose>
+        <visual name="brace_left_visual">
+          <geometry>
+            <box><size>0.21 0.03 0.03</size></box>
+          </geometry>
+          <material>
+            <ambient>0.15 0.35 0.45 1</ambient>
+            <diffuse>0.15 0.35 0.45 1</diffuse>
+          </material>
+        </visual>
+        <collision name="brace_left_collision">
+          <geometry>
+            <box><size>0.21 0.03 0.03</size></box>
+          </geometry>
+        </collision>
+      </link>
+      <link name="brace_right_link">
+        <pose>0.06 0 0.10 0 1.57079632679 -0.72</pose>
+        <visual name="brace_right_visual">
+          <geometry>
+            <box><size>0.21 0.03 0.03</size></box>
+          </geometry>
+          <material>
+            <ambient>0.15 0.35 0.45 1</ambient>
+            <diffuse>0.15 0.35 0.45 1</diffuse>
+          </material>
+        </visual>
+        <collision name="brace_right_collision">
+          <geometry>
+            <box><size>0.21 0.03 0.03</size></box>
+          </geometry>
+        </collision>
+      </link>
+    </model>
+  </world>
+</sdf>

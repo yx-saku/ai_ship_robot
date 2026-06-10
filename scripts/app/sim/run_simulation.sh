@@ -3,9 +3,12 @@ set -euo pipefail
 
 ROS_DISTRO="${ROS_DISTRO:-humble}"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-WORKSPACE_ROOT="$(cd "${SCRIPT_DIR}/../.." && pwd)"
-INSTALL_ENVIRONMENT_SCRIPT="${WORKSPACE_ROOT}/scripts/install/environment.sh"
-LIDAR_PATTERN_DIR="${WORKSPACE_ROOT}/ros2_ws/src/ai_ship_robot_description/urdf/lidar/patterns"
+WORKSPACE_ROOT="$(cd "${SCRIPT_DIR}/../../.." && pwd)"
+SETUP_RUNTIME_SCRIPT="${WORKSPACE_ROOT}/scripts/install/setup.sh"
+SETUP_SIMULATION_SCRIPT="${WORKSPACE_ROOT}/scripts/install/sim/setup.sh"
+LIDAR_PATTERN_DIR="${WORKSPACE_ROOT}/ros2_ws_sim/src/ai_ship_robot_description/urdf/lidar/patterns"
+AI_SHIP_ROBOT_OPT_ROOT="${AI_SHIP_ROBOT_OPT_ROOT:-/opt/ai_ship_robot}"
+THIRD_PARTY_UNDERLAY_SETUP="${AI_SHIP_ROBOT_OPT_ROOT}/ros_underlay/${ROS_DISTRO}/third_party_ws/install/setup.bash"
 
 print_available_lidar_patterns() {
   local indent="${1:-}"
@@ -26,7 +29,7 @@ print_available_lidar_patterns() {
 
 usage() {
   cat <<'EOF'
-Usage: bash scripts/app/run_simulation.sh [OPTIONS]
+Usage: bash scripts/app/sim/run_simulation.sh [OPTIONS]
 
 Options:
   --build             Run one-time environment setup before launching simulation.
@@ -105,8 +108,9 @@ source_workspace_environment() {
   fi
   source "/opt/ros/${ROS_DISTRO}/setup.bash"
   if [[ "${include_overlays}" == "true" ]]; then
-    if ! source_overlay_if_current "${WORKSPACE_ROOT}/third_party/ws/install/setup.bash" \
-      || ! source_overlay_if_current "${WORKSPACE_ROOT}/ros2_ws/install/setup.bash"; then
+    if ! source_overlay_if_current "${THIRD_PARTY_UNDERLAY_SETUP}" \
+      || ! source_overlay_if_current "${WORKSPACE_ROOT}/ros2_ws/install/setup.bash" \
+      || ! source_overlay_if_current "${WORKSPACE_ROOT}/ros2_ws_sim/install/setup.bash"; then
       if [[ "${had_nounset}" -eq 1 ]]; then
         set -u
       fi
@@ -126,10 +130,12 @@ source_overlay_if_current() {
   fi
 
   # colconのsetupファイルはunderlayの絶対パスを持つため、ディレクトリ移動後の古い成果物は再buildする。
-  if grep -Fq "${WORKSPACE_ROOT}/third_party_ws" "${setup_file}" \
+  if grep -Fq "${WORKSPACE_ROOT}/third_party/ws" "${setup_file}" \
+    || grep -Fq "${WORKSPACE_ROOT}/third_party/vendor" "${setup_file}" \
+    || grep -Fq "${WORKSPACE_ROOT}/third_party_ws" "${setup_file}" \
     || grep -Fq "${WORKSPACE_ROOT}/third_party_vendor" "${setup_file}"; then
     echo "Stale workspace setup detected: ${setup_file}" >&2
-    echo "Run bash scripts/app/run_simulation.sh --build or bash scripts/install/environment.sh --workspace-only." >&2
+    echo "Run bash scripts/install/install_third_party.sh && bash scripts/install/sim/install_third_party.sh && bash scripts/app/sim/run_simulation.sh --build." >&2
     return 1
   fi
 
@@ -236,11 +242,13 @@ esac
 source_workspace_environment false
 
 if [[ "${BUILD_WORKSPACE}" == "true" ]]; then
-  bash "${INSTALL_ENVIRONMENT_SCRIPT}" --workspace-only
+  # --build指定時だけ workspace setup を実行し、通常起動では再buildを避ける。
+  bash "${SETUP_RUNTIME_SCRIPT}"
+  bash "${SETUP_SIMULATION_SCRIPT}"
 fi
 
-if [[ ! -f "${WORKSPACE_ROOT}/ros2_ws/install/setup.bash" ]]; then
-  echo "Missing ros2_ws/install/setup.bash. Run bash scripts/install/environment.sh first." >&2
+if [[ ! -f "${WORKSPACE_ROOT}/ros2_ws_sim/install/setup.bash" ]]; then
+  echo "Missing ros2_ws_sim/install/setup.bash. Run bash scripts/install/setup.sh && bash scripts/install/sim/setup.sh first." >&2
   exit 1
 fi
 

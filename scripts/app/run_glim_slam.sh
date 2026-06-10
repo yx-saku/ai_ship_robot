@@ -4,20 +4,16 @@ set -euo pipefail
 ROS_DISTRO="${ROS_DISTRO:-humble}"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 WORKSPACE_ROOT="$(cd "${SCRIPT_DIR}/../.." && pwd)"
-INSTALL_ENVIRONMENT_SCRIPT="${WORKSPACE_ROOT}/scripts/install/environment.sh"
+SETUP_RUNTIME_SCRIPT="${WORKSPACE_ROOT}/scripts/install/setup.sh"
+AI_SHIP_ROBOT_OPT_ROOT="${AI_SHIP_ROBOT_OPT_ROOT:-/opt/ai_ship_robot}"
+THIRD_PARTY_UNDERLAY_SETUP="${AI_SHIP_ROBOT_OPT_ROOT}/ros_underlay/${ROS_DISTRO}/third_party_ws/install/setup.bash"
 
 usage() {
   cat <<'EOF'
 Usage: bash scripts/app/run_glim_slam.sh [OPTIONS]
 
 Options:
-  --with-sim          Start Gazebo simulation and glim SLAM together.
   --build             Build/install required workspace profile before launch.
-  --gui               Enable Gazebo Classic GUI when --with-sim is used.
-  --no-gui            Disable Gazebo Classic GUI when --with-sim is used.
-  --rviz              Enable RViz2.
-  --no-rviz           Disable RViz2.
-  --lite              Use lite simulation settings when --with-sim is used.
   --config PATH       Use a glim config directory.
   --left-points TOPIC Set left LiDAR PointCloud2 topic.
   --right-points TOPIC
@@ -51,10 +47,12 @@ source_overlay_if_current() {
   fi
 
   # 古い絶対パスを含むoverlayはsourceせず、再buildを促して環境の混線を避ける。
-  if grep -Fq "${WORKSPACE_ROOT}/third_party_ws" "${setup_file}" \
+  if grep -Fq "${WORKSPACE_ROOT}/third_party/ws" "${setup_file}" \
+    || grep -Fq "${WORKSPACE_ROOT}/third_party/vendor" "${setup_file}" \
+    || grep -Fq "${WORKSPACE_ROOT}/third_party_ws" "${setup_file}" \
     || grep -Fq "${WORKSPACE_ROOT}/third_party_vendor" "${setup_file}"; then
     echo "Stale workspace setup detected: ${setup_file}" >&2
-    echo "Run bash scripts/app/run_glim_slam.sh --build or bash scripts/install/environment.sh --workspace-only --profile slam-sim." >&2
+    echo "Run bash scripts/install/install_third_party.sh && bash scripts/app/run_glim_slam.sh --build." >&2
     return 1
   fi
 
@@ -77,7 +75,7 @@ source_workspace_environment() {
   fi
   source "/opt/ros/${ROS_DISTRO}/setup.bash"
   if [[ "${include_overlays}" == "true" ]]; then
-    if ! source_overlay_if_current "${WORKSPACE_ROOT}/third_party/ws/install/setup.bash" \
+    if ! source_overlay_if_current "${THIRD_PARTY_UNDERLAY_SETUP}" \
       || ! source_overlay_if_current "${WORKSPACE_ROOT}/ros2_ws/install/setup.bash"; then
       if [[ "${had_nounset}" -eq 1 ]]; then
         set -u
@@ -90,9 +88,7 @@ source_workspace_environment() {
   fi
 }
 
-WITH_SIM=false
 BUILD_WORKSPACE=false
-ROBOT_NAME_SET=false
 LAUNCH_ARGS=()
 
 while [[ $# -gt 0 ]]; do
@@ -101,26 +97,8 @@ while [[ $# -gt 0 ]]; do
       usage
       exit 0
       ;;
-    --with-sim)
-      WITH_SIM=true
-      ;;
     --build)
       BUILD_WORKSPACE=true
-      ;;
-    --gui)
-      LAUNCH_ARGS+=("gui:=true")
-      ;;
-    --no-gui)
-      LAUNCH_ARGS+=("gui:=false")
-      ;;
-    --rviz)
-      LAUNCH_ARGS+=("use_rviz:=true")
-      ;;
-    --no-rviz)
-      LAUNCH_ARGS+=("use_rviz:=false")
-      ;;
-    --lite)
-      LAUNCH_ARGS+=("lite:=true")
       ;;
     --config=*)
       LAUNCH_ARGS+=("glim_config_path:=${1#*=}")
@@ -171,15 +149,6 @@ while [[ $# -gt 0 ]]; do
       shift
       LAUNCH_ARGS+=("glim_executable:=$(require_value --glim-executable "${1:-}")")
       ;;
-    --robot-name=*)
-      ROBOT_NAME_SET=true
-      LAUNCH_ARGS+=("robot_name:=${1#*=}")
-      ;;
-    --robot-name)
-      shift
-      ROBOT_NAME_SET=true
-      LAUNCH_ARGS+=("robot_name:=$(require_value --robot-name "${1:-}")")
-      ;;
     *:=*)
       echo "Do not use ROS 2 launch argument syntax here: $1" >&2
       echo "Use shell options instead. Run with --help to see available options." >&2
@@ -197,28 +166,15 @@ done
 source_workspace_environment false
 
 if [[ "${BUILD_WORKSPACE}" == "true" ]]; then
-  # シミュレーション併用時だけGazebo/Livox依存を含め、実機SLAMではglim中心のprofileにする。
-  if [[ "${WITH_SIM}" == "true" ]]; then
-    bash "${INSTALL_ENVIRONMENT_SCRIPT}" --workspace-only --profile slam-sim
-  else
-    bash "${INSTALL_ENVIRONMENT_SCRIPT}" --workspace-only --profile real
-  fi
-  echo "If the build reports missing apt/CMake dependencies, run scripts/install/environment.sh --system-only with the same profile first." >&2
+  # --build指定時だけworkspace setupを実行し、通常起動では再buildを避ける。
+  bash "${SETUP_RUNTIME_SCRIPT}"
 fi
 
 if [[ ! -f "${WORKSPACE_ROOT}/ros2_ws/install/setup.bash" ]]; then
-  echo "Missing ros2_ws/install/setup.bash. Run bash scripts/install/environment.sh --profile slam-sim first." >&2
+  echo "Missing ros2_ws/install/setup.bash. Run bash scripts/install/setup.sh first." >&2
   exit 1
 fi
 
 source_workspace_environment
 
-if [[ "${WITH_SIM}" == "true" ]]; then
-  if [[ "${ROBOT_NAME_SET}" == "false" ]]; then
-    # Gazeboに前回のentityが残った場合でも、再起動時のspawn名衝突を避ける。
-    LAUNCH_ARGS+=("robot_name:=ai_ship_robot_glim_$$")
-  fi
-  ros2 launch ai_ship_robot_slam sim_glim.launch.py "${LAUNCH_ARGS[@]}"
-else
-  ros2 launch ai_ship_robot_slam glim.launch.py "${LAUNCH_ARGS[@]}"
-fi
+ros2 launch ai_ship_robot_slam glim.launch.py "${LAUNCH_ARGS[@]}"

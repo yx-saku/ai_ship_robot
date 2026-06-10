@@ -3,12 +3,15 @@ set -euo pipefail
 
 ROS_DISTRO="${ROS_DISTRO:-humble}"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-WORKSPACE_ROOT="$(cd "${SCRIPT_DIR}/../.." && pwd)"
-INSTALL_ENVIRONMENT_SCRIPT="${WORKSPACE_ROOT}/scripts/install/environment.sh"
+WORKSPACE_ROOT="$(cd "${SCRIPT_DIR}/../../.." && pwd)"
+SETUP_RUNTIME_SCRIPT="${WORKSPACE_ROOT}/scripts/install/setup.sh"
+SETUP_SIMULATION_SCRIPT="${WORKSPACE_ROOT}/scripts/install/sim/setup.sh"
+AI_SHIP_ROBOT_OPT_ROOT="${AI_SHIP_ROBOT_OPT_ROOT:-/opt/ai_ship_robot}"
+THIRD_PARTY_UNDERLAY_SETUP="${AI_SHIP_ROBOT_OPT_ROOT}/ros_underlay/${ROS_DISTRO}/third_party_ws/install/setup.bash"
 
 usage() {
   cat <<'EOF'
-Usage: bash scripts/app/drive_robot.sh [OPTIONS]
+Usage: bash scripts/app/sim/drive_robot.sh [OPTIONS]
 
 Options:
   --build                  Run one-time environment setup before starting keyboard drive.
@@ -27,7 +30,7 @@ Keys:
   space/x/k: stop all, Q/Esc: quit
 
 This script only publishes cmd_vel. Start Gazebo/LiDAR separately with:
-  bash scripts/app/run_simulation.sh
+  bash scripts/app/sim/run_simulation.sh
 EOF
 }
 
@@ -65,8 +68,9 @@ source_workspace_environment() {
   fi
   source "/opt/ros/${ROS_DISTRO}/setup.bash"
   if [[ "${include_overlays}" == "true" ]]; then
-    if ! source_overlay_if_current "${WORKSPACE_ROOT}/third_party/ws/install/setup.bash" \
-      || ! source_overlay_if_current "${WORKSPACE_ROOT}/ros2_ws/install/setup.bash"; then
+    if ! source_overlay_if_current "${THIRD_PARTY_UNDERLAY_SETUP}" \
+      || ! source_overlay_if_current "${WORKSPACE_ROOT}/ros2_ws/install/setup.bash" \
+      || ! source_overlay_if_current "${WORKSPACE_ROOT}/ros2_ws_sim/install/setup.bash"; then
       if [[ "${had_nounset}" -eq 1 ]]; then
         set -u
       fi
@@ -86,10 +90,12 @@ source_overlay_if_current() {
   fi
 
   # colconのsetupファイルはunderlayの絶対パスを持つため、ディレクトリ移動後の古い成果物は再buildする。
-  if grep -Fq "${WORKSPACE_ROOT}/third_party_ws" "${setup_file}" \
+  if grep -Fq "${WORKSPACE_ROOT}/third_party/ws" "${setup_file}" \
+    || grep -Fq "${WORKSPACE_ROOT}/third_party/vendor" "${setup_file}" \
+    || grep -Fq "${WORKSPACE_ROOT}/third_party_ws" "${setup_file}" \
     || grep -Fq "${WORKSPACE_ROOT}/third_party_vendor" "${setup_file}"; then
     echo "Stale workspace setup detected: ${setup_file}" >&2
-    echo "Run bash scripts/app/drive_robot.sh --build or bash scripts/install/environment.sh --workspace-only." >&2
+    echo "Run bash scripts/install/install_third_party.sh && bash scripts/install/sim/install_third_party.sh && bash scripts/app/sim/drive_robot.sh --build." >&2
     return 1
   fi
 
@@ -166,11 +172,13 @@ done
 source_workspace_environment false
 
 if [[ "${BUILD_WORKSPACE}" == "true" ]]; then
-  bash "${INSTALL_ENVIRONMENT_SCRIPT}" --workspace-only
+  # --build指定時だけ workspace setup を実行し、通常起動では再buildを避ける。
+  bash "${SETUP_RUNTIME_SCRIPT}"
+  bash "${SETUP_SIMULATION_SCRIPT}"
 fi
 
-if [[ ! -f "${WORKSPACE_ROOT}/ros2_ws/install/setup.bash" ]]; then
-  echo "Missing ros2_ws/install/setup.bash. Run bash scripts/install/environment.sh first." >&2
+if [[ ! -f "${WORKSPACE_ROOT}/ros2_ws_sim/install/setup.bash" ]]; then
+  echo "Missing ros2_ws_sim/install/setup.bash. Run bash scripts/install/setup.sh && bash scripts/install/sim/setup.sh first." >&2
   exit 1
 fi
 
@@ -179,7 +187,7 @@ source_workspace_environment
 DRIVE_EXECUTABLE="$(ros2 pkg prefix ai_ship_robot_gazebo)/lib/ai_ship_robot_gazebo/keyboard_drive.py"
 if [[ ! -x "${DRIVE_EXECUTABLE}" ]]; then
   echo "Missing keyboard_drive executable: ${DRIVE_EXECUTABLE}" >&2
-  echo "Run bash scripts/app/drive_robot.sh --build or bash scripts/install/environment.sh first." >&2
+  echo "Run bash scripts/app/sim/drive_robot.sh --build or bash scripts/install/setup.sh && bash scripts/install/sim/setup.sh first." >&2
   exit 1
 fi
 

@@ -58,21 +58,31 @@ RUN if ! getent group ${USER_GID} >/dev/null; then groupadd --gid ${USER_GID} ${
     && echo "${USERNAME} ALL=(root) NOPASSWD:ALL" > /etc/sudoers.d/${USERNAME} \
     && chmod 0440 /etc/sudoers.d/${USERNAME}
 
-# Dev Container imageにsystem依存を焼き込む。問題切り分け時は、この3行のブロックをコメントアウトして手動実行へ戻す。
+# install script だけを image build に含め、workspace build は container 起動後の setup script へ分離する。
 RUN mkdir -p /workspaces/ai_ship_robot/scripts/install
-COPY scripts/install/system_dependencies.sh /workspaces/ai_ship_robot/scripts/install/system_dependencies.sh
+COPY scripts/install/ /workspaces/ai_ship_robot/scripts/install/
+
+# 本番向けの system 依存だけを独立layerにし、workspace build は mount 後の setup へ回す。
 RUN --mount=type=cache,id=ai-ship-robot-apt-cache,target=/var/cache/apt,sharing=locked \
     --mount=type=cache,id=ai-ship-robot-apt-lists,target=/var/lib/apt/lists,sharing=locked \
-    bash /workspaces/ai_ship_robot/scripts/install/system_dependencies.sh
+    bash /workspaces/ai_ship_robot/scripts/install/install.sh
 
-# shell自動読み込み設定は軽い別layerに分け、bashrc修正で重いapt layerが無効化されないようにする。
-COPY scripts/install/shell_environment.sh /workspaces/ai_ship_robot/scripts/install/shell_environment.sh
-RUN HOME=/home/${USERNAME} \
-    AI_SHIP_ROBOT_BASHRC=/home/${USERNAME}/.bashrc \
-    AI_SHIP_ROBOT_ENV_SCRIPT=/home/${USERNAME}/.ai_ship_robot_environment.bash \
-    bash /workspaces/ai_ship_robot/scripts/install/shell_environment.sh \
+# 実機とsimulationで共通するthird_partyは、workspace mountに隠れない /opt 配下のunderlayとして導入する。
+RUN --mount=type=cache,id=ai-ship-robot-apt-cache,target=/var/cache/apt,sharing=locked \
+    --mount=type=cache,id=ai-ship-robot-apt-lists,target=/var/lib/apt/lists,sharing=locked \
+    bash /workspaces/ai_ship_robot/scripts/install/install_third_party.sh
+
+# シミュレーション追加分も system 依存だけを別layerに分け、Gazebo系依存の更新を再利用しやすくする。
+RUN --mount=type=cache,id=ai-ship-robot-apt-cache,target=/var/cache/apt,sharing=locked \
+    --mount=type=cache,id=ai-ship-robot-apt-lists,target=/var/lib/apt/lists,sharing=locked \
+    bash /workspaces/ai_ship_robot/scripts/install/sim/install.sh
+
+# Gazebo専用third_partyだけを共通underlayへ追加し、simulation workspace本体のbuildとは分離する。
+RUN --mount=type=cache,id=ai-ship-robot-apt-cache,target=/var/cache/apt,sharing=locked \
+    --mount=type=cache,id=ai-ship-robot-apt-lists,target=/var/lib/apt/lists,sharing=locked \
+    bash /workspaces/ai_ship_robot/scripts/install/sim/install_third_party.sh \
     && mkdir -p /home/${USERNAME}/.ros/log \
-    && chown -R ${USER_UID}:${USER_GID} /home/${USERNAME}/.bashrc /home/${USERNAME}/.ai_ship_robot_environment.bash /home/${USERNAME}/.ros
+    && chown -R ${USER_UID}:${USER_GID} /home/${USERNAME}/.ros
 
 USER ${USERNAME}
 WORKDIR /workspaces/ai_ship_robot
