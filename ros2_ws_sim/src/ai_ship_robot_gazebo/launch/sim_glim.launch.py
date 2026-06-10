@@ -17,11 +17,10 @@ def generate_launch_description():
     left_points_topic = LaunchConfiguration("left_points_topic")
     right_points_topic = LaunchConfiguration("right_points_topic")
     output_points_topic = LaunchConfiguration("output_points_topic")
-    imu_topic = LaunchConfiguration("imu_topic")
     glim_package = LaunchConfiguration("glim_package")
     glim_executable = LaunchConfiguration("glim_executable")
 
-    # 既存シミュレーションlaunchをそのままincludeし、SLAM側は別launchとして重ねる。
+    # Gazebo側のRVizとodom TFを止め、SLAM可視化とGLIM TFを単一の基準にする。
     simulation = GroupAction(
         scoped=True,
         actions=[
@@ -37,11 +36,13 @@ def generate_launch_description():
                     "lite": lite,
                     "world": world,
                     "lidar_pattern_file": lidar_pattern_file,
+                    "publish_odom_tf": "false",
                 }.items(),
             )
         ],
     )
 
+    # 本番用GLIM launchをsimulation側からincludeし、SLAM本体はsimulation依存を持たない形にする。
     slam = IncludeLaunchDescription(
         PythonLaunchDescriptionSource(
             PathJoinSubstitution([FindPackageShare("ai_ship_robot_slam"), "launch", "glim.launch.py"])
@@ -54,7 +55,6 @@ def generate_launch_description():
             "left_points_topic": left_points_topic,
             "right_points_topic": right_points_topic,
             "output_points_topic": output_points_topic,
-            "imu_topic": imu_topic,
             "glim_package": glim_package,
             "glim_executable": glim_executable,
         }.items(),
@@ -71,7 +71,6 @@ def generate_launch_description():
             DeclareLaunchArgument("left_points_topic", default_value="/left_lidar/points"),
             DeclareLaunchArgument("right_points_topic", default_value="/right_lidar/points"),
             DeclareLaunchArgument("output_points_topic", default_value="/slam/points"),
-            DeclareLaunchArgument("imu_topic", default_value="/imu/data"),
             DeclareLaunchArgument("glim_package", default_value="glim_ros"),
             DeclareLaunchArgument("glim_executable", default_value="glim_rosnode"),
             DeclareLaunchArgument(

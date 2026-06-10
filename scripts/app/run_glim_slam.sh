@@ -18,8 +18,9 @@ Options:
   --left-points TOPIC Set left LiDAR PointCloud2 topic.
   --right-points TOPIC
                       Set right LiDAR PointCloud2 topic.
-  --imu-topic TOPIC   Set IMU topic.
   --voxel-leaf SIZE   Set fused cloud voxel leaf size in meters.
+  --rviz              Enable RViz2.
+  --no-rviz           Disable RViz2.
   --glim-package NAME Set glim ROS package name.
   --glim-executable NAME
                       Set glim executable name.
@@ -75,8 +76,13 @@ source_workspace_environment() {
   fi
   source "/opt/ros/${ROS_DISTRO}/setup.bash"
   if [[ "${include_overlays}" == "true" ]]; then
-    if ! source_overlay_if_current "${THIRD_PARTY_UNDERLAY_SETUP}" \
-      || ! source_overlay_if_current "${WORKSPACE_ROOT}/ros2_ws/install/setup.bash"; then
+    if ! source_overlay_if_current "${THIRD_PARTY_UNDERLAY_SETUP}"; then
+      if [[ "${had_nounset}" -eq 1 ]]; then
+        set -u
+      fi
+      return 1
+    fi
+    if ! source_overlay_if_current "${WORKSPACE_ROOT}/ros2_ws/install/setup.bash"; then
       if [[ "${had_nounset}" -eq 1 ]]; then
         set -u
       fi
@@ -121,19 +127,18 @@ while [[ $# -gt 0 ]]; do
       shift
       LAUNCH_ARGS+=("right_points_topic:=$(require_value --right-points "${1:-}")")
       ;;
-    --imu-topic=*)
-      LAUNCH_ARGS+=("imu_topic:=${1#*=}")
-      ;;
-    --imu-topic)
-      shift
-      LAUNCH_ARGS+=("imu_topic:=$(require_value --imu-topic "${1:-}")")
-      ;;
     --voxel-leaf=*)
       LAUNCH_ARGS+=("voxel_leaf_size:=${1#*=}")
       ;;
     --voxel-leaf)
       shift
       LAUNCH_ARGS+=("voxel_leaf_size:=$(require_value --voxel-leaf "${1:-}")")
+      ;;
+    --rviz)
+      LAUNCH_ARGS+=("use_rviz:=true")
+      ;;
+    --no-rviz)
+      LAUNCH_ARGS+=("use_rviz:=false")
       ;;
     --glim-package=*)
       LAUNCH_ARGS+=("glim_package:=${1#*=}")

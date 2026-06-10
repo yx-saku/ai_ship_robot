@@ -2,6 +2,7 @@
 <robot xmlns:xacro="http://www.ros.org/wiki/xacro" name="ai_ship_robot">
   <xacro:arg name="use_sim" default="true" />
   <xacro:arg name="lidar_pattern_file" default="lidar_pattern_dual_updown.urdf.xacro" />
+  <xacro:arg name="publish_odom_tf" default="true" />
 
   <xacro:property name="base_length" value="0.72" />
   <xacro:property name="base_width" value="0.72" />
@@ -276,7 +277,7 @@
         <odometry_frame>odom</odometry_frame>
         <robot_base_frame>base_footprint</robot_base_frame>
         <publish_odom>true</publish_odom>
-        <publish_odom_tf>true</publish_odom_tf>
+        <publish_odom_tf>$(arg publish_odom_tf)</publish_odom_tf>
       </plugin>
     </gazebo>
 

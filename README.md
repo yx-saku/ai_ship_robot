@@ -227,9 +227,11 @@ ros2 topic pub /cmd_vel geometry_msgs/msg/Twist \
 
 ## glimでSLAMする
 
-2台LiDAR点群とIMUを使ってglim SLAMを起動します。シミュレーションで使う場合も、Gazebo起動とglim起動は別ターミナルで分けて実行します。
+2台LiDAR点群と左Mid-360内蔵IMUを使ってglim SLAMを起動します。本番用入口の `scripts/app/run_glim_slam.sh` はシミュレーションを意識せず、glimだけを起動します。Gazeboと組み合わせる場合は `scripts/app/sim/run_glim_slam.sh` を使います。
 
-GLIM本体とROS 2ノードは公式repoの実装をそのまま使います。`glim_rosnode` は1つの点群topicを入力にするため、本プロジェクトでは2台LiDARの `PointCloud2` をTFで `base_link` に変換し、`/slam/points` へ統合する小さなROS 2ノードだけを追加しています。
+GLIM本体とROS 2ノードは公式repoの実装をそのまま使います。`glim_rosnode` は1つの点群topicを入力にするため、本プロジェクトでは2台LiDARの `PointCloud2` をTFで `left_lidar_link` に変換し、`/slam/points` へ統合する小さなROS 2ノードだけを追加しています。
+
+左Mid-360の内蔵IMU frameは `left_lidar_imu_link` です。Livox Mid-360 User Manual EN 15ページのIMU chip位置を使い、`left_lidar_link -> left_lidar_imu_link` は `x=0.011`, `y=0.02329`, `z=-0.04412` m、回転identityとして扱います。
 
 ```bash
 bash scripts/install/install.sh
@@ -238,8 +240,7 @@ bash scripts/install/sim/install.sh
 bash scripts/install/sim/install_third_party.sh
 bash scripts/install/setup.sh
 bash scripts/install/sim/setup.sh
-bash scripts/app/sim/run_simulation.sh --lite
-bash scripts/app/run_glim_slam.sh
+bash scripts/app/sim/run_glim_slam.sh --lite
 ```
 
 `GTSAMConfig.cmake` などのCMake依存が見つからない場合は、system側 third_party underlayを再ビルドします。
@@ -249,11 +250,10 @@ bash scripts/install/install_third_party.sh
 bash scripts/install/setup.sh
 ```
 
-シミュレーション側をRVizなし、Gazebo GUIなしで起動する例です。
+RVizなし、Gazebo GUIなしで起動する例です。
 
 ```bash
-bash scripts/app/sim/run_simulation.sh --lite --no-rviz --no-gui
-bash scripts/app/run_glim_slam.sh
+bash scripts/app/sim/run_glim_slam.sh --lite --no-rviz --no-gui
 ```
 
 別端末でロボットを操作します。
@@ -265,20 +265,23 @@ bash scripts/app/sim/drive_robot.sh
 主なSLAM関連topicです。
 
 - 2台LiDAR統合点群: `/slam/points`
-- IMU入力: `/imu/data`
+- SLAM用IMU入力: `/left_lidar/imu`
 - 左LiDAR入力: `/left_lidar/points`
 - 右LiDAR入力: `/right_lidar/points`
+- SLAM用LiDAR frame: `left_lidar_link`
+- SLAM用IMU frame: `left_lidar_imu_link`
 
 確認コマンドです。
 
 ```bash
 ros2 topic hz /slam/points
-ros2 topic hz /imu/data
-ros2 run tf2_ros tf2_echo base_link left_lidar_link
-ros2 run tf2_ros tf2_echo base_link right_lidar_link
+ros2 topic hz /left_lidar/imu
+ros2 run tf2_ros tf2_echo left_lidar_link left_lidar_imu_link
+ros2 run tf2_ros tf2_echo left_lidar_link right_lidar_link
+ros2 run tf2_ros tf2_echo glim_odom base_footprint
 ```
 
-実機や外部センサでglimだけを起動する場合は、シミュレーションを含めずにtopicを指定します。
+実機や外部センサでglimだけを起動する場合は、シミュレーションを含めずにconfigを指定します。GLIMはJSON config directoryを読むため、IMU topicなどを変える場合は `config_ros.json` も対象topicに合わせます。
 
 ```bash
 bash scripts/install/install.sh
@@ -287,7 +290,6 @@ bash scripts/install/setup.sh
 bash scripts/app/run_glim_slam.sh \
   --left-points /left_lidar/points \
   --right-points /right_lidar/points \
-  --imu-topic /imu/data \
   --config ros2_ws/src/ai_ship_robot_slam/config/glim_real
 ```
 

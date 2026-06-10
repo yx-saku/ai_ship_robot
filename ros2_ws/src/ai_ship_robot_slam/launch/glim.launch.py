@@ -17,7 +17,6 @@ def generate_launch_description():
     left_points_topic = LaunchConfiguration("left_points_topic")
     right_points_topic = LaunchConfiguration("right_points_topic")
     output_points_topic = LaunchConfiguration("output_points_topic")
-    imu_topic = LaunchConfiguration("imu_topic")
     target_frame = LaunchConfiguration("target_frame")
     voxel_leaf_size = LaunchConfiguration("voxel_leaf_size")
 
@@ -71,8 +70,7 @@ def generate_launch_description():
             DeclareLaunchArgument("left_points_topic", default_value="/left_lidar/points"),
             DeclareLaunchArgument("right_points_topic", default_value="/right_lidar/points"),
             DeclareLaunchArgument("output_points_topic", default_value="/slam/points"),
-            DeclareLaunchArgument("imu_topic", default_value="/imu/data"),
-            DeclareLaunchArgument("target_frame", default_value="base_link"),
+            DeclareLaunchArgument("target_frame", default_value="left_lidar_link"),
             DeclareLaunchArgument("voxel_leaf_size", default_value="0.03"),
             DeclareLaunchArgument("glim_package", default_value="glim_ros"),
             DeclareLaunchArgument("glim_executable", default_value="glim_rosnode"),

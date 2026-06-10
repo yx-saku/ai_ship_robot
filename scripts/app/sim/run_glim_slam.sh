@@ -29,26 +29,27 @@ print_available_lidar_patterns() {
 
 usage() {
   cat <<'EOF'
-Usage: bash scripts/app/sim/run_simulation.sh [OPTIONS]
+Usage: bash scripts/app/sim/run_glim_slam.sh [OPTIONS]
 
 Options:
-  --build             Run one-time environment setup before launching simulation.
-  --lite              Disable Gazebo Classic GUI and default LiDAR rays to quarter resolution.
+  --build             Run required workspace setup before launch.
+  --config PATH       Use a glim config directory.
+  --left-points TOPIC Set left LiDAR PointCloud2 topic.
+  --right-points TOPIC
+                      Set right LiDAR PointCloud2 topic.
+  --voxel-leaf SIZE   Set fused cloud voxel leaf size in meters.
+  --rviz              Enable SLAM RViz2.
+  --no-rviz           Disable SLAM RViz2.
+  --lite              Disable Gazebo Classic GUI and reduce LiDAR load.
   --gui               Enable Gazebo Classic GUI.
   --no-gui            Disable Gazebo Classic GUI.
-  --rviz              Enable RViz2.
-  --no-rviz           Disable RViz2.
-  -4, --quarter-resolution
-                      Use quarter LiDAR sample density.
-  -2, --half-resolution
-                      Use half LiDAR sample density.
-  -1, --full-resolution
-                      Use full LiDAR sample counts.
   --world PATH        Use a custom Gazebo Classic world.
-  --rviz-config PATH  Use a custom RViz config.
   --lidar-pattern FILE
                       Use a LiDAR pattern xacro file name.
   --robot-name NAME   Set the spawned robot name.
+  --glim-package NAME Set glim ROS package name.
+  --glim-executable NAME
+                      Set glim executable name.
   -h, --help          Show this help.
 
 Available LiDAR patterns:
@@ -70,7 +71,6 @@ require_value() {
 
 validate_lidar_pattern_file() {
   local file_name="$1"
-  local pattern_file=""
 
   # xacroのinclude対象をLiDAR配置ファイル名に限定し、任意パスの読み込みを防ぐ。
   if [[ "${file_name}" == */* || "${file_name}" != lidar_pattern_*.urdf.xacro ]]; then
@@ -92,6 +92,26 @@ validate_lidar_pattern_file() {
   exit 2
 }
 
+source_overlay_if_current() {
+  local setup_file="$1"
+
+  if [[ ! -f "${setup_file}" ]]; then
+    return 0
+  fi
+
+  # colconのsetupファイルはunderlayの絶対パスを持つため、ディレクトリ移動後の古い成果物は再buildする。
+  if grep -Fq "${WORKSPACE_ROOT}/third_party/ws" "${setup_file}" \
+    || grep -Fq "${WORKSPACE_ROOT}/third_party/vendor" "${setup_file}" \
+    || grep -Fq "${WORKSPACE_ROOT}/third_party_ws" "${setup_file}" \
+    || grep -Fq "${WORKSPACE_ROOT}/third_party_vendor" "${setup_file}"; then
+    echo "Stale workspace setup detected: ${setup_file}" >&2
+    echo "Run bash scripts/install/install_third_party.sh && bash scripts/install/sim/install_third_party.sh && bash scripts/app/sim/run_glim_slam.sh --build." >&2
+    return 1
+  fi
+
+  source "${setup_file}"
+}
+
 source_workspace_environment() {
   local include_overlays="${1:-true}"
   local had_nounset=0
@@ -101,7 +121,7 @@ source_workspace_environment() {
     return 1
   fi
 
-  # ROS 2本体を先に読み込み、存在するoverlayだけを順番に重ねて実行時環境を作る。
+  # ROS 2本体を先に読み込み、production overlayの上にsimulation overlayを重ねる。
   if [[ "$-" == *u* ]]; then
     had_nounset=1
     set +u
@@ -122,30 +142,10 @@ source_workspace_environment() {
   fi
 }
 
-source_overlay_if_current() {
-  local setup_file="$1"
-
-  if [[ ! -f "${setup_file}" ]]; then
-    return 0
-  fi
-
-  # colconのsetupファイルはunderlayの絶対パスを持つため、ディレクトリ移動後の古い成果物は再buildする。
-  if grep -Fq "${WORKSPACE_ROOT}/third_party/ws" "${setup_file}" \
-    || grep -Fq "${WORKSPACE_ROOT}/third_party/vendor" "${setup_file}" \
-    || grep -Fq "${WORKSPACE_ROOT}/third_party_ws" "${setup_file}" \
-    || grep -Fq "${WORKSPACE_ROOT}/third_party_vendor" "${setup_file}"; then
-    echo "Stale workspace setup detected: ${setup_file}" >&2
-    echo "Run bash scripts/install/install_third_party.sh && bash scripts/install/sim/install_third_party.sh && bash scripts/app/sim/run_simulation.sh --build." >&2
-    return 1
-  fi
-
-  source "${setup_file}"
-}
-
-LAUNCH_ARGS=()
 BUILD_WORKSPACE=false
 LITE_MODE=false
-LIDAR_RESOLUTION_MODE="default"
+ROBOT_NAME_SET=false
+LAUNCH_ARGS=()
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -156,6 +156,40 @@ while [[ $# -gt 0 ]]; do
     --build)
       BUILD_WORKSPACE=true
       ;;
+    --config=*)
+      LAUNCH_ARGS+=("glim_config_path:=${1#*=}")
+      ;;
+    --config)
+      shift
+      LAUNCH_ARGS+=("glim_config_path:=$(require_value --config "${1:-}")")
+      ;;
+    --left-points=*)
+      LAUNCH_ARGS+=("left_points_topic:=${1#*=}")
+      ;;
+    --left-points)
+      shift
+      LAUNCH_ARGS+=("left_points_topic:=$(require_value --left-points "${1:-}")")
+      ;;
+    --right-points=*)
+      LAUNCH_ARGS+=("right_points_topic:=${1#*=}")
+      ;;
+    --right-points)
+      shift
+      LAUNCH_ARGS+=("right_points_topic:=$(require_value --right-points "${1:-}")")
+      ;;
+    --voxel-leaf=*)
+      LAUNCH_ARGS+=("voxel_leaf_size:=${1#*=}")
+      ;;
+    --voxel-leaf)
+      shift
+      LAUNCH_ARGS+=("voxel_leaf_size:=$(require_value --voxel-leaf "${1:-}")")
+      ;;
+    --rviz)
+      LAUNCH_ARGS+=("use_rviz:=true")
+      ;;
+    --no-rviz)
+      LAUNCH_ARGS+=("use_rviz:=false")
+      ;;
     --lite)
       LITE_MODE=true
       ;;
@@ -165,34 +199,12 @@ while [[ $# -gt 0 ]]; do
     --no-gui)
       LAUNCH_ARGS+=("gui:=false")
       ;;
-    --rviz)
-      LAUNCH_ARGS+=("use_rviz:=true")
-      ;;
-    --no-rviz)
-      LAUNCH_ARGS+=("use_rviz:=false")
-      ;;
-    -4|--quarter-resolution)
-      LIDAR_RESOLUTION_MODE="quarter"
-      ;;
-    -2|--half-resolution)
-      LIDAR_RESOLUTION_MODE="half"
-      ;;
-    -1|--full-resolution)
-      LIDAR_RESOLUTION_MODE="full"
-      ;;
     --world=*)
       LAUNCH_ARGS+=("world:=${1#*=}")
       ;;
     --world)
       shift
       LAUNCH_ARGS+=("world:=$(require_value --world "${1:-}")")
-      ;;
-    --rviz-config=*)
-      LAUNCH_ARGS+=("rviz_config:=${1#*=}")
-      ;;
-    --rviz-config)
-      shift
-      LAUNCH_ARGS+=("rviz_config:=$(require_value --rviz-config "${1:-}")")
       ;;
     --lidar-pattern=*)
       LAUNCH_ARGS+=("lidar_pattern_file:=$(validate_lidar_pattern_file "${1#*=}")")
@@ -203,10 +215,26 @@ while [[ $# -gt 0 ]]; do
       ;;
     --robot-name=*)
       LAUNCH_ARGS+=("robot_name:=${1#*=}")
+      ROBOT_NAME_SET=true
       ;;
     --robot-name)
       shift
       LAUNCH_ARGS+=("robot_name:=$(require_value --robot-name "${1:-}")")
+      ROBOT_NAME_SET=true
+      ;;
+    --glim-package=*)
+      LAUNCH_ARGS+=("glim_package:=${1#*=}")
+      ;;
+    --glim-package)
+      shift
+      LAUNCH_ARGS+=("glim_package:=$(require_value --glim-package "${1:-}")")
+      ;;
+    --glim-executable=*)
+      LAUNCH_ARGS+=("glim_executable:=${1#*=}")
+      ;;
+    --glim-executable)
+      shift
+      LAUNCH_ARGS+=("glim_executable:=$(require_value --glim-executable "${1:-}")")
       ;;
     *:=*)
       echo "Do not use ROS 2 launch argument syntax here: $1" >&2
@@ -222,36 +250,35 @@ while [[ $# -gt 0 ]]; do
   shift
 done
 
-# lite指定時は1/4解像度を既定値にし、個別オプションがあればそちらを優先する。
+# lite指定時はGazebo GUIを止め、LiDAR処理もsimulation launch側の軽量設定へ切り替える。
 LAUNCH_ARGS+=("lite:=${LITE_MODE}")
-case "${LIDAR_RESOLUTION_MODE}" in
-  quarter)
-    LAUNCH_ARGS+=("half_lidar_resolution:=false" "quarter_lidar_resolution:=true")
-    ;;
-  half)
-    LAUNCH_ARGS+=("half_lidar_resolution:=true" "quarter_lidar_resolution:=false")
-    ;;
-  full)
-    LAUNCH_ARGS+=("half_lidar_resolution:=false" "quarter_lidar_resolution:=false")
-    ;;
-  default)
-    LAUNCH_ARGS+=("half_lidar_resolution:=false" "quarter_lidar_resolution:=false")
-    ;;
-esac
+if [[ "${LITE_MODE}" == "true" ]]; then
+  LAUNCH_ARGS+=("gui:=false")
+fi
+
+# Gazebo entity名の衝突を避けるため、未指定時だけ一意な名前を使う。
+if [[ "${ROBOT_NAME_SET}" == "false" ]]; then
+  LAUNCH_ARGS+=("robot_name:=ai_ship_robot_glim_$$")
+fi
 
 source_workspace_environment false
 
 if [[ "${BUILD_WORKSPACE}" == "true" ]]; then
-  # --build指定時だけ workspace setup を実行し、通常起動では再buildを避ける。
+  # simulation起動時だけsimulation workspace setupも実行し、production scriptには持ち込まない。
   bash "${SETUP_RUNTIME_SCRIPT}"
   bash "${SETUP_SIMULATION_SCRIPT}"
 fi
 
+if [[ ! -f "${WORKSPACE_ROOT}/ros2_ws/install/setup.bash" ]]; then
+  echo "Missing ros2_ws/install/setup.bash. Run bash scripts/install/setup.sh first." >&2
+  exit 1
+fi
+
 if [[ ! -f "${WORKSPACE_ROOT}/ros2_ws_sim/install/setup.bash" ]]; then
-  echo "Missing ros2_ws_sim/install/setup.bash. Run bash scripts/install/setup.sh && bash scripts/install/sim/setup.sh first." >&2
+  echo "Missing ros2_ws_sim/install/setup.bash. Run bash scripts/install/sim/setup.sh first." >&2
   exit 1
 fi
 
 source_workspace_environment
 
-ros2 launch ai_ship_robot_gazebo simulation.launch.py "${LAUNCH_ARGS[@]}"
+ros2 launch ai_ship_robot_gazebo sim_glim.launch.py "${LAUNCH_ARGS[@]}"

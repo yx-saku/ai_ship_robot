@@ -6,9 +6,9 @@
     "imu_bias_noise": 1e-5,
     "global_shutter_lidar": true,
     "T_lidar_imu": [
-      0.0,
-      0.0,
-      0.0,
+      0.011,
+      0.02329,
+      -0.04412,
       0.0,
       0.0,
       0.0,

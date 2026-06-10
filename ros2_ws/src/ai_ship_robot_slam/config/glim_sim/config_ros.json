@@ -6,9 +6,9 @@
     "imu_time_offset": 0.0,
     "points_time_offset": 0.0,
     "acc_scale": 0.0,
-    "imu_frame_id": "imu_link",
-    "lidar_frame_id": "base_link",
-    "base_frame_id": "base_link",
+    "imu_frame_id": "left_lidar_imu_link",
+    "lidar_frame_id": "left_lidar_link",
+    "base_frame_id": "base_footprint",
     "odom_frame_id": "glim_odom",
     "map_frame_id": "map",
     "publish_imu2lidar": false,
@@ -16,7 +16,7 @@
     "extension_modules": [
       "librviz_viewer.so"
     ],
-    "imu_topic": "/imu/data",
+    "imu_topic": "/left_lidar/imu",
     "points_topic": "/slam/points",
     "image_topic": "/image",
     "imu_qos": {

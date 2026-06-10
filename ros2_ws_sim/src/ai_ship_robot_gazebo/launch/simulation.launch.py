@@ -20,6 +20,7 @@ def generate_launch_description():
     lidar_pattern_file = LaunchConfiguration("lidar_pattern_file")
     half_lidar_resolution = LaunchConfiguration("half_lidar_resolution")
     quarter_lidar_resolution = LaunchConfiguration("quarter_lidar_resolution")
+    publish_odom_tf = LaunchConfiguration("publish_odom_tf")
     effective_gui = PythonExpression(["'false' if '", lite, "' == 'true' else '", gui, "'"])
     effective_half_lidar_resolution = PythonExpression(
         [
@@ -57,6 +58,8 @@ def generate_launch_description():
                 effective_half_lidar_resolution,
                 " quarter_lidar_resolution:=",
                 effective_quarter_lidar_resolution,
+                " publish_odom_tf:=",
+                publish_odom_tf,
             ]
         ),
         value_type=str,
@@ -122,6 +125,7 @@ def generate_launch_description():
             DeclareLaunchArgument("lidar_pattern_file", default_value="lidar_pattern_dual_updown.urdf.xacro"),
             DeclareLaunchArgument("half_lidar_resolution", default_value="false"),
             DeclareLaunchArgument("quarter_lidar_resolution", default_value="false"),
+            DeclareLaunchArgument("publish_odom_tf", default_value="true"),
             DeclareLaunchArgument(
                 "rviz_config",
                 default_value=PathJoinSubstitution(

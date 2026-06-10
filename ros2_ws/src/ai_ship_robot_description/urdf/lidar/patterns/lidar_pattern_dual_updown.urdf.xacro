@@ -21,7 +21,9 @@
     z="${lidar_z}"
     roll="${lidar_roll}"
     pitch="${left_lidar_pitch}"
-    yaw="${lidar_yaw}" />
+    yaw="${lidar_yaw}"
+    enable_imu="true"
+    imu_topic="/left_lidar/imu" />
 
   <xacro:mid360_lidar
     prefix="right"
