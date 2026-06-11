@@ -8,7 +8,7 @@
   <xacro:property name="lidar_left_y" value="${base_width / 2.0 - mid360_width / 2.0}" />
   <xacro:property name="lidar_right_y" value="${-lidar_left_y}" />
   <xacro:property name="lidar_ground_height" value="0.150" />
-  <xacro:property name="lidar_z" value="${lidar_ground_height - wheel_radius}" />
+  <xacro:property name="lidar_z" value="${lidar_ground_height}" />
   <xacro:property name="lidar_roll" value="0.0" />
   <xacro:property name="lidar_yaw" value="0.0" />
   <xacro:property name="left_lidar_pitch" value="${120.0 * deg_to_rad}" />
@@ -32,5 +32,7 @@
     z="${lidar_z}"
     roll="${lidar_roll}"
     pitch="${right_lidar_pitch}"
-    yaw="${lidar_yaw}" />
+    yaw="${lidar_yaw}"
+    enable_imu="true"
+    imu_topic="/right_lidar/imu" />
 </robot>

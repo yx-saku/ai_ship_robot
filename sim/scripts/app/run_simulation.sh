@@ -10,6 +10,10 @@ SETUP_SIMULATION_SCRIPT="${SIM_ROOT}/scripts/install/setup.sh"
 LIDAR_PATTERN_DIR="${SIM_ROOT}/ros2_ws/src/ai_ship_robot_description/urdf/lidar/patterns"
 AI_SHIP_ROBOT_OPT_ROOT="${AI_SHIP_ROBOT_OPT_ROOT:-/opt/ai_ship_robot}"
 THIRD_PARTY_UNDERLAY_SETUP="${AI_SHIP_ROBOT_OPT_ROOT}/ros_underlay/${ROS_DISTRO}/third_party_ws/install/setup.bash"
+DEFAULT_LIDAR_TOPICS=("/left_lidar/custom" "/right_lidar/custom")
+DEFAULT_IMU_TOPICS=("/left_lidar/imu" "/right_lidar/imu")
+ROSBAG_PID=""
+ROSBAG_ROOT="${WORKSPACE_ROOT}/rosbag2"
 
 print_available_lidar_patterns() {
   local indent="${1:-}"
@@ -48,8 +52,13 @@ Options:
   --world PATH        Use a custom Gazebo Classic world.
   --rviz-config PATH  Use a custom RViz config.
   --lidar-pattern FILE
-                      Use a LiDAR pattern xacro file name.
+                       Use a LiDAR pattern xacro file name.
   --robot-name NAME   Set the spawned robot name.
+  --record-bag        Record LiDAR CustomMsg, IMU, /clock, /tf, and /tf_static while simulation runs.
+  --bag-output PATH   Set rosbag output directory or prefix.
+  --bag-topics CSV    Add extra record topics as comma-separated list.
+  --lidar-topics CSV  Override recorded LiDAR CustomMsg topics as comma-separated list.
+  --imu-topics CSV    Override recorded IMU topics as comma-separated list.
   -h, --help          Show this help.
 
 Available LiDAR patterns:
@@ -142,10 +151,87 @@ source_overlay_if_current() {
   source "${setup_file}"
 }
 
+parse_csv_topics() {
+  local csv="$1"
+  local topic=""
+  local topics=()
+
+  IFS=',' read -r -a topics <<< "${csv}"
+  for topic in "${topics[@]}"; do
+    topic="${topic//[[:space:]]/}"
+    [[ -n "${topic}" ]] && printf '%s\n' "${topic}"
+  done
+}
+
+append_unique_topics() {
+  local array_name="$1"
+  shift
+  local -n target_array="${array_name}"
+  local candidate=""
+  local existing=""
+  local found=0
+
+  for candidate in "$@"; do
+    [[ -n "${candidate}" ]] || continue
+    found=0
+    for existing in "${target_array[@]}"; do
+      if [[ "${existing}" == "${candidate}" ]]; then
+        found=1
+        break
+      fi
+    done
+    if [[ "${found}" -eq 0 ]]; then
+      target_array+=("${candidate}")
+    fi
+  done
+}
+
+start_rosbag_record() {
+  local output_path="$1"
+  local use_sim_time="$2"
+  shift 2
+  local topics=("$@")
+  local record_cmd=(ros2 bag record --include-hidden-topics)
+
+  mkdir -p "${ROSBAG_ROOT}"
+  if [[ -n "${output_path}" ]]; then
+    record_cmd+=(--output "${output_path}")
+  fi
+  if [[ "${use_sim_time}" == "true" ]]; then
+    record_cmd+=(--use-sim-time)
+  fi
+
+  record_cmd+=("${topics[@]}")
+  echo "Rosbag output: ${output_path}" >&2
+  echo "Recording rosbag topics: ${topics[*]}" >&2
+  "${record_cmd[@]}" &
+  ROSBAG_PID=$!
+}
+
+default_bag_output() {
+  # 保存先をworkspace直下へ集約し、開発時の回収場所を固定する。
+  printf '%s/sim_%(%Y%m%d_%H%M%S)T' "${ROSBAG_ROOT}" -1
+}
+
+cleanup_background_processes() {
+  # rosbag recordへINTを送り、metadata flushの機会を与えてbag破損を避ける。
+  if [[ -n "${ROSBAG_PID}" ]] && kill -0 "${ROSBAG_PID}" 2>/dev/null; then
+    kill -INT "${ROSBAG_PID}" 2>/dev/null || true
+    wait "${ROSBAG_PID}" 2>/dev/null || true
+  fi
+}
+
 LAUNCH_ARGS=()
 BUILD_WORKSPACE=false
 LITE_MODE=false
 LIDAR_RESOLUTION_MODE="default"
+RECORD_BAG=false
+BAG_OUTPUT=""
+LIDAR_TOPICS=("${DEFAULT_LIDAR_TOPICS[@]}")
+IMU_TOPICS=("${DEFAULT_IMU_TOPICS[@]}")
+EXTRA_BAG_TOPICS=()
+
+trap cleanup_background_processes EXIT
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -208,6 +294,37 @@ while [[ $# -gt 0 ]]; do
       shift
       LAUNCH_ARGS+=("robot_name:=$(require_value --robot-name "${1:-}")")
       ;;
+    --record-bag)
+      RECORD_BAG=true
+      ;;
+    --bag-output=*)
+      BAG_OUTPUT="${1#*=}"
+      ;;
+    --bag-output)
+      shift
+      BAG_OUTPUT="$(require_value --bag-output "${1:-}")"
+      ;;
+    --bag-topics=*)
+      mapfile -t EXTRA_BAG_TOPICS < <(parse_csv_topics "${1#*=}")
+      ;;
+    --bag-topics)
+      shift
+      mapfile -t EXTRA_BAG_TOPICS < <(parse_csv_topics "$(require_value --bag-topics "${1:-}")")
+      ;;
+    --lidar-topics=*)
+      mapfile -t LIDAR_TOPICS < <(parse_csv_topics "${1#*=}")
+      ;;
+    --lidar-topics)
+      shift
+      mapfile -t LIDAR_TOPICS < <(parse_csv_topics "$(require_value --lidar-topics "${1:-}")")
+      ;;
+    --imu-topics=*)
+      mapfile -t IMU_TOPICS < <(parse_csv_topics "${1#*=}")
+      ;;
+    --imu-topics)
+      shift
+      mapfile -t IMU_TOPICS < <(parse_csv_topics "$(require_value --imu-topics "${1:-}")")
+      ;;
     *:=*)
       echo "Do not use ROS 2 launch argument syntax here: $1" >&2
       echo "Use shell options instead. Run with --help to see available options." >&2
@@ -255,5 +372,17 @@ if [[ ! -f "${SIM_ROOT}/ros2_ws/install/setup.bash" ]]; then
 fi
 
 source_workspace_environment
+
+if [[ "${RECORD_BAG}" == "true" ]]; then
+  if [[ -z "${BAG_OUTPUT}" ]]; then
+    BAG_OUTPUT="$(default_bag_output)"
+  fi
+  BAG_TOPICS=()
+  append_unique_topics BAG_TOPICS "${LIDAR_TOPICS[@]}"
+  append_unique_topics BAG_TOPICS "${IMU_TOPICS[@]}"
+  append_unique_topics BAG_TOPICS "${EXTRA_BAG_TOPICS[@]}"
+  append_unique_topics BAG_TOPICS "/clock" "/tf" "/tf_static"
+  start_rosbag_record "${BAG_OUTPUT}" true "${BAG_TOPICS[@]}"
+fi
 
 ros2 launch ai_ship_robot_gazebo simulation.launch.py "${LAUNCH_ARGS[@]}"

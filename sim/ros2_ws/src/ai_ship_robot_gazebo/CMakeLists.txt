@@ -11,6 +11,7 @@ install(
 install(
   PROGRAMS
     scripts/keyboard_drive.py
+    scripts/scripted_drive.py
   DESTINATION lib/${PROJECT_NAME}
 )
 

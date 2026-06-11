@@ -4,6 +4,12 @@
     <gravity>0 0 -9.81</gravity>
     <magnetic_field>6.0e-6 2.3e-5 -4.2e-5</magnetic_field>
     <atmosphere type="adiabatic" />
+    <!-- /clock の更新粒度を上げるため、physics step を 1ms 基準に固定する。 -->
+    <physics type="ode">
+      <real_time_update_rate>1000</real_time_update_rate>
+      <max_step_size>0.001</max_step_size>
+      <real_time_factor>1.0</real_time_factor>
+    </physics>
 
     <light name="sun" type="directional">
       <cast_shadows>true</cast_shadows>

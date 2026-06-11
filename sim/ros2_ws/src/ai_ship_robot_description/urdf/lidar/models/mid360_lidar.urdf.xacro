@@ -20,7 +20,7 @@
       <sensor name="${prefix}_lidar_link" type="ray">
         <always_on>true</always_on>
         <visualize>false</visualize>
-        <update_rate>10</update_rate>
+        <update_rate>5</update_rate>
         <!-- Livox pluginの要求に合わせ、可視化用のray設定とCSV走査設定を同居させる。 -->
         <plugin name="${prefix}_livox_plugin" filename="libros2_livox.so">
           <ray>
@@ -76,9 +76,10 @@
     <gazebo reference="${prefix}_lidar_imu_link">
       <sensor name="${prefix}_lidar_imu" type="imu">
         <always_on>true</always_on>
-        <update_rate>100</update_rate>
+        <update_rate>200</update_rate>
         <!-- Mid-360内蔵IMUとして扱えるよう、IMU topicとframeをLiDAR個体に紐付ける。 -->
         <plugin filename="libgazebo_ros_imu_sensor.so" name="${prefix}_gazebo_ros_imu_sensor">
+          <updateRateHZ>200.0</updateRateHZ>
           <ros>
             <namespace>/</namespace>
             <remapping>~/out:=${imu_topic}</remapping>

@@ -1,6 +1,17 @@
 services:
   ai-ship-robot-dev:
-    # Dev Container設定を主とし、このcomposeはDockerfile build検証だけに使う。
+    # Dev Containerとdocker compose buildの経路を揃え、同じBuildKit cacheを再利用できるようにする。
     build:
       context: .
       dockerfile: .devcontainer/Dockerfile
+      network: host
+      args:
+        BASE_IMAGE: ${BASE_IMAGE:-ubuntu:22.04}
+        ROS_DISTRO: ${ROS_DISTRO:-humble}
+        APT_PRIMARY_MIRROR: ${APT_PRIMARY_MIRROR:-}
+        APT_SECURITY_MIRROR: ${APT_SECURITY_MIRROR:-}
+        APT_FORCE_IPV4: ${APT_FORCE_IPV4:-true}
+        APT_RETRIES: ${APT_RETRIES:-3}
+        APT_HTTP_TIMEOUT: ${APT_HTTP_TIMEOUT:-20}
+    # compose利用時のhost networkはservice定義側に残し、Dev Container接続時の互換性を優先する。
+    network_mode: host

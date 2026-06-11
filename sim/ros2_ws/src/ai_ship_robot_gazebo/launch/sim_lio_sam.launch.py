@@ -12,8 +12,10 @@ def generate_launch_description():
     world = LaunchConfiguration("world")
     robot_name = LaunchConfiguration("robot_name")
     lidar_pattern_file = LaunchConfiguration("lidar_pattern_file")
+    fusion_config = LaunchConfiguration("fusion_config")
     params_file = LaunchConfiguration("params_file")
-    points_topic = LaunchConfiguration("points_topic")
+    fused_points_topic = LaunchConfiguration("fused_points_topic")
+    reference_lidar_frame = LaunchConfiguration("reference_lidar_frame")
     imu_topic = LaunchConfiguration("imu_topic")
     lio_points_topic = LaunchConfiguration("lio_points_topic")
     lidar_frame = LaunchConfiguration("lidar_frame")
@@ -24,6 +26,7 @@ def generate_launch_description():
     derived_ring_count = LaunchConfiguration("derived_ring_count")
     min_vertical_angle_deg = LaunchConfiguration("min_vertical_angle_deg")
     max_vertical_angle_deg = LaunchConfiguration("max_vertical_angle_deg")
+    fusion_timestamp_unit_scale = LaunchConfiguration("fusion_timestamp_unit_scale")
     publish_map_to_odom_tf = LaunchConfiguration("publish_map_to_odom_tf")
     lio_sam_package = LaunchConfiguration("lio_sam_package")
 
@@ -57,8 +60,10 @@ def generate_launch_description():
         launch_arguments={
             "use_sim_time": "true",
             "use_rviz": use_rviz,
+            "fusion_config": fusion_config,
             "params_file": params_file,
-            "points_topic": points_topic,
+            "fused_points_topic": fused_points_topic,
+            "reference_lidar_frame": reference_lidar_frame,
             "imu_topic": imu_topic,
             "lio_points_topic": lio_points_topic,
             "lidar_frame": lidar_frame,
@@ -69,6 +74,7 @@ def generate_launch_description():
             "derived_ring_count": derived_ring_count,
             "min_vertical_angle_deg": min_vertical_angle_deg,
             "max_vertical_angle_deg": max_vertical_angle_deg,
+            "fusion_timestamp_unit_scale": fusion_timestamp_unit_scale,
             "publish_map_to_odom_tf": publish_map_to_odom_tf,
             "lio_sam_package": lio_sam_package,
         }.items(),
@@ -81,7 +87,8 @@ def generate_launch_description():
             DeclareLaunchArgument("robot_name", default_value="ai_ship_robot"),
             DeclareLaunchArgument("lite", default_value="false"),
             DeclareLaunchArgument("lidar_pattern_file", default_value="lidar_pattern_dual_updown.urdf.xacro"),
-            DeclareLaunchArgument("points_topic", default_value="/left_lidar/points"),
+            DeclareLaunchArgument("fused_points_topic", default_value="/left_lidar/fused_points"),
+            DeclareLaunchArgument("reference_lidar_frame", default_value="left_lidar_link"),
             DeclareLaunchArgument("imu_topic", default_value="/left_lidar/imu"),
             DeclareLaunchArgument("lio_points_topic", default_value="/left_lidar/lio_sam_points"),
             DeclareLaunchArgument("lidar_frame", default_value="left_lidar_link"),
@@ -92,8 +99,15 @@ def generate_launch_description():
             DeclareLaunchArgument("derived_ring_count", default_value="4"),
             DeclareLaunchArgument("min_vertical_angle_deg", default_value="-7.22"),
             DeclareLaunchArgument("max_vertical_angle_deg", default_value="55.22"),
+            DeclareLaunchArgument("fusion_timestamp_unit_scale", default_value="1.0e-9"),
             DeclareLaunchArgument("publish_map_to_odom_tf", default_value="true"),
             DeclareLaunchArgument("lio_sam_package", default_value="lio_sam"),
+            DeclareLaunchArgument(
+                "fusion_config",
+                default_value=PathJoinSubstitution(
+                    [FindPackageShare("ai_ship_robot_slam"), "config", "multi_lidar_fusion.yaml"]
+                ),
+            ),
             DeclareLaunchArgument(
                 "world",
                 default_value=PathJoinSubstitution(

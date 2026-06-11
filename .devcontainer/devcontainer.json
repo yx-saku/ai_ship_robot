@@ -1,33 +1,15 @@
 {
   "name": "ai-ship-robot-ros2-humble",
-  "build": {
-    "dockerfile": "Dockerfile",
-    "context": "..",
-    "options": [
-      "--network=host"
-    ],
-    "args": {
-      "BASE_IMAGE": "ubuntu:22.04",
-      "ROS_DISTRO": "humble",
-      "APT_PRIMARY_MIRROR": "${localEnv:APT_PRIMARY_MIRROR}",
-      "APT_SECURITY_MIRROR": "${localEnv:APT_SECURITY_MIRROR}",
-      "APT_FORCE_IPV4": "${localEnv:APT_FORCE_IPV4:true}",
-      "APT_RETRIES": "${localEnv:APT_RETRIES:3}",
-      "APT_HTTP_TIMEOUT": "${localEnv:APT_HTTP_TIMEOUT:20}"
-    }
-  },
+  "dockerComposeFile": [
+    "../docker-compose.yml"
+  ],
+  "service": "ai-ship-robot-dev",
   "workspaceFolder": "/workspaces/ai_ship_robot",
   "remoteUser": "ros",
-  "runArgs": [
-    "--net=host",
-    "-e",
-    "DISPLAY=${localEnv:DISPLAY}",
-    "-e",
-    "QT_X11_NO_MITSHM=1",
-    "-v",
-    "/tmp/.X11-unix:/tmp/.X11-unix:rw"
-  ],
+  "overrideCommand": true,
   "containerEnv": {
+    "DISPLAY": "${localEnv:DISPLAY}",
+    "QT_X11_NO_MITSHM": "1",
     "APT_PRIMARY_MIRROR": "${localEnv:APT_PRIMARY_MIRROR}",
     "APT_SECURITY_MIRROR": "${localEnv:APT_SECURITY_MIRROR}",
     "APT_FORCE_IPV4": "${localEnv:APT_FORCE_IPV4:true}",
@@ -55,6 +37,8 @@
     }
   },
   "mounts": [
+    "source=${localWorkspaceFolder},target=/workspaces/ai_ship_robot,type=bind,consistency=cached",
+    "source=/tmp/.X11-unix,target=/tmp/.X11-unix,type=bind,consistency=cached",
     "source=${localWorkspaceFolder}/.devcontainer/.config/kilo,target=/home/ros/.config/kilo,type=bind",
     "source=${localWorkspaceFolder}/.devcontainer/.local/state/kilo,target=/home/ros/.local/state/kilo,type=bind",
     "source=${localWorkspaceFolder}/.devcontainer/.local/share/kilo,target=/home/ros/.local/share/kilo,type=bind",

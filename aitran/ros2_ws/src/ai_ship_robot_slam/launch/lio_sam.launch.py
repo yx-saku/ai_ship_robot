@@ -12,8 +12,10 @@ def generate_launch_description():
     use_rviz = LaunchConfiguration("use_rviz")
     use_adapter = LaunchConfiguration("use_adapter")
     params_file = LaunchConfiguration("params_file")
+    fusion_config = LaunchConfiguration("fusion_config")
     rviz_config = LaunchConfiguration("rviz_config")
-    points_topic = LaunchConfiguration("points_topic")
+    fused_points_topic = LaunchConfiguration("fused_points_topic")
+    reference_lidar_frame = LaunchConfiguration("reference_lidar_frame")
     imu_topic = LaunchConfiguration("imu_topic")
     lio_points_topic = LaunchConfiguration("lio_points_topic")
     lidar_frame = LaunchConfiguration("lidar_frame")
@@ -23,8 +25,23 @@ def generate_launch_description():
     derived_ring_count = LaunchConfiguration("derived_ring_count")
     min_vertical_angle_deg = LaunchConfiguration("min_vertical_angle_deg")
     max_vertical_angle_deg = LaunchConfiguration("max_vertical_angle_deg")
+    fusion_timestamp_unit_scale = LaunchConfiguration("fusion_timestamp_unit_scale")
     publish_map_to_odom_tf = LaunchConfiguration("publish_map_to_odom_tf")
     lio_sam_package = LaunchConfiguration("lio_sam_package")
+
+    # 複数LiDARを基準LiDAR座標系へ集約し、LIO-SAMへ渡す入力点群を1本化する。
+    fusion = Node(
+        package="ai_ship_robot_slam",
+        executable="multi_lidar_pointcloud_fusion_node",
+        name="multi_lidar_pointcloud_fusion_node",
+        output="screen",
+        parameters=[
+            fusion_config,
+            {
+                "use_sim_time": use_sim_time,
+            },
+        ],
+    )
 
     lio_sam_parameters = [
         params_file,
@@ -49,7 +66,7 @@ def generate_launch_description():
         parameters=[
             {
                 "use_sim_time": use_sim_time,
-                "input_points_topic": points_topic,
+                "input_points_topic": fused_points_topic,
                 "output_points_topic": lio_points_topic,
                 "output_frame": lidar_frame,
                 "derived_ring_count": ParameterValue(derived_ring_count, value_type=int),
@@ -132,7 +149,8 @@ def generate_launch_description():
             DeclareLaunchArgument("use_sim_time", default_value="false"),
             DeclareLaunchArgument("use_rviz", default_value="true"),
             DeclareLaunchArgument("use_adapter", default_value="true"),
-            DeclareLaunchArgument("points_topic", default_value="/left_lidar/points"),
+            DeclareLaunchArgument("fused_points_topic", default_value="/left_lidar/fused_points"),
+            DeclareLaunchArgument("reference_lidar_frame", default_value="left_lidar_link"),
             DeclareLaunchArgument("imu_topic", default_value="/left_lidar/imu"),
             DeclareLaunchArgument("lio_points_topic", default_value="/left_lidar/lio_sam_points"),
             DeclareLaunchArgument("lidar_frame", default_value="left_lidar_link"),
@@ -142,8 +160,15 @@ def generate_launch_description():
             DeclareLaunchArgument("derived_ring_count", default_value="4"),
             DeclareLaunchArgument("min_vertical_angle_deg", default_value="-7.22"),
             DeclareLaunchArgument("max_vertical_angle_deg", default_value="55.22"),
+            DeclareLaunchArgument("fusion_timestamp_unit_scale", default_value="1.0e-9"),
             DeclareLaunchArgument("publish_map_to_odom_tf", default_value="true"),
             DeclareLaunchArgument("lio_sam_package", default_value="lio_sam"),
+            DeclareLaunchArgument(
+                "fusion_config",
+                default_value=PathJoinSubstitution(
+                    [FindPackageShare("ai_ship_robot_slam"), "config", "multi_lidar_fusion.yaml"]
+                ),
+            ),
             DeclareLaunchArgument(
                 "params_file",
                 default_value=PathJoinSubstitution(
@@ -154,6 +179,7 @@ def generate_launch_description():
                 "rviz_config",
                 default_value=PathJoinSubstitution([FindPackageShare("lio_sam"), "config", "rviz2.rviz"]),
             ),
+            fusion,
             adapter,
             map_to_odom_tf,
             imu_preintegration,

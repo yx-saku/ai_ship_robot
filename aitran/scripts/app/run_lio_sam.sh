@@ -14,32 +14,36 @@ usage() {
 Usage: bash aitran/scripts/app/run_lio_sam.sh [OPTIONS]
 
 Options:
-  --build                Build/install required workspace profile before launch.
-  --config PATH          Use a LIO-SAM params YAML file.
-  --points TOPIC         Set raw Mid-360 PointCloud2 topic.
-  --imu TOPIC            Set Mid-360 IMU topic.
-  --lio-points TOPIC     Set adapted PointCloud2 topic passed to LIO-SAM.
-  --adapter              Enable Mid-360 PointCloud2 adapter. Default.
-  --no-adapter           Disable adapter and pass --lio-points directly to LIO-SAM.
-  --lidar-frame FRAME    Set LIO-SAM lidar frame.
-  --base-frame FRAME     Set LIO-SAM base frame.
-  --odom-frame FRAME     Set LIO-SAM odom frame.
-  --map-frame FRAME      Set LIO-SAM map frame.
-  --derived-ring-count N Set pseudo ring count when raw cloud has no ring/line field.
-  --min-vertical-angle DEG
-                         Set minimum vertical angle for pseudo ring derivation.
-  --max-vertical-angle DEG
-                         Set maximum vertical angle for pseudo ring derivation.
-  --use-sim-time         Use ROS simulation time for Gazebo or rosbag playback.
-  --no-use-sim-time      Use system time. Default.
-  --rviz                 Enable RViz2.
-  --no-rviz              Disable RViz2.
-  --publish-map-to-odom-tf
-                         Publish static map -> odom TF. Default.
-  --no-publish-map-to-odom-tf
-                         Disable static map -> odom TF.
-  --lio-sam-package NAME Set LIO-SAM ROS package name.
-  -h, --help             Show this help.
+  --build                     Build/install required workspace profile before launch.
+  --config PATH               Use a LIO-SAM params YAML file.
+  --fusion-config PATH        Use a multi-LiDAR fusion params YAML file.
+  --input-points CSV          Set input PointCloud2 topics as comma-separated list.
+  --left-points TOPIC         Compatibility alias for adding / replacing left LiDAR CustomMsg input.
+  --right-points TOPIC        Compatibility alias for adding / replacing right LiDAR CustomMsg input.
+  --reference-points TOPIC    Set reference LiDAR PointCloud2 topic.
+  --reference-lidar-frame FRAME
+                              Set reference LiDAR frame used for fusion output.
+  --fused-points TOPIC        Set fused PointCloud2 topic before adapter.
+  --imu TOPIC                 Set reference LiDAR IMU topic.
+  --lio-points TOPIC          Set adapted PointCloud2 topic passed to LIO-SAM.
+  --adapter                   Enable Mid-360 PointCloud2 adapter. Default.
+  --no-adapter                Disable adapter and pass --lio-points directly to LIO-SAM.
+  --lidar-frame FRAME         Set LIO-SAM lidar frame.
+  --base-frame FRAME          Set LIO-SAM base frame.
+  --odom-frame FRAME          Set LIO-SAM odom frame.
+  --map-frame FRAME           Set LIO-SAM map frame.
+  --derived-ring-count N      Set pseudo ring count when raw cloud has no ring/line field.
+  --min-vertical-angle DEG    Set minimum vertical angle for pseudo ring derivation.
+  --max-vertical-angle DEG    Set maximum vertical angle for pseudo ring derivation.
+  --fusion-timestamp-scale S  Set integer point timestamp unit scale for fusion.
+  --use-sim-time              Use ROS simulation time for Gazebo or rosbag playback.
+  --no-use-sim-time           Use system time. Default.
+  --rviz                      Enable RViz2.
+  --no-rviz                   Disable RViz2.
+  --publish-map-to-odom-tf    Publish static map -> odom TF. Default.
+  --no-publish-map-to-odom-tf Disable static map -> odom TF.
+  --lio-sam-package NAME      Set LIO-SAM ROS package name.
+  -h, --help                  Show this help.
 EOF
 }
 
@@ -111,6 +115,38 @@ source_workspace_environment() {
 
 BUILD_WORKSPACE=false
 LAUNCH_ARGS=()
+LEFT_POINTS_TOPIC=""
+RIGHT_POINTS_TOPIC=""
+
+format_topic_list() {
+  local values=("$@")
+  local result="["
+  local index=0
+
+  for value in "${values[@]}"; do
+    [[ -n "${value}" ]] || continue
+    if [[ "${index}" -gt 0 ]]; then
+      result+=", "
+    fi
+    result+="'${value}'"
+    index=$((index + 1))
+  done
+
+  result+="]"
+  printf '%s' "${result}"
+}
+
+parse_csv_topics() {
+  local csv="$1"
+  local topic=""
+  local topics=()
+
+  IFS=',' read -r -a topics <<< "${csv}"
+  for topic in "${topics[@]}"; do
+    topic="${topic//[[:space:]]/}"
+    [[ -n "${topic}" ]] && printf '%s\n' "${topic}"
+  done
+}
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -128,12 +164,76 @@ while [[ $# -gt 0 ]]; do
       shift
       LAUNCH_ARGS+=("params_file:=$(require_value --config "${1:-}")")
       ;;
+    --fusion-config=*)
+      LAUNCH_ARGS+=("fusion_config:=${1#*=}")
+      ;;
+    --fusion-config)
+      shift
+      LAUNCH_ARGS+=("fusion_config:=$(require_value --fusion-config "${1:-}")")
+      ;;
+    --input-points=*)
+      mapfile -t input_topics < <(parse_csv_topics "${1#*=}")
+      if [[ "${#input_topics[@]}" -eq 0 ]]; then
+        echo "--input-points requires at least one topic." >&2
+        exit 2
+      fi
+      LAUNCH_ARGS+=("input_points_topics:=$(format_topic_list "${input_topics[@]}")")
+      ;;
+    --input-points)
+      shift
+      input_points_value="$(require_value --input-points "${1:-}")"
+      mapfile -t input_topics < <(parse_csv_topics "${input_points_value}")
+      if [[ "${#input_topics[@]}" -eq 0 ]]; then
+        echo "--input-points requires at least one topic." >&2
+        exit 2
+      fi
+      LAUNCH_ARGS+=("input_points_topics:=$(format_topic_list "${input_topics[@]}")")
+      ;;
     --points=*)
-      LAUNCH_ARGS+=("points_topic:=${1#*=}")
+      points_topic="${1#*=}"
+      LAUNCH_ARGS+=("input_points_topics:=$(format_topic_list "${points_topic}")")
+      LAUNCH_ARGS+=("reference_points_topic:=${points_topic}")
       ;;
     --points)
       shift
-      LAUNCH_ARGS+=("points_topic:=$(require_value --points "${1:-}")")
+      points_topic="$(require_value --points "${1:-}")"
+      LAUNCH_ARGS+=("input_points_topics:=$(format_topic_list "${points_topic}")")
+      LAUNCH_ARGS+=("reference_points_topic:=${points_topic}")
+      ;;
+    --left-points=*)
+      LEFT_POINTS_TOPIC="${1#*=}"
+      ;;
+    --left-points)
+      shift
+      LEFT_POINTS_TOPIC="$(require_value --left-points "${1:-}")"
+      ;;
+    --right-points=*)
+      RIGHT_POINTS_TOPIC="${1#*=}"
+      ;;
+    --right-points)
+      shift
+      RIGHT_POINTS_TOPIC="$(require_value --right-points "${1:-}")"
+      ;;
+    --reference-points=*)
+      LAUNCH_ARGS+=("reference_points_topic:=${1#*=}")
+      ;;
+    --reference-points)
+      shift
+      LAUNCH_ARGS+=("reference_points_topic:=$(require_value --reference-points "${1:-}")")
+      ;;
+    --reference-lidar-frame=*)
+      LAUNCH_ARGS+=("reference_lidar_frame:=${1#*=}")
+      ;;
+    --reference-lidar-frame)
+      shift
+      LAUNCH_ARGS+=("reference_lidar_frame:=$(require_value --reference-lidar-frame "${1:-}")")
+      ;;
+    --fused-points=*)
+      LAUNCH_ARGS+=("fused_points_topic:=${1#*=}")
+      ;;
+    --fused-points)
+      shift
+      LAUNCH_ARGS+=("fused_points_topic:=$(require_value --fused-points "${1:-}")")
       ;;
     --imu=*)
       LAUNCH_ARGS+=("imu_topic:=${1#*=}")
@@ -204,6 +304,13 @@ while [[ $# -gt 0 ]]; do
       shift
       LAUNCH_ARGS+=("max_vertical_angle_deg:=$(require_value --max-vertical-angle "${1:-}")")
       ;;
+    --fusion-timestamp-scale=*)
+      LAUNCH_ARGS+=("fusion_timestamp_unit_scale:=${1#*=}")
+      ;;
+    --fusion-timestamp-scale)
+      shift
+      LAUNCH_ARGS+=("fusion_timestamp_unit_scale:=$(require_value --fusion-timestamp-scale "${1:-}")")
+      ;;
     --use-sim-time)
       LAUNCH_ARGS+=("use_sim_time:=true")
       ;;
@@ -242,6 +349,16 @@ while [[ $# -gt 0 ]]; do
   esac
   shift
 done
+
+if [[ -n "${LEFT_POINTS_TOPIC}" || -n "${RIGHT_POINTS_TOPIC}" ]]; then
+  input_topics=()
+  [[ -n "${LEFT_POINTS_TOPIC}" ]] && input_topics+=("${LEFT_POINTS_TOPIC}")
+  [[ -n "${RIGHT_POINTS_TOPIC}" ]] && input_topics+=("${RIGHT_POINTS_TOPIC}")
+  LAUNCH_ARGS+=("input_points_topics:=$(format_topic_list "${input_topics[@]}")")
+  if [[ -n "${LEFT_POINTS_TOPIC}" ]]; then
+    LAUNCH_ARGS+=("reference_points_topic:=${LEFT_POINTS_TOPIC}")
+  fi
+fi
 
 source_workspace_environment false
 

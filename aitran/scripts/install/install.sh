@@ -227,6 +227,8 @@ install_runtime_packages() {
     "ros-${ROS_DISTRO}-rosbag2"
     "ros-${ROS_DISTRO}-rosidl-default-generators"
     "ros-${ROS_DISTRO}-rosidl-default-runtime"
+    "ros-${ROS_DISTRO}-rqt"
+    "ros-${ROS_DISTRO}-rqt-common-plugins"
     "ros-${ROS_DISTRO}-sensor-msgs"
     "ros-${ROS_DISTRO}-std-msgs"
     "ros-${ROS_DISTRO}-tf2"

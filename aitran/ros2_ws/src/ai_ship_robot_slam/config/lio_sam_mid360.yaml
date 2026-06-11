@@ -1,12 +1,12 @@
 /**:
   ros__parameters:
-    # LIO-SAMへ渡すtopicはlaunch側でも上書きできるよう、ここでは左Mid-360を既定にする。
+    # LIO-SAMへ渡すtopicは、複数LiDAR合成後にadapterで整形した点群を既定にする。
     pointCloudTopic: /left_lidar/lio_sam_points
     imuTopic: /left_lidar/imu
     odomTopic: odometry/imu
     gpsTopic: odometry/gps
 
-    # 既存URDFのframe名に合わせ、map/odom/base/lidarの責務をLIO-SAMへ明示する。
+    # 基準LiDARは左LiDARとし、複数LiDAR合成後もLIO-SAMのLiDAR frameは左側を使う。
     lidarFrame: left_lidar_link
     baselinkFrame: base_footprint
     odometryFrame: odom
@@ -22,7 +22,7 @@
     savePCD: false
     savePCDDirectory: /tmp/ai_ship_robot_lio_sam/
 
-    # Mid-360はLivox系として扱い、adapterがring/timeをLIO-SAM互換フィールドへ正規化する。
+    # Mid-360はLivox系として扱い、fusion後のadapterがring/timeをLIO-SAM互換へ正規化する。
     sensor: livox
     N_SCAN: 4
     Horizon_SCAN: 10000
@@ -38,7 +38,7 @@
     imuGravity: 9.80511
     imuRPYWeight: 0.01
 
-    # URDFで定義しているMid-360のLiDAR->IMU並進をLIO-SAMにもそろえる。
+    # 現状既定の基準系は左LiDARと左IMUの組み合わせで、extrinsicもその対応を使う。
     extrinsicTrans: [0.011, 0.02329, -0.04412]
     extrinsicRot: [1.0, 0.0, 0.0,
                    0.0, 1.0, 0.0,

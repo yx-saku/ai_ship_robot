@@ -17,6 +17,11 @@ Usage: bash sim/scripts/app/drive_robot.sh [OPTIONS]
 
 Options:
   --build                  Run one-time environment setup before starting keyboard drive.
+  --auto                   Run scripted drive instead of keyboard drive.
+  --scenario FILE          YAML scenario file for scripted drive.
+  --once                   Run scenario once. Default for --auto.
+  --loop                   Loop scenario until interrupted.
+  --start-delay SEC        Wait before starting scripted drive. Default: 0.0
   --linear-speed VALUE     Forward/backward speed in m/s. Default: 0.20
   --lateral-speed VALUE    Left/right strafe speed in m/s. Default: 0.20
   --angular-speed VALUE    Yaw speed in rad/s. Default: 0.60
@@ -107,6 +112,10 @@ source_overlay_if_current() {
 trap cleanup_terminal EXIT
 
 BUILD_WORKSPACE=false
+AUTO_MODE=false
+SCENARIO_FILE=""
+START_DELAY_SEC="0.0"
+LOOP_SCENARIO=false
 LINEAR_SPEED="0.20"
 LATERAL_SPEED="0.20"
 ANGULAR_SPEED="0.60"
@@ -121,6 +130,29 @@ while [[ $# -gt 0 ]]; do
       ;;
     --build)
       BUILD_WORKSPACE=true
+      ;;
+    --auto)
+      AUTO_MODE=true
+      ;;
+    --scenario=*)
+      SCENARIO_FILE="${1#*=}"
+      ;;
+    --scenario)
+      shift
+      SCENARIO_FILE="$(require_value --scenario "${1:-}")"
+      ;;
+    --once)
+      LOOP_SCENARIO=false
+      ;;
+    --loop)
+      LOOP_SCENARIO=true
+      ;;
+    --start-delay=*)
+      START_DELAY_SEC="${1#*=}"
+      ;;
+    --start-delay)
+      shift
+      START_DELAY_SEC="$(require_value --start-delay "${1:-}")"
       ;;
     --linear-speed=*)
       LINEAR_SPEED="${1#*=}"
@@ -186,16 +218,36 @@ fi
 
 source_workspace_environment
 
-DRIVE_EXECUTABLE="$(ros2 pkg prefix ai_ship_robot_gazebo)/lib/ai_ship_robot_gazebo/keyboard_drive.py"
+# 自動モードは専用ノードを使い、TTY依存のkeyboard_driveとは実行経路を分離する。
+if [[ "${AUTO_MODE}" == "true" ]]; then
+  if [[ -z "${SCENARIO_FILE}" ]]; then
+    echo "--auto requires --scenario FILE." >&2
+    exit 2
+  fi
+  DRIVE_EXECUTABLE="$(ros2 pkg prefix ai_ship_robot_gazebo)/lib/ai_ship_robot_gazebo/scripted_drive.py"
+else
+  DRIVE_EXECUTABLE="$(ros2 pkg prefix ai_ship_robot_gazebo)/lib/ai_ship_robot_gazebo/keyboard_drive.py"
+fi
+
 if [[ ! -x "${DRIVE_EXECUTABLE}" ]]; then
-  echo "Missing keyboard_drive executable: ${DRIVE_EXECUTABLE}" >&2
+  echo "Missing drive executable: ${DRIVE_EXECUTABLE}" >&2
   echo "Run bash sim/scripts/app/drive_robot.sh --build or bash aitran/scripts/install/setup.sh && bash sim/scripts/install/setup.sh first." >&2
   exit 1
 fi
 
-"${DRIVE_EXECUTABLE}" --ros-args \
-  -p cmd_vel_topic:="${CMD_VEL_TOPIC}" \
-  -p linear_speed:="${LINEAR_SPEED}" \
-  -p lateral_speed:="${LATERAL_SPEED}" \
-  -p angular_speed:="${ANGULAR_SPEED}" \
-  -p publish_rate:="${PUBLISH_RATE}"
+if [[ "${AUTO_MODE}" == "true" ]]; then
+  "${DRIVE_EXECUTABLE}" --ros-args \
+    -p cmd_vel_topic:="${CMD_VEL_TOPIC}" \
+    -p scenario_file:="${SCENARIO_FILE}" \
+    -p start_delay_sec:="${START_DELAY_SEC}" \
+    -p loop:="${LOOP_SCENARIO}" \
+    -p use_sim_time:=true \
+    -p publish_rate:="${PUBLISH_RATE}"
+else
+  "${DRIVE_EXECUTABLE}" --ros-args \
+    -p cmd_vel_topic:="${CMD_VEL_TOPIC}" \
+    -p linear_speed:="${LINEAR_SPEED}" \
+    -p lateral_speed:="${LATERAL_SPEED}" \
+    -p angular_speed:="${ANGULAR_SPEED}" \
+    -p publish_rate:="${PUBLISH_RATE}"
+fi

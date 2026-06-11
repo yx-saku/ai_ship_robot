@@ -201,6 +201,18 @@ bash sim/scripts/app/run_simulation.sh --build
 - `--lite`: GUIなし、LiDAR ray数を低減して軽量起動する
 - `--build`: 起動前にworkspace setupを実行する
 
+rosbagを記録する例です。
+
+```bash
+bash sim/scripts/app/run_simulation.sh --record-bag
+```
+
+- 記録対象の既定値: `/left_lidar/custom`, `/right_lidar/custom`, `/left_lidar/imu`, `/right_lidar/imu`, `/clock`, `/tf`, `/tf_static`
+- `--bag-output` 未指定時は `rosbag2/sim_<timestamp>` に保存します
+- 記録時刻は `ros2 bag record --use-sim-time` で `/clock` を基準にします
+- 追加topicは `--bag-topics /cmd_vel,/scan_debug` のようにCSVで指定できます
+- LiDAR/IMU記録対象の上書きは `--lidar-topics` と `--imu-topics` を使います
+
 ## ロボットを操作する
 
 シミュレーション起動後、別ターミナルで次を実行します。
@@ -224,6 +236,18 @@ bash sim/scripts/app/drive_robot.sh
 bash sim/scripts/app/drive_robot.sh --linear-speed 0.15 --lateral-speed 0.15 --angular-speed 0.5
 ```
 
+YAMLシナリオで自動運転する例です。
+
+```bash
+bash sim/scripts/app/drive_robot.sh \
+  --auto \
+  --scenario sim/config/drive_scenarios/arc_left.yaml \
+  --start-delay 1.0
+```
+
+- `--loop` を付けるとシナリオを繰り返します
+- ステップごとに速度成分はリセットされ、終了時には `Twist=0` をpublishします
+
 ROS topicを直接publishして操作することもできます。
 
 ```bash
@@ -236,7 +260,7 @@ ros2 topic pub /cmd_vel geometry_msgs/msg/Twist \
 
 左Mid-360の点群と内蔵IMUを使ってLIO-SAMを起動します。本番用入口の `aitran/scripts/app/run_lio_sam.sh` はシミュレーションを意識せず、LIO-SAMだけを起動します。Gazeboと同時に起動する場合は `aitran/scripts/app/run_slam.sh --sim` を使います。
 
-LIO-SAM本体はthird_party underlayの公式repo実装を使います。本プロジェクトでは、Mid-360の `PointCloud2` をLIO-SAMが期待する `x,y,z,intensity,ring,time` フィールドへ正規化する小さなROS 2 adapterを追加しています。
+LIO-SAM本体はthird_party underlayの公式repo実装を使います。本プロジェクトでは、Livox `CustomMsg` を複数台分融合したうえで、Mid-360の点群をLIO-SAMが期待する `x,y,z,intensity,ring,time` フィールドへ正規化するROS 2導線を追加しています。rosbag の既定記録対象も `CustomMsg` を使います。
 
 左Mid-360の内蔵IMU frameは `left_lidar_imu_link` です。Livox Mid-360 User Manual EN 15ページのIMU chip位置を使い、`left_lidar_link -> left_lidar_imu_link` は `x=0.011`, `y=0.02329`, `z=-0.04412` m、回転identityとして扱います。
 
@@ -263,6 +287,16 @@ RVizなし、Gazebo GUIなしで起動する例です。
 bash aitran/scripts/app/run_slam.sh --sim --lite --no-rviz --no-gui
 ```
 
+シミュレーションSLAMと同時にrosbagを記録する例です。
+
+```bash
+bash aitran/scripts/app/run_slam.sh --sim --lite --record-bag
+```
+
+- `--bag-output` 未指定時は `rosbag2/sim_slam_<timestamp>` に保存します
+- 記録時刻は `/clock` を基準にします
+- `run_slam.sh --bag-play` では bag 内の `/tf_static` のみを再生し、`/tf` は再生しません
+
 別端末でロボットを操作します。
 
 ```bash
@@ -273,14 +307,15 @@ bash sim/scripts/app/drive_robot.sh
 
 - LIO-SAM用変換後点群: `/left_lidar/lio_sam_points`
 - SLAM用IMU入力: `/left_lidar/imu`
-- 左LiDAR入力: `/left_lidar/points`
+- 左LiDAR入力CustomMsg: `/left_lidar/custom`
+- 融合入力CustomMsg: `/left_lidar/custom`, `/right_lidar/custom`
 - SLAM用LiDAR frame: `left_lidar_link`
 - SLAM用IMU frame: `left_lidar_imu_link`
 
 確認コマンドです。
 
 ```bash
-ros2 topic hz /left_lidar/lio_sam_points
+ros2 topic hz /left_lidar/custom
 ros2 topic hz /left_lidar/imu
 ros2 run tf2_ros tf2_echo left_lidar_link left_lidar_imu_link
 ros2 run tf2_ros tf2_echo odom base_footprint
@@ -293,10 +328,46 @@ bash aitran/scripts/install/install.sh
 bash aitran/scripts/install/install_third_party.sh
 bash aitran/scripts/install/setup.sh
 bash aitran/scripts/app/run_slam.sh \
-  --points /left_lidar/points \
+  --points /left_lidar/custom \
   --imu /left_lidar/imu \
   --config aitran/ros2_ws/src/ai_ship_robot_slam/config/lio_sam_mid360.yaml
 ```
+
+実機相当のtopic入力を記録しながらLIO-SAMを起動する例です。
+
+```bash
+bash aitran/scripts/app/run_slam.sh \
+  --points /left_lidar/custom \
+  --imu /left_lidar/imu \
+  --record-bag
+```
+
+- 実機相当入力の記録先既定値は `rosbag2/lio_sam_<timestamp>` です
+- 記録時は `/tf` と `/tf_static` も含めます
+
+記録済みbagを再生してGazeboなしでLIO-SAMを起動する例です。
+
+```bash
+bash aitran/scripts/app/run_slam.sh \
+  --bag-play rosbag2/sim_20260611_120000 \
+  --imu /left_lidar/imu \
+  --input-points /left_lidar/custom,/right_lidar/custom
+```
+
+- bag再生時は `use_sim_time=true` を強制します
+
+## rosbagの中身を確認する
+
+開発用ツールとして、rosbag と RViz2 をまとめて起動するスクリプトを追加しています。
+
+```bash
+bash scripts/dev/replay_rosbag.sh rosbag2/sim_20260611_120000
+```
+
+- 既定の RViz 設定は `sim/ros2_ws/src/ai_ship_robot_gazebo/config/mid360_points.rviz` を使います
+- `replay_rosbag.sh` は bag に含まれる `/tf` と `/tf_static` もそのまま再生します
+- 再生速度は `--rate 0.5`、ループ再生は `--loop`、開始オフセットは `--start-offset 5` で指定できます
+- 別の RViz 設定を使う場合は `--rviz-config path/to/file.rviz` を指定します
 
 third_party側のLIO-SAM ROS 2パッケージ名が導入版と異なる場合は、起動時に差し替えます。
 

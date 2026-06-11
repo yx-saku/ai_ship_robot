@@ -21,6 +21,9 @@ def generate_launch_description():
     half_lidar_resolution = LaunchConfiguration("half_lidar_resolution")
     quarter_lidar_resolution = LaunchConfiguration("quarter_lidar_resolution")
     publish_odom_tf = LaunchConfiguration("publish_odom_tf")
+    gazebo_params_file = PathJoinSubstitution(
+        [FindPackageShare("ai_ship_robot_gazebo"), "config", "gazebo_ros.yaml"]
+    )
     effective_gui = PythonExpression(["'false' if '", lite, "' == 'true' else '", gui, "'"])
     effective_half_lidar_resolution = PythonExpression(
         [
@@ -74,6 +77,7 @@ def generate_launch_description():
             "world": world,
             "gui": effective_gui,
             "verbose": verbose,
+            "params_file": gazebo_params_file,
         }.items(),
     )
 

@@ -18,3 +18,5 @@ __pycache__/
 .devcontainer/.local
 .devcontainer/.config
 .kilo
+
+rosbag2/
