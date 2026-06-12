@@ -2,6 +2,7 @@
 set -euo pipefail
 
 ROS_DISTRO="${ROS_DISTRO:-humble}"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 AI_SHIP_ROBOT_OPT_ROOT="${AI_SHIP_ROBOT_OPT_ROOT:-/opt/ai_ship_robot}"
 THIRD_PARTY_WS="${AI_SHIP_ROBOT_OPT_ROOT}/ros_underlay/${ROS_DISTRO}/third_party_ws"
 THIRD_PARTY_SRC_DIR="${THIRD_PARTY_WS}/src"
@@ -73,6 +74,7 @@ ensure_owned_directory() {
     mkdir -p "${directory_path}"
   else
     ${SUDO} install -d -o "$(id -u)" -g "$(id -g)" "${directory_path}"
+    ${SUDO} chown -R "$(id -u):$(id -g)" "${directory_path}"
   fi
 }
 
@@ -105,7 +107,7 @@ ensure_git_repo() {
   local current_ref=""
 
   if [[ -d "${target_dir}/.git" ]]; then
-    current_ref="$(git -C "${target_dir}" rev-parse HEAD)"
+    current_ref="$(git -c safe.directory="${target_dir}" -C "${target_dir}" rev-parse HEAD)"
     if [[ "${current_ref}" != "${expected_ref}" ]]; then
       echo "Unexpected repository revision at ${target_dir}" >&2
       echo "  expected: ${expected_ref}" >&2
@@ -126,9 +128,9 @@ ensure_git_repo() {
   # 外部repoは検証済みcommitへ固定し、default branch更新で挙動が変わらないようにする。
   mkdir -p "$(dirname "${target_dir}")"
   git init "${target_dir}"
-  git -C "${target_dir}" remote add origin "${repo_url}"
-  git -C "${target_dir}" fetch --depth 1 origin "${expected_ref}"
-  git -C "${target_dir}" checkout --detach FETCH_HEAD
+  git -c safe.directory="${target_dir}" -C "${target_dir}" remote add origin "${repo_url}"
+  git -c safe.directory="${target_dir}" -C "${target_dir}" fetch --depth 1 origin "${expected_ref}"
+  git -c safe.directory="${target_dir}" -C "${target_dir}" checkout --detach FETCH_HEAD
 }
 
 ensure_sparse_git_repo() {
@@ -139,7 +141,7 @@ ensure_sparse_git_repo() {
   local current_ref=""
 
   if [[ -d "${target_dir}/.git" ]]; then
-    current_ref="$(git -C "${target_dir}" rev-parse HEAD)"
+    current_ref="$(git -c safe.directory="${target_dir}" -C "${target_dir}" rev-parse HEAD)"
     if [[ "${current_ref}" != "${expected_ref}" ]]; then
       echo "Unexpected repository revision at ${target_dir}" >&2
       echo "  expected: ${expected_ref}" >&2
@@ -147,7 +149,10 @@ ensure_sparse_git_repo() {
       echo "Remove the directory or update the pinned ref after validating the new revision." >&2
       return 1
     fi
-    git -C "${target_dir}" sparse-checkout set "${sparse_path}"
+    if [[ -e "${target_dir}/${sparse_path}" ]]; then
+      return 0
+    fi
+    git -c safe.directory="${target_dir}" -C "${target_dir}" sparse-checkout set "${sparse_path}"
     return 0
   fi
 
@@ -161,11 +166,11 @@ ensure_sparse_git_repo() {
   # 大きなupstream workspaceから必要なinterface packageだけを取得し、LIO-SAM本体は無改修でbuildする。
   mkdir -p "$(dirname "${target_dir}")"
   git init "${target_dir}"
-  git -C "${target_dir}" remote add origin "${repo_url}"
-  git -C "${target_dir}" sparse-checkout init --cone
-  git -C "${target_dir}" sparse-checkout set "${sparse_path}"
-  git -C "${target_dir}" fetch --depth 1 origin "${expected_ref}"
-  git -C "${target_dir}" checkout --detach FETCH_HEAD
+  git -c safe.directory="${target_dir}" -C "${target_dir}" remote add origin "${repo_url}"
+  git -c safe.directory="${target_dir}" -C "${target_dir}" sparse-checkout init --cone
+  git -c safe.directory="${target_dir}" -C "${target_dir}" sparse-checkout set "${sparse_path}"
+  git -c safe.directory="${target_dir}" -C "${target_dir}" fetch --depth 1 origin "${expected_ref}"
+  git -c safe.directory="${target_dir}" -C "${target_dir}" checkout --detach FETCH_HEAD
 }
 
 prepare_livox_ros_driver2_manifest() {
@@ -184,27 +189,18 @@ prepare_livox_ros_driver2_manifest() {
 }
 
 patch_lio_sam_mid360_imu_converter() {
-  local utility_header="${LIO_SAM_DIR}/include/lio_sam/utility.hpp"
-  local old_expression="Eigen::Quaterniond q_final = extQRPY; //q_from * extQRPY;"
-  local new_expression="Eigen::Quaterniond q_final = q_from * extQRPY;"
+  local patch_script="${SCRIPT_DIR}/patch_lio_sam_mid360_6axis.py"
 
-  if [[ ! -f "${utility_header}" ]]; then
-    echo "Missing LIO-SAM utility header: ${utility_header}" >&2
-    return 1
-  fi
-  if grep -Fq "${new_expression}" "${utility_header}"; then
-    return 0
-  fi
-  if ! grep -Fq "${old_expression}" "${utility_header}"; then
-    echo "Unexpected LIO-SAM imuConverter implementation. Review before patching: ${utility_header}" >&2
+  if [[ ! -f "${patch_script}" ]]; then
+    echo "Missing LIO-SAM patch script: ${patch_script}" >&2
     return 1
   fi
 
-  # Mid-360の6軸IMU初期姿勢はproject側でorientationへ入れるため、LIO-SAM本体にq_fromを読ませる。
-  if [[ -w "${utility_header}" ]]; then
-    perl -0pi -e 's/Eigen::Quaterniond q_final = extQRPY; \/\/q_from \* extQRPY;/Eigen::Quaterniond q_final = q_from * extQRPY;/g' "${utility_header}"
+  # LIO-SAM本体への変更は固定commitに対する再現可能なpatch scriptとして適用する。
+  if [[ -w "${LIO_SAM_DIR}/include/lio_sam/utility.hpp" ]]; then
+    python3 "${patch_script}" "${LIO_SAM_DIR}"
   else
-    ${SUDO} perl -0pi -e 's/Eigen::Quaterniond q_final = extQRPY; \/\/q_from \* extQRPY;/Eigen::Quaterniond q_final = q_from * extQRPY;/g' "${utility_header}"
+    ${SUDO} python3 "${patch_script}" "${LIO_SAM_DIR}"
   fi
 }
 

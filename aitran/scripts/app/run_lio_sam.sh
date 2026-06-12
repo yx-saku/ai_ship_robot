@@ -25,11 +25,34 @@ Options:
                               Set reference LiDAR frame used for fusion output.
   --fused-points TOPIC        Set optional fusion PointCloud2 debug topic.
   --raw-imu TOPIC             Set raw 6-axis IMU topic for initial orientation estimation.
-  --imu TOPIC                 Set LIO-SAM IMU topic. Default is /livox/imu_oriented.
+  --imu TOPIC                 Set LIO-SAM IMU topic. Default is /livox/imu.
+  --imu-type TYPE             Set IMU mode: six_axis | nine_axis. Default is six_axis.
+  --imu-acceleration-unit U   Set IMU acceleration unit: g | mps2. Default is g.
+  --imu-acceleration-scale S  Additional IMU acceleration scale. Default is 1.0.
+  --imu-frequency HZ          Set fallback IMU frequency. Default is 500.0.
+  --imu-debug                 Enable converted IMU diagnostic logs.
+  --no-imu-debug              Disable converted IMU diagnostic logs. Default.
+  --deskew-mode MODE          Set deskew mode: imu_angular | odom_interpolation | off.
+  --wait-for-imu-initialization
+                              Wait for internal 6-axis IMU initialization. Default.
+  --no-wait-for-imu-initialization
+                              Do not wait for internal 6-axis IMU initialization.
+  --use-imu-preintegration-initial-guess
+                              Use /odometry/imu_incremental as map initial guess. Default.
+  --no-use-imu-preintegration-initial-guess
+                              Disable preintegration initial guess.
+  --use-imu-translation-initial-guess
+                              Use IMU preintegration translation as initial guess.
+  --no-use-imu-translation-initial-guess
+                              Ignore IMU preintegration translation. Default.
+  --use-imu-rotation-initial-guess
+                              Use IMU preintegration rotation as initial guess. Default.
+  --no-use-imu-rotation-initial-guess
+                              Ignore IMU preintegration rotation.
   --lio-custom TOPIC          Set corrected CustomMsg topic passed to UV-Lab LIO-SAM.
   --lio-points TOPIC          Compatibility alias for --lio-custom.
-  --imu-initializer           Enable 6-axis IMU initial roll/pitch estimator. Default.
-  --no-imu-initializer        Disable 6-axis IMU initial roll/pitch estimator.
+  --imu-initializer           Enable legacy external 6-axis IMU roll/pitch estimator.
+  --no-imu-initializer        Disable legacy external estimator. Default.
   --fusion                    Enable optional multi-LiDAR fusion node.
   --no-fusion                 Disable optional multi-LiDAR fusion node. Default.
   --adapter                   Enable legacy PointCloud2 adapter for debugging.
@@ -255,6 +278,71 @@ while [[ $# -gt 0 ]]; do
     --imu)
       shift
       LAUNCH_ARGS+=("imu_topic:=$(require_value --imu "${1:-}")")
+      ;;
+    --imu-type=*)
+      LAUNCH_ARGS+=("imu_type:=${1#*=}")
+      ;;
+    --imu-type)
+      shift
+      LAUNCH_ARGS+=("imu_type:=$(require_value --imu-type "${1:-}")")
+      ;;
+    --imu-acceleration-unit=*)
+      LAUNCH_ARGS+=("imu_acceleration_unit:=${1#*=}")
+      ;;
+    --imu-acceleration-unit)
+      shift
+      LAUNCH_ARGS+=("imu_acceleration_unit:=$(require_value --imu-acceleration-unit "${1:-}")")
+      ;;
+    --imu-acceleration-scale=*)
+      LAUNCH_ARGS+=("imu_acceleration_scale:=${1#*=}")
+      ;;
+    --imu-acceleration-scale)
+      shift
+      LAUNCH_ARGS+=("imu_acceleration_scale:=$(require_value --imu-acceleration-scale "${1:-}")")
+      ;;
+    --imu-frequency=*)
+      LAUNCH_ARGS+=("imu_frequency:=${1#*=}")
+      ;;
+    --imu-frequency)
+      shift
+      LAUNCH_ARGS+=("imu_frequency:=$(require_value --imu-frequency "${1:-}")")
+      ;;
+    --imu-debug)
+      LAUNCH_ARGS+=("imu_debug:=true")
+      ;;
+    --no-imu-debug)
+      LAUNCH_ARGS+=("imu_debug:=false")
+      ;;
+    --deskew-mode=*)
+      LAUNCH_ARGS+=("deskew_mode:=${1#*=}")
+      ;;
+    --deskew-mode)
+      shift
+      LAUNCH_ARGS+=("deskew_mode:=$(require_value --deskew-mode "${1:-}")")
+      ;;
+    --wait-for-imu-initialization)
+      LAUNCH_ARGS+=("wait_for_imu_initialization:=true")
+      ;;
+    --no-wait-for-imu-initialization)
+      LAUNCH_ARGS+=("wait_for_imu_initialization:=false")
+      ;;
+    --use-imu-preintegration-initial-guess)
+      LAUNCH_ARGS+=("use_imu_preintegration_initial_guess:=true")
+      ;;
+    --no-use-imu-preintegration-initial-guess)
+      LAUNCH_ARGS+=("use_imu_preintegration_initial_guess:=false")
+      ;;
+    --use-imu-translation-initial-guess)
+      LAUNCH_ARGS+=("use_imu_translation_initial_guess:=true")
+      ;;
+    --no-use-imu-translation-initial-guess)
+      LAUNCH_ARGS+=("use_imu_translation_initial_guess:=false")
+      ;;
+    --use-imu-rotation-initial-guess)
+      LAUNCH_ARGS+=("use_imu_rotation_initial_guess:=true")
+      ;;
+    --no-use-imu-rotation-initial-guess)
+      LAUNCH_ARGS+=("use_imu_rotation_initial_guess:=false")
       ;;
     --raw-imu=*)
       LAUNCH_ARGS+=("raw_imu_topic:=${1#*=}")

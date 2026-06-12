@@ -60,6 +60,7 @@ ensure_owned_directory() {
     mkdir -p "${directory_path}"
   else
     ${SUDO} install -d -o "$(id -u)" -g "$(id -g)" "${directory_path}"
+    ${SUDO} chown -R "$(id -u):$(id -g)" "${directory_path}"
   fi
 }
 

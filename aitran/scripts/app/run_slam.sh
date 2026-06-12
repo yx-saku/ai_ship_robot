@@ -16,6 +16,7 @@ SIM_MODE=false
 DEFAULT_LIDAR_TOPICS=("/livox/lidar")
 DEFAULT_IMU_TOPICS=("/livox/imu")
 ROSBAG_PID=""
+ROSBAG_PLAY_PID=""
 SLAM_PID=""
 ROSBAG_ROOT="${WORKSPACE_ROOT}/rosbag2"
 
@@ -30,6 +31,8 @@ Options:
   --bag-topics CSV   Record only the given comma-separated topics.
   --bag-play PATH    Play a recorded rosbag and run LIO-SAM without Gazebo.
   --bag-play-rate N  Set rosbag playback rate. Default: 1.0
+  --bag-start-delay SEC
+                     Delay rosbag playback start by the given seconds.
   --bag-start-offset SEC
                      Start rosbag playback after the given offset.
   --bag-loop         Loop rosbag playback.
@@ -271,6 +274,11 @@ cleanup_background_processes() {
     kill -INT "${ROSBAG_PID}" 2>/dev/null || kill -TERM "${ROSBAG_PID}" 2>/dev/null || true
     wait "${ROSBAG_PID}" 2>/dev/null || true
   fi
+  # bag再生プロセスはrecordとは別PIDで持ち、同時利用時も両方を確実に停止する。
+  if [[ -n "${ROSBAG_PLAY_PID}" ]] && kill -0 "${ROSBAG_PLAY_PID}" 2>/dev/null; then
+    kill -INT "${ROSBAG_PLAY_PID}" 2>/dev/null || kill -TERM "${ROSBAG_PLAY_PID}" 2>/dev/null || true
+    wait "${ROSBAG_PLAY_PID}" 2>/dev/null || true
+  fi
   if [[ -n "${SLAM_PID}" ]] && kill -0 "${SLAM_PID}" 2>/dev/null; then
     kill -INT "${SLAM_PID}" 2>/dev/null || kill -TERM "${SLAM_PID}" 2>/dev/null || true
     wait "${SLAM_PID}" 2>/dev/null || true
@@ -302,6 +310,11 @@ run_bag_play_lio_sam() {
   local bag_rate="$2"
   local bag_offset="$3"
   local bag_loop="$4"
+  local bag_start_delay="$5"
+  local record_bag="$6"
+  local bag_output="$7"
+  shift 7
+  local record_topics=("$@")
   local play_cmd=(ros2 bag play "${bag_path}" --clock --rate "${bag_rate}" --start-offset "${bag_offset}")
   local slam_args=()
   local play_topics=()
@@ -319,28 +332,28 @@ run_bag_play_lio_sam() {
         derived_input_topics="${FORWARD_ARGS[i]#*=}"
         ;;
       --input-points)
-        ((i++))
+        i=$((i + 1))
         derived_input_topics="${FORWARD_ARGS[i]}"
         ;;
       --points=*)
         derived_input_topics="${FORWARD_ARGS[i]#*=}"
         ;;
       --points)
-        ((i++))
+        i=$((i + 1))
         derived_input_topics="${FORWARD_ARGS[i]}"
         ;;
       --imu=*)
         derived_imu_topic="${FORWARD_ARGS[i]#*=}"
         ;;
       --imu)
-        ((i++))
+        i=$((i + 1))
         derived_imu_topic="${FORWARD_ARGS[i]}"
         ;;
       --raw-imu=*)
         derived_raw_imu_topic="${FORWARD_ARGS[i]#*=}"
         ;;
       --raw-imu)
-        ((i++))
+        i=$((i + 1))
         derived_raw_imu_topic="${FORWARD_ARGS[i]}"
         ;;
     esac
@@ -357,6 +370,7 @@ run_bag_play_lio_sam() {
   else
     append_unique_topics play_topics "${DEFAULT_IMU_TOPICS[@]}"
   fi
+  append_unique_topics play_topics "/tf"
   append_unique_topics play_topics "/tf_static"
   play_cmd+=(--topics "${play_topics[@]}")
 
@@ -364,9 +378,17 @@ run_bag_play_lio_sam() {
   bash "${SCRIPT_DIR}/run_lio_sam.sh" --use-sim-time "${slam_args[@]}" &
   SLAM_PID=$!
   sleep 2
+  # bag再生前にrecordを起動し、再生開始直後のtopicも取りこぼしにくくする。
+  if [[ "${record_bag}" == "true" ]]; then
+    start_rosbag_record "${bag_output}" true "${record_topics[@]}"
+  fi
+  # 起動順序を固定したい検証向けに、bag再生だけを実時間で遅延させる。
+  if [[ "${bag_start_delay}" != "0" && "${bag_start_delay}" != "0.0" ]]; then
+    sleep "${bag_start_delay}"
+  fi
   "${play_cmd[@]}" &
-  ROSBAG_PID=$!
-  wait "${ROSBAG_PID}"
+  ROSBAG_PLAY_PID=$!
+  wait "${ROSBAG_PLAY_PID}"
 }
 
 run_bag_play_glim() {
@@ -374,6 +396,11 @@ run_bag_play_glim() {
   local bag_rate="$2"
   local bag_offset="$3"
   local bag_loop="$4"
+  local bag_start_delay="$5"
+  local record_bag="$6"
+  local bag_output="$7"
+  shift 7
+  local record_topics=("$@")
   local play_cmd=(ros2 bag play "${bag_path}" --clock --rate "${bag_rate}" --start-offset "${bag_offset}")
   local slam_args=()
   local play_topics=()
@@ -390,21 +417,21 @@ run_bag_play_glim() {
         derived_input_topics="${FORWARD_ARGS[i]#*=}"
         ;;
       --input-points)
-        ((i++))
+        i=$((i + 1))
         derived_input_topics="${FORWARD_ARGS[i]}"
         ;;
       --points=*)
         derived_input_topics="${FORWARD_ARGS[i]#*=}"
         ;;
       --points)
-        ((i++))
+        i=$((i + 1))
         derived_input_topics="${FORWARD_ARGS[i]}"
         ;;
       --imu=*)
         derived_imu_topic="${FORWARD_ARGS[i]#*=}"
         ;;
       --imu)
-        ((i++))
+        i=$((i + 1))
         derived_imu_topic="${FORWARD_ARGS[i]}"
         ;;
     esac
@@ -421,6 +448,7 @@ run_bag_play_glim() {
   else
     append_unique_topics play_topics "${DEFAULT_IMU_TOPICS[@]}"
   fi
+  append_unique_topics play_topics "/tf"
   append_unique_topics play_topics "/tf_static"
   play_cmd+=(--topics "${play_topics[@]}")
 
@@ -428,9 +456,17 @@ run_bag_play_glim() {
   bash "${SCRIPT_DIR}/run_glim_slam.sh" --use-sim-time "${slam_args[@]}" &
   SLAM_PID=$!
   sleep 2
+  # bag再生前にrecordを起動し、再生開始直後のtopicも取りこぼしにくくする。
+  if [[ "${record_bag}" == "true" ]]; then
+    start_rosbag_record "${bag_output}" true "${record_topics[@]}"
+  fi
+  # 起動順序を固定したい検証向けに、bag再生だけを実時間で遅延させる。
+  if [[ "${bag_start_delay}" != "0" && "${bag_start_delay}" != "0.0" ]]; then
+    sleep "${bag_start_delay}"
+  fi
   "${play_cmd[@]}" &
-  ROSBAG_PID=$!
-  wait "${ROSBAG_PID}"
+  ROSBAG_PLAY_PID=$!
+  wait "${ROSBAG_PLAY_PID}"
 }
 
 run_sim_lio_sam() {
@@ -553,6 +589,71 @@ run_sim_lio_sam() {
       --imu)
         shift
         launch_args+=("imu_topic:=$(require_value --imu "${1:-}")")
+        ;;
+      --imu-type=*)
+        launch_args+=("imu_type:=${1#*=}")
+        ;;
+      --imu-type)
+        shift
+        launch_args+=("imu_type:=$(require_value --imu-type "${1:-}")")
+        ;;
+      --imu-acceleration-unit=*)
+        launch_args+=("imu_acceleration_unit:=${1#*=}")
+        ;;
+      --imu-acceleration-unit)
+        shift
+        launch_args+=("imu_acceleration_unit:=$(require_value --imu-acceleration-unit "${1:-}")")
+        ;;
+      --imu-acceleration-scale=*)
+        launch_args+=("imu_acceleration_scale:=${1#*=}")
+        ;;
+      --imu-acceleration-scale)
+        shift
+        launch_args+=("imu_acceleration_scale:=$(require_value --imu-acceleration-scale "${1:-}")")
+        ;;
+      --imu-frequency=*)
+        launch_args+=("imu_frequency:=${1#*=}")
+        ;;
+      --imu-frequency)
+        shift
+        launch_args+=("imu_frequency:=$(require_value --imu-frequency "${1:-}")")
+        ;;
+      --imu-debug)
+        launch_args+=("imu_debug:=true")
+        ;;
+      --no-imu-debug)
+        launch_args+=("imu_debug:=false")
+        ;;
+      --deskew-mode=*)
+        launch_args+=("deskew_mode:=${1#*=}")
+        ;;
+      --deskew-mode)
+        shift
+        launch_args+=("deskew_mode:=$(require_value --deskew-mode "${1:-}")")
+        ;;
+      --wait-for-imu-initialization)
+        launch_args+=("wait_for_imu_initialization:=true")
+        ;;
+      --no-wait-for-imu-initialization)
+        launch_args+=("wait_for_imu_initialization:=false")
+        ;;
+      --use-imu-preintegration-initial-guess)
+        launch_args+=("use_imu_preintegration_initial_guess:=true")
+        ;;
+      --no-use-imu-preintegration-initial-guess)
+        launch_args+=("use_imu_preintegration_initial_guess:=false")
+        ;;
+      --use-imu-translation-initial-guess)
+        launch_args+=("use_imu_translation_initial_guess:=true")
+        ;;
+      --no-use-imu-translation-initial-guess)
+        launch_args+=("use_imu_translation_initial_guess:=false")
+        ;;
+      --use-imu-rotation-initial-guess)
+        launch_args+=("use_imu_rotation_initial_guess:=true")
+        ;;
+      --no-use-imu-rotation-initial-guess)
+        launch_args+=("use_imu_rotation_initial_guess:=false")
         ;;
       --raw-imu=*)
         launch_args+=("raw_imu_topic:=${1#*=}")
@@ -1038,6 +1139,7 @@ BAG_OUTPUT=""
 BAG_TOPICS=()
 BAG_PLAY=""
 BAG_PLAY_RATE="1.0"
+BAG_START_DELAY="0"
 BAG_START_OFFSET="0"
 BAG_LOOP=false
 BACKEND="lio-sam"
@@ -1089,6 +1191,13 @@ while [[ $# -gt 0 ]]; do
     --bag-play-rate)
       shift
       BAG_PLAY_RATE="$(require_value --bag-play-rate "${1:-}")"
+      ;;
+    --bag-start-delay=*)
+      BAG_START_DELAY="${1#*=}"
+      ;;
+    --bag-start-delay)
+      shift
+      BAG_START_DELAY="$(require_value --bag-start-delay "${1:-}")"
       ;;
     --bag-start-offset=*)
       BAG_START_OFFSET="${1#*=}"
@@ -1155,11 +1264,6 @@ if [[ "${SIM_MODE}" == "true" ]]; then
   exit $?
 fi
 
-if [[ -n "${BAG_PLAY}" && "${RECORD_BAG}" == "true" ]]; then
-  echo "--bag-play and --record-bag cannot be used together." >&2
-  exit 2
-fi
-
 if [[ -n "${BAG_PLAY}" ]]; then
   for arg in "${FORWARD_ARGS[@]}"; do
     if [[ "${arg}" == "--no-use-sim-time" ]]; then
@@ -1168,10 +1272,13 @@ if [[ -n "${BAG_PLAY}" ]]; then
     fi
   done
   source_sim_slam_environment
+  if [[ "${RECORD_BAG}" == "true" && -z "${BAG_OUTPUT}" ]]; then
+    BAG_OUTPUT="$(default_bag_output bag_play)"
+  fi
   if [[ "${BACKEND}" == "glim" ]]; then
-    run_bag_play_glim "${BAG_PLAY}" "${BAG_PLAY_RATE}" "${BAG_START_OFFSET}" "${BAG_LOOP}"
+    run_bag_play_glim "${BAG_PLAY}" "${BAG_PLAY_RATE}" "${BAG_START_OFFSET}" "${BAG_LOOP}" "${BAG_START_DELAY}" "${RECORD_BAG}" "${BAG_OUTPUT}" "${BAG_TOPICS[@]}"
   else
-    run_bag_play_lio_sam "${BAG_PLAY}" "${BAG_PLAY_RATE}" "${BAG_START_OFFSET}" "${BAG_LOOP}"
+    run_bag_play_lio_sam "${BAG_PLAY}" "${BAG_PLAY_RATE}" "${BAG_START_OFFSET}" "${BAG_LOOP}" "${BAG_START_DELAY}" "${RECORD_BAG}" "${BAG_OUTPUT}" "${BAG_TOPICS[@]}"
   fi
   exit $?
 fi

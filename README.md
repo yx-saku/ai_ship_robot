@@ -323,6 +323,8 @@ bash aitran/scripts/app/run_slam.sh --sim --lite --record-bag
 - 記録時刻は `/clock` を基準にします
 - `--record-bag` 指定時は、`--bag-topics` 未指定なら Gazebo / SLAM を含む見えている全トピックを記録します
 - `--bag-topics /livox/lidar,/livox/imu` のように指定すると、そのトピックだけを記録します
+- `--bag-play` と `--record-bag` は同時に指定でき、再生しながら別の rosbag を記録できます
+- `--bag-start-delay` を付けると、rosbag の再生開始を指定秒数だけ遅らせられます
 - `run_slam.sh --bag-play` では bag 内の `/tf_static` のみを再生し、`/tf` は再生しません
 
 別端末でロボットを操作します。
@@ -382,12 +384,15 @@ bash aitran/scripts/app/run_slam.sh \
 ```bash
 bash aitran/scripts/app/run_slam.sh \
   --bag-play rosbag2/sim_20260611_120000 \
+  --bag-start-delay 10 \
   --raw-imu /livox/imu \
   --imu /livox/imu_oriented \
   --input-points /livox/lidar
 ```
 
 - bag再生時は `use_sim_time=true` を強制します
+- `--bag-start-offset` は bag 内の再生開始位置、`--bag-start-delay` は実時間での再生開始待ち時間です
+- `--record-bag` を併用すると、再生中の topic と SLAM 出力を別の rosbag に同時記録できます
 
 ## rosbagの中身を確認する
 

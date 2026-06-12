@@ -37,6 +37,28 @@
     imuGyrBiasN: 0.00001
     imuGravity: 9.80511
     imuRPYWeight: 0.0
+    imuType: six_axis
+    imuAccelerationUnit: g
+    imuAccelerationScale: 1.0
+    imuFrequency: 500.0
+    imuDebug: false
+
+    # 6軸IMUでは開始静止区間からroll/pitchとgyro biasだけを推定し、yawは相対値として扱う。
+    waitForImuInitialization: true
+    initialImuExpectedAccelerationNorm: 1.0
+    initialImuAccelerationNormTolerance: 0.35
+    initialImuMaxAngularVelocity: 0.2
+    initialImuMinSamples: 50
+    initialImuMinDuration: 0.5
+
+    # 6軸IMU preintegrationの並進driftを初期値へ直接入れず、回転だけをscan matching初期値へ使う。
+    useImuPreintegrationInitialGuess: true
+    useImuTranslationInitialGuess: false
+    useImuRotationInitialGuess: true
+
+    # 標準は従来に近いIMU角速度deskewとし、検証時にodom_interpolation/offへ切替可能にする。
+    deskewMode: imu_angular
+    maxPointOffsetTimeSec: 0.2
 
     # 現状既定の基準系は左LiDARと左IMUの組み合わせで、IMU->LiDAR相対回転はidentityになる。
     extrinsicTrans: [0.011, 0.02329, -0.04412]
