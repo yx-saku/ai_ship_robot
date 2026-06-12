@@ -10,8 +10,6 @@ SETUP_SIMULATION_SCRIPT="${SIM_ROOT}/scripts/install/setup.sh"
 LIDAR_PATTERN_DIR="${SIM_ROOT}/ros2_ws/src/ai_ship_robot_description/urdf/lidar/patterns"
 AI_SHIP_ROBOT_OPT_ROOT="${AI_SHIP_ROBOT_OPT_ROOT:-/opt/ai_ship_robot}"
 THIRD_PARTY_UNDERLAY_SETUP="${AI_SHIP_ROBOT_OPT_ROOT}/ros_underlay/${ROS_DISTRO}/third_party_ws/install/setup.bash"
-DEFAULT_LIDAR_TOPICS=("/livox/lidar")
-DEFAULT_IMU_TOPICS=("/livox/imu")
 ROSBAG_PID=""
 SIMULATION_PID=""
 DRIVE_PID=""
@@ -62,11 +60,9 @@ Options:
                       Wait before starting scripted drive. Default: 0.0
   --drive-loop        Loop drive scenario until interrupted.
   --drive-once        Run drive scenario once. Default.
-  --record-bag        Record /livox/* adapter topics, /clock, /tf, and /tf_static.
+  --record-bag        Record all topics during simulation.
   --bag-output PATH   Set rosbag output directory or prefix.
-  --bag-topics CSV    Add extra record topics as comma-separated list.
-  --lidar-topics CSV  Override recorded LiDAR CustomMsg topics as comma-separated list.
-  --imu-topics CSV    Override recorded IMU topics as comma-separated list.
+  --bag-topics CSV    Record only the given comma-separated topics.
   -h, --help          Show this help.
 
 Available LiDAR patterns:
@@ -209,9 +205,18 @@ start_rosbag_record() {
     record_cmd+=(--use-sim-time)
   fi
 
-  record_cmd+=("${topics[@]}")
+  # topic無指定時は全topic記録へ切り替え、wrapper側の既定挙動を一本化する。
+  if [[ "${#topics[@]}" -eq 0 ]]; then
+    record_cmd+=(-a)
+  else
+    record_cmd+=("${topics[@]}")
+  fi
   echo "Rosbag output: ${output_path}" >&2
-  echo "Recording rosbag topics: ${topics[*]}" >&2
+  if [[ "${#topics[@]}" -eq 0 ]]; then
+    echo "Recording rosbag topics: all topics" >&2
+  else
+    echo "Recording rosbag topics: ${topics[*]}" >&2
+  fi
   "${record_cmd[@]}" &
   ROSBAG_PID=$!
 }
@@ -266,9 +271,7 @@ LITE_MODE=false
 LIDAR_RESOLUTION_MODE="default"
 RECORD_BAG=false
 BAG_OUTPUT=""
-LIDAR_TOPICS=("${DEFAULT_LIDAR_TOPICS[@]}")
-IMU_TOPICS=("${DEFAULT_IMU_TOPICS[@]}")
-EXTRA_BAG_TOPICS=()
+BAG_TOPICS=()
 DRIVE_SCENARIO=""
 DRIVE_START_DELAY="0.0"
 DRIVE_LOOP=false
@@ -372,25 +375,11 @@ while [[ $# -gt 0 ]]; do
       BAG_OUTPUT="$(require_value --bag-output "${1:-}")"
       ;;
     --bag-topics=*)
-      mapfile -t EXTRA_BAG_TOPICS < <(parse_csv_topics "${1#*=}")
+      mapfile -t BAG_TOPICS < <(parse_csv_topics "${1#*=}")
       ;;
     --bag-topics)
       shift
-      mapfile -t EXTRA_BAG_TOPICS < <(parse_csv_topics "$(require_value --bag-topics "${1:-}")")
-      ;;
-    --lidar-topics=*)
-      mapfile -t LIDAR_TOPICS < <(parse_csv_topics "${1#*=}")
-      ;;
-    --lidar-topics)
-      shift
-      mapfile -t LIDAR_TOPICS < <(parse_csv_topics "$(require_value --lidar-topics "${1:-}")")
-      ;;
-    --imu-topics=*)
-      mapfile -t IMU_TOPICS < <(parse_csv_topics "${1#*=}")
-      ;;
-    --imu-topics)
-      shift
-      mapfile -t IMU_TOPICS < <(parse_csv_topics "$(require_value --imu-topics "${1:-}")")
+      mapfile -t BAG_TOPICS < <(parse_csv_topics "$(require_value --bag-topics "${1:-}")")
       ;;
     *:=*)
       echo "Do not use ROS 2 launch argument syntax here: $1" >&2
@@ -454,11 +443,7 @@ if [[ "${RECORD_BAG}" == "true" ]]; then
   if [[ -z "${BAG_OUTPUT}" ]]; then
     BAG_OUTPUT="$(default_bag_output)"
   fi
-  BAG_TOPICS=()
-  append_unique_topics BAG_TOPICS "${LIDAR_TOPICS[@]}"
-  append_unique_topics BAG_TOPICS "${IMU_TOPICS[@]}"
-  append_unique_topics BAG_TOPICS "${EXTRA_BAG_TOPICS[@]}"
-  append_unique_topics BAG_TOPICS "/clock" "/tf" "/tf_static"
+  # 明示指定があればそのtopicだけを記録し、未指定時は全topicを記録する。
   start_rosbag_record "${BAG_OUTPUT}" true "${BAG_TOPICS[@]}"
 fi
 
