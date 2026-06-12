@@ -14,15 +14,23 @@ GTSAM_DIR="${THIRD_PARTY_SRC_DIR}/gtsam"
 LIO_SAM_DIR="${THIRD_PARTY_SRC_DIR}/lio_sam"
 AUTO_RCCAR_INDOOR_DIR="${THIRD_PARTY_SRC_DIR}/autoRCcar_indoor"
 AUTO_RCCAR_INTERFACES_DIR="${AUTO_RCCAR_INDOOR_DIR}/ros2/src/autorccar_interfaces"
+GTSAM_POINTS_DIR="${THIRD_PARTY_SRC_DIR}/gtsam_points"
+GLIM_DIR="${THIRD_PARTY_SRC_DIR}/glim"
+GLIM_ROS_DIR="${THIRD_PARTY_SRC_DIR}/glim_ros2"
 LIVOX_SDK_ROOT="${AI_SHIP_ROBOT_OPT_ROOT}/vendor/livox_sdk2"
 LIVOX_SDK_SRC_DIR="${LIVOX_SDK_ROOT}/src"
 LIVOX_SDK_BUILD_DIR="${LIVOX_SDK_ROOT}/build"
 LIVOX_SDK_PREFIX="${LIVOX_SDK_ROOT}/install"
+GTSAM_POINTS_BUILD_DIR="${THIRD_PARTY_BUILD_DIR}/gtsam_points"
+GTSAM_POINTS_PREFIX="${THIRD_PARTY_INSTALL_DIR}"
 LIVOX_DRIVER_REF="13eb05e4e6dd7a765b934d0c5fd6236676a57b49"
 LIVOX_SDK_REF="f5d9375f84efe2b15bc0a052d3e18482ed13adf4"
 GTSAM_REF="4f66a491ffc83cf092d0d818b11dc35135521612"
 LIO_SAM_REF="066a3e44c6a8e3cb1bd1bdd49b2cb2365711a213"
 AUTO_RCCAR_INDOOR_REF="bc06c0176c4f6f1fdead58377045cea473a0b74c"
+GTSAM_POINTS_REF="42e811a50e421390c206b486572b88a024734146"
+GLIM_REF="25ad190776f05f6a8d7438686197294f73c5f868"
+GLIM_ROS_REF="a62811dc3ab73076f4a43fc21005f96cd712903c"
 ROSDEP_UPDATE_MAX_AGE_SECONDS="${ROSDEP_UPDATE_MAX_AGE_SECONDS:-86400}"
 ROSDEP_UPDATED=0
 
@@ -32,7 +40,7 @@ Usage: bash aitran/scripts/install/install_third_party.sh
 
 実機・simulation共通の third_party を system 側へ導入します。
 - Livox-SDK2 を /opt/ai_ship_robot/vendor/livox_sdk2 に導入
-- livox_ros_driver2 / GTSAM / LIO-SAM を ROS underlay として導入
+- livox_ros_driver2 / GTSAM / LIO-SAM / GLIM stack を ROS underlay として導入
 - underlay install: /opt/ai_ship_robot/ros_underlay/${ROS_DISTRO}/third_party_ws/install
 EOF
 }
@@ -87,6 +95,7 @@ prepare_install_roots() {
   ensure_owned_directory "${LIVOX_SDK_ROOT}"
   ensure_owned_directory "${LIVOX_SDK_BUILD_DIR}"
   ensure_owned_directory "${LIVOX_SDK_PREFIX}"
+  ensure_owned_directory "${GTSAM_POINTS_BUILD_DIR}"
 }
 
 directory_is_empty() {
@@ -204,6 +213,31 @@ patch_lio_sam_mid360_imu_converter() {
   fi
 }
 
+patch_gtsam_points_boost_none() {
+  local migration_header="${GTSAM_POINTS_DIR}/include/gtsam_points/util/gtsam_migration.hpp"
+  local old_declaration="constexpr auto NoneValue = boost::none;"
+  local new_declaration="inline const auto NoneValue = boost::none;"
+
+  if [[ ! -f "${migration_header}" ]]; then
+    echo "Missing gtsam_points migration header: ${migration_header}" >&2
+    return 1
+  fi
+
+  # GTSAM 4.2系のboost::noneはconstexpr変数にできないため、clone後に互換宣言へ置換する。
+  if grep -Fqx "${new_declaration}" "${migration_header}"; then
+    return 0
+  fi
+  if ! grep -Fqx "${old_declaration}" "${migration_header}"; then
+    echo "Unsupported gtsam_points migration header contents: ${migration_header}" >&2
+    return 1
+  fi
+  if [[ -w "${migration_header}" ]]; then
+    sed -i "s|${old_declaration}|${new_declaration}|" "${migration_header}"
+  else
+    ${SUDO} sed -i "s|${old_declaration}|${new_declaration}|" "${migration_header}"
+  fi
+}
+
 clone_common_repositories() {
   # MID-360実機とsimulationで共通利用するrepoをsystem側の固定workspaceへ取得する。
   ensure_git_repo "${LIVOX_SDK_SRC_DIR}" "https://github.com/Livox-SDK/Livox-SDK2.git" "${LIVOX_SDK_REF}"
@@ -211,8 +245,18 @@ clone_common_repositories() {
   ensure_git_repo "${GTSAM_DIR}" "https://github.com/borglab/gtsam.git" "${GTSAM_REF}"
   ensure_sparse_git_repo "${AUTO_RCCAR_INDOOR_DIR}" "https://github.com/UV-Lab/autoRCcar_indoor.git" "${AUTO_RCCAR_INDOOR_REF}" "ros2/src/autorccar_interfaces"
   ensure_git_repo "${LIO_SAM_DIR}" "https://github.com/UV-Lab/LIO-SAM_MID360_ROS2.git" "${LIO_SAM_REF}"
+  ensure_git_repo "${GTSAM_POINTS_DIR}" "https://github.com/koide3/gtsam_points.git" "${GTSAM_POINTS_REF}"
+  patch_gtsam_points_boost_none
+  ensure_git_repo "${GLIM_DIR}" "https://github.com/koide3/glim.git" "${GLIM_REF}"
+  ensure_git_repo "${GLIM_ROS_DIR}" "https://github.com/koide3/glim_ros2.git" "${GLIM_ROS_REF}"
   prepare_livox_ros_driver2_manifest
   patch_lio_sam_mid360_imu_converter
+}
+
+install_glim_apt_dependencies() {
+  # GLIM stackはgtsam_pointsの非ROS依存を持つため、rosdep外のsystem packageを先に導入する。
+  ${SUDO} apt-get update
+  ${SUDO} apt-get install -y libboost-all-dev libmetis-dev libfmt-dev libspdlog-dev libomp-dev
 }
 
 prepend_env_path() {
@@ -326,7 +370,7 @@ ensure_rosdep_updated() {
 }
 
 selected_common_ros_paths() {
-  printf '%s\n' "${LIVOX_DRIVER_DIR}" "${GTSAM_DIR}" "${AUTO_RCCAR_INTERFACES_DIR}" "${LIO_SAM_DIR}"
+  printf '%s\n' "${LIVOX_DRIVER_DIR}" "${GTSAM_DIR}" "${AUTO_RCCAR_INTERFACES_DIR}" "${LIO_SAM_DIR}" "${GLIM_DIR}" "${GLIM_ROS_DIR}"
 }
 
 install_rosdeps_for_paths() {
@@ -388,8 +432,81 @@ build_third_party_paths() {
   source_third_party_underlay_if_exists
 }
 
+install_gtsam_points_if_needed() {
+  local gtsam_points_cxx_flags="${CMAKE_CXX_FLAGS:-}"
+
+  if [[ -f "${THIRD_PARTY_INSTALL_DIR}/lib/cmake/gtsam_points/gtsam_points-config.cmake" ]]; then
+    return 0
+  fi
+  if [[ ! -d "${GTSAM_POINTS_DIR}" ]]; then
+    echo "Missing gtsam_points repository at ${GTSAM_POINTS_DIR}" >&2
+    return 1
+  fi
+
+  configure_livox_sdk_environment
+  source_third_party_underlay_if_exists
+  if [[ " ${gtsam_points_cxx_flags} " != *" -Wno-pragmas "* ]]; then
+    gtsam_points_cxx_flags="${gtsam_points_cxx_flags:+${gtsam_points_cxx_flags} }-Wno-pragmas"
+  fi
+
+  # gtsam_pointsは非ROS CMake projectとしてinstall-baseへ直接導入し、後段のglim find_packageを成立させる。
+  cmake -S "${GTSAM_POINTS_DIR}" -B "${GTSAM_POINTS_BUILD_DIR}" \
+    -DCMAKE_BUILD_TYPE=Release \
+    -DCMAKE_INSTALL_PREFIX="${GTSAM_POINTS_PREFIX}" \
+    -DCMAKE_PREFIX_PATH="${THIRD_PARTY_INSTALL_DIR}" \
+    -DGTSAM_DIR="${THIRD_PARTY_INSTALL_DIR}/lib/cmake/GTSAM" \
+    -DGTSAM_UNSTABLE_DIR="${THIRD_PARTY_INSTALL_DIR}/lib/cmake/GTSAM_unstable" \
+    -DBUILD_TESTS=OFF \
+    -DBUILD_DEMO=OFF \
+    -DBUILD_EXAMPLE=OFF \
+    -DBUILD_TOOLS=OFF \
+    -DBUILD_WITH_TBB=OFF \
+    -DBUILD_WITH_OPENMP=ON \
+    -DBUILD_WITH_CUDA=OFF \
+    -DBUILD_WITH_CUDA_MULTIARCH=OFF \
+    -DBUILD_WITH_MARCH_NATIVE=OFF \
+    -DCMAKE_CXX_FLAGS="${gtsam_points_cxx_flags}"
+  cmake --build "${GTSAM_POINTS_BUILD_DIR}" --parallel
+  cmake --install "${GTSAM_POINTS_BUILD_DIR}"
+  source_third_party_underlay_if_exists
+}
+
+build_glim_underlay_workspace() {
+  if [[ ! -d "${GLIM_DIR}" || ! -d "${GLIM_ROS_DIR}" ]]; then
+    echo "Missing GLIM repositories under ${THIRD_PARTY_SRC_DIR}" >&2
+    return 1
+  fi
+
+  # CPU-only方針に合わせ、glim本体とROS bridgeはCUDA/viewer/OpenCVなしでunderlayへ入れる。
+  configure_livox_sdk_environment
+  source_third_party_underlay_if_exists
+  colcon --log-base "${THIRD_PARTY_LOG_DIR}" build \
+    --base-paths "${GLIM_DIR}" \
+    --build-base "${THIRD_PARTY_BUILD_DIR}" \
+    --install-base "${THIRD_PARTY_INSTALL_DIR}" \
+    --cmake-args \
+      -DCMAKE_PREFIX_PATH="${THIRD_PARTY_INSTALL_DIR}" \
+      -DCMAKE_CXX_STANDARD=17 \
+      -DBUILD_WITH_CUDA=OFF \
+      -DBUILD_WITH_VIEWER=OFF \
+      -DBUILD_WITH_OPENCV=OFF \
+      -DBUILD_WITH_MARCH_NATIVE=OFF
+  source_third_party_underlay_if_exists
+  colcon --log-base "${THIRD_PARTY_LOG_DIR}" build \
+    --base-paths "${GLIM_ROS_DIR}" \
+    --build-base "${THIRD_PARTY_BUILD_DIR}" \
+    --install-base "${THIRD_PARTY_INSTALL_DIR}" \
+    --cmake-args \
+      -DCMAKE_PREFIX_PATH="${THIRD_PARTY_INSTALL_DIR}" \
+      -DCMAKE_CXX_STANDARD=17 \
+      -DBUILD_WITH_CUDA=OFF \
+      -DBUILD_WITH_VIEWER=OFF \
+      -DBUILD_WITH_CV_BRIDGE=OFF
+  source_third_party_underlay_if_exists
+}
+
 build_common_underlay_workspace() {
-  if [[ ! -d "${LIVOX_DRIVER_DIR}" || ! -d "${GTSAM_DIR}" || ! -d "${AUTO_RCCAR_INTERFACES_DIR}" || ! -d "${LIO_SAM_DIR}" ]]; then
+  if [[ ! -d "${LIVOX_DRIVER_DIR}" || ! -d "${GTSAM_DIR}" || ! -d "${AUTO_RCCAR_INTERFACES_DIR}" || ! -d "${LIO_SAM_DIR}" || ! -d "${GTSAM_POINTS_DIR}" || ! -d "${GLIM_DIR}" || ! -d "${GLIM_ROS_DIR}" ]]; then
     echo "Missing common third-party repositories under ${THIRD_PARTY_SRC_DIR}" >&2
     return 1
   fi
@@ -399,12 +516,15 @@ build_common_underlay_workspace() {
   build_third_party_paths 17 "${GTSAM_DIR}"
   build_third_party_paths 17 "${AUTO_RCCAR_INTERFACES_DIR}"
   build_third_party_paths 17 "${LIO_SAM_DIR}"
+  install_gtsam_points_if_needed
+  build_glim_underlay_workspace
 }
 
 install_common_third_party() {
   source_ros2
   prepare_install_roots
   clone_common_repositories
+  install_glim_apt_dependencies
   install_livox_sdk2_if_needed
   install_rosdeps_for_paths $(selected_common_ros_paths)
   build_common_underlay_workspace

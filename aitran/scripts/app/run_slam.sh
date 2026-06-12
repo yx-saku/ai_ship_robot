@@ -285,6 +285,26 @@ cleanup_background_processes() {
   fi
 }
 
+ensure_process_started() {
+  local pid="$1"
+  local process_name="$2"
+
+  # 起動直後に落ちた子プロセスはここで検知し、後続のrecord/playを止めて原因を前面に出す。
+  if kill -0 "${pid}" 2>/dev/null; then
+    return 0
+  fi
+
+  local process_status=0
+
+  if wait "${pid}"; then
+    process_status=0
+  else
+    process_status=$?
+  fi
+  echo "${process_name} exited before startup completed." >&2
+  exit "${process_status}"
+}
+
 run_recorded_lio_sam() {
   local bag_output="$1"
   local slam_args=()
@@ -370,7 +390,6 @@ run_bag_play_lio_sam() {
   else
     append_unique_topics play_topics "${DEFAULT_IMU_TOPICS[@]}"
   fi
-  append_unique_topics play_topics "/tf"
   append_unique_topics play_topics "/tf_static"
   play_cmd+=(--topics "${play_topics[@]}")
 
@@ -378,6 +397,7 @@ run_bag_play_lio_sam() {
   bash "${SCRIPT_DIR}/run_lio_sam.sh" --use-sim-time "${slam_args[@]}" &
   SLAM_PID=$!
   sleep 2
+  ensure_process_started "${SLAM_PID}" "LIO-SAM"
   # bag再生前にrecordを起動し、再生開始直後のtopicも取りこぼしにくくする。
   if [[ "${record_bag}" == "true" ]]; then
     start_rosbag_record "${bag_output}" true "${record_topics[@]}"
@@ -448,7 +468,6 @@ run_bag_play_glim() {
   else
     append_unique_topics play_topics "${DEFAULT_IMU_TOPICS[@]}"
   fi
-  append_unique_topics play_topics "/tf"
   append_unique_topics play_topics "/tf_static"
   play_cmd+=(--topics "${play_topics[@]}")
 
@@ -456,6 +475,7 @@ run_bag_play_glim() {
   bash "${SCRIPT_DIR}/run_glim_slam.sh" --use-sim-time "${slam_args[@]}" &
   SLAM_PID=$!
   sleep 2
+  ensure_process_started "${SLAM_PID}" "GLIM"
   # bag再生前にrecordを起動し、再生開始直後のtopicも取りこぼしにくくする。
   if [[ "${record_bag}" == "true" ]]; then
     start_rosbag_record "${bag_output}" true "${record_topics[@]}"

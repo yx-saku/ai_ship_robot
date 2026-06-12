@@ -20,7 +20,7 @@
       <sensor name="${prefix}_lidar_link" type="ray">
         <always_on>true</always_on>
         <visualize>false</visualize>
-        <update_rate>5</update_rate>
+        <update_rate>10</update_rate>
         <!-- Livox pluginの要求に合わせ、可視化用のray設定とCSV走査設定を同居させる。 -->
         <plugin name="${prefix}_livox_plugin" filename="libros2_livox.so">
           <ray>

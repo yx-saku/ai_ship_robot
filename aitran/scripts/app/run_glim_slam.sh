@@ -128,6 +128,35 @@ parse_csv_topics() {
   done
 }
 
+get_launch_arg_value() {
+  local prefix="$1"
+  shift
+  local arg=""
+  local value=""
+
+  for arg in "$@"; do
+    if [[ "${arg}" == "${prefix}:="* ]]; then
+      value="${arg#${prefix}:=}"
+    fi
+  done
+
+  printf '%s' "${value}"
+}
+
+require_glim_package_available() {
+  local glim_package_name="$1"
+
+  # launch例外へ進む前に不足依存を明示し、GLIM未導入とpackage名誤りを切り分けやすくする。
+  if ros2 pkg prefix "${glim_package_name}" >/dev/null 2>&1; then
+    return 0
+  fi
+
+  echo "GLIM package not found: ${glim_package_name}" >&2
+  echo "Current third-party underlay does not include a GLIM package." >&2
+  echo "Install GLIM into ${AI_SHIP_ROBOT_OPT_ROOT}/ros_underlay/${ROS_DISTRO}/third_party_ws or specify --glim-package with an installed package name." >&2
+  exit 1
+}
+
 BUILD_WORKSPACE=false
 LAUNCH_ARGS=()
 LEFT_POINTS_TOPIC=""
@@ -282,5 +311,12 @@ if [[ ! -f "${AITRAN_ROOT}/ros2_ws/install/setup.bash" ]]; then
 fi
 
 source_workspace_environment
+
+# launch引数の既定値解決前にpackage存在確認を行い、例外ではなく説明付きで停止する。
+GLIM_PACKAGE_NAME="$(get_launch_arg_value glim_package "${LAUNCH_ARGS[@]}")"
+if [[ -z "${GLIM_PACKAGE_NAME}" ]]; then
+  GLIM_PACKAGE_NAME="glim_ros"
+fi
+require_glim_package_available "${GLIM_PACKAGE_NAME}"
 
 ros2 launch ai_ship_robot_slam glim.launch.py "${LAUNCH_ARGS[@]}"

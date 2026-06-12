@@ -44,6 +44,17 @@ def generate_launch_description():
     max_initial_angular_velocity = LaunchConfiguration("max_initial_angular_velocity")
     min_initial_imu_samples = LaunchConfiguration("min_initial_imu_samples")
     min_initial_imu_duration = LaunchConfiguration("min_initial_imu_duration")
+    imu_type = LaunchConfiguration("imu_type")
+    imu_acceleration_unit = LaunchConfiguration("imu_acceleration_unit")
+    imu_acceleration_scale = LaunchConfiguration("imu_acceleration_scale")
+    imu_frequency = LaunchConfiguration("imu_frequency")
+    imu_debug = LaunchConfiguration("imu_debug")
+    wait_for_imu_initialization = LaunchConfiguration("wait_for_imu_initialization")
+    use_imu_preintegration_initial_guess = LaunchConfiguration("use_imu_preintegration_initial_guess")
+    use_imu_translation_initial_guess = LaunchConfiguration("use_imu_translation_initial_guess")
+    use_imu_rotation_initial_guess = LaunchConfiguration("use_imu_rotation_initial_guess")
+    deskew_mode = LaunchConfiguration("deskew_mode")
+    max_point_offset_time_sec = LaunchConfiguration("max_point_offset_time_sec")
 
     # Gazebo側のRVizとodom TFを止め、LIO-SAMが出すmap/odom系TFを検証対象にする。
     simulation = GroupAction(
@@ -107,6 +118,17 @@ def generate_launch_description():
             "max_initial_angular_velocity": max_initial_angular_velocity,
             "min_initial_imu_samples": min_initial_imu_samples,
             "min_initial_imu_duration": min_initial_imu_duration,
+            "imu_type": imu_type,
+            "imu_acceleration_unit": imu_acceleration_unit,
+            "imu_acceleration_scale": imu_acceleration_scale,
+            "imu_frequency": imu_frequency,
+            "imu_debug": imu_debug,
+            "wait_for_imu_initialization": wait_for_imu_initialization,
+            "use_imu_preintegration_initial_guess": use_imu_preintegration_initial_guess,
+            "use_imu_translation_initial_guess": use_imu_translation_initial_guess,
+            "use_imu_rotation_initial_guess": use_imu_rotation_initial_guess,
+            "deskew_mode": deskew_mode,
+            "max_point_offset_time_sec": max_point_offset_time_sec,
         }.items(),
     )
 
@@ -147,6 +169,17 @@ def generate_launch_description():
             DeclareLaunchArgument("max_initial_angular_velocity", default_value="0.2"),
             DeclareLaunchArgument("min_initial_imu_samples", default_value="50"),
             DeclareLaunchArgument("min_initial_imu_duration", default_value="0.5"),
+            DeclareLaunchArgument("imu_type", default_value="six_axis"),
+            DeclareLaunchArgument("imu_acceleration_unit", default_value="g"),
+            DeclareLaunchArgument("imu_acceleration_scale", default_value="1.0"),
+            DeclareLaunchArgument("imu_frequency", default_value="500.0"),
+            DeclareLaunchArgument("imu_debug", default_value="false"),
+            DeclareLaunchArgument("wait_for_imu_initialization", default_value="true"),
+            DeclareLaunchArgument("use_imu_preintegration_initial_guess", default_value="true"),
+            DeclareLaunchArgument("use_imu_translation_initial_guess", default_value="false"),
+            DeclareLaunchArgument("use_imu_rotation_initial_guess", default_value="true"),
+            DeclareLaunchArgument("deskew_mode", default_value="imu_angular"),
+            DeclareLaunchArgument("max_point_offset_time_sec", default_value="0.2"),
             DeclareLaunchArgument(
                 "fusion_config",
                 default_value=PathJoinSubstitution(

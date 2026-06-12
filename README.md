@@ -417,6 +417,8 @@ bash aitran/scripts/app/run_lio_sam.sh --lio-sam-package lio_sam
 
 GLIM本体と ROS 2 ノードは third_party underlay の公式実装を使います。本プロジェクトでは、既存の `multi_lidar_pointcloud_fusion_node` で Livox `CustomMsg` を単一の `PointCloud2` にまとめ、`/livox/fused_points` を `glim_rosnode` に渡します。
 
+`aitran/scripts/install/install_third_party.sh` は `gtsam_points`、`glim`、`glim_ros2` を含む GLIM stack も underlay へ導入します。CPU-only 方針に合わせて、既定では CUDA / viewer / OpenCV なしで build します。
+
 ```bash
 bash aitran/scripts/install/install.sh
 bash aitran/scripts/install/install_third_party.sh
