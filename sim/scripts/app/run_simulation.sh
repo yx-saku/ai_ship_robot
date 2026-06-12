@@ -10,9 +10,11 @@ SETUP_SIMULATION_SCRIPT="${SIM_ROOT}/scripts/install/setup.sh"
 LIDAR_PATTERN_DIR="${SIM_ROOT}/ros2_ws/src/ai_ship_robot_description/urdf/lidar/patterns"
 AI_SHIP_ROBOT_OPT_ROOT="${AI_SHIP_ROBOT_OPT_ROOT:-/opt/ai_ship_robot}"
 THIRD_PARTY_UNDERLAY_SETUP="${AI_SHIP_ROBOT_OPT_ROOT}/ros_underlay/${ROS_DISTRO}/third_party_ws/install/setup.bash"
-DEFAULT_LIDAR_TOPICS=("/left_lidar/custom" "/right_lidar/custom")
-DEFAULT_IMU_TOPICS=("/left_lidar/imu" "/right_lidar/imu")
+DEFAULT_LIDAR_TOPICS=("/livox/lidar")
+DEFAULT_IMU_TOPICS=("/livox/imu")
 ROSBAG_PID=""
+SIMULATION_PID=""
+DRIVE_PID=""
 ROSBAG_ROOT="${WORKSPACE_ROOT}/rosbag2"
 
 print_available_lidar_patterns() {
@@ -54,7 +56,13 @@ Options:
   --lidar-pattern FILE
                        Use a LiDAR pattern xacro file name.
   --robot-name NAME   Set the spawned robot name.
-  --record-bag        Record LiDAR CustomMsg, IMU, /clock, /tf, and /tf_static while simulation runs.
+  --drive-scenario FILE
+                      Start drive_robot.sh with a YAML scenario file.
+  --drive-start-delay SEC
+                      Wait before starting scripted drive. Default: 0.0
+  --drive-loop        Loop drive scenario until interrupted.
+  --drive-once        Run drive scenario once. Default.
+  --record-bag        Record /livox/* adapter topics, /clock, /tf, and /tf_static.
   --bag-output PATH   Set rosbag output directory or prefix.
   --bag-topics CSV    Add extra record topics as comma-separated list.
   --lidar-topics CSV  Override recorded LiDAR CustomMsg topics as comma-separated list.
@@ -208,16 +216,47 @@ start_rosbag_record() {
   ROSBAG_PID=$!
 }
 
+start_scripted_drive() {
+  local drive_cmd=(
+    bash "${SIM_ROOT}/scripts/app/drive_robot.sh"
+    --scenario "${DRIVE_SCENARIO}"
+    --start-delay "${DRIVE_START_DELAY}"
+  )
+
+  # シナリオの繰り返し指定だけをdrive_robot.shへ転送し、速度系はscenario YAMLを唯一の入力にする。
+  if [[ "${DRIVE_LOOP}" == "true" ]]; then
+    drive_cmd+=(--loop)
+  else
+    drive_cmd+=(--once)
+  fi
+
+  echo "Starting scripted drive scenario: ${DRIVE_SCENARIO}" >&2
+  "${drive_cmd[@]}" &
+  DRIVE_PID=$!
+}
+
 default_bag_output() {
   # 保存先をworkspace直下へ集約し、開発時の回収場所を固定する。
   printf '%s/sim_%(%Y%m%d_%H%M%S)T' "${ROSBAG_ROOT}" -1
 }
 
 cleanup_background_processes() {
+  # 先に自動運転を止め、終了処理中にcmd_vel publishが継続しないようにする。
+  if [[ -n "${DRIVE_PID}" ]] && kill -0 "${DRIVE_PID}" 2>/dev/null; then
+    kill -INT "${DRIVE_PID}" 2>/dev/null || true
+    wait "${DRIVE_PID}" 2>/dev/null || true
+  fi
+
   # rosbag recordへINTを送り、metadata flushの機会を与えてbag破損を避ける。
   if [[ -n "${ROSBAG_PID}" ]] && kill -0 "${ROSBAG_PID}" 2>/dev/null; then
     kill -INT "${ROSBAG_PID}" 2>/dev/null || true
     wait "${ROSBAG_PID}" 2>/dev/null || true
+  fi
+
+  # シナリオ同時起動時はlaunchをbackground管理するため、終了時に明示停止する。
+  if [[ -n "${SIMULATION_PID}" ]] && kill -0 "${SIMULATION_PID}" 2>/dev/null; then
+    kill -INT "${SIMULATION_PID}" 2>/dev/null || true
+    wait "${SIMULATION_PID}" 2>/dev/null || true
   fi
 }
 
@@ -230,6 +269,10 @@ BAG_OUTPUT=""
 LIDAR_TOPICS=("${DEFAULT_LIDAR_TOPICS[@]}")
 IMU_TOPICS=("${DEFAULT_IMU_TOPICS[@]}")
 EXTRA_BAG_TOPICS=()
+DRIVE_SCENARIO=""
+DRIVE_START_DELAY="0.0"
+DRIVE_LOOP=false
+DRIVE_OPTION_REQUESTED=false
 
 trap cleanup_background_processes EXIT
 
@@ -294,6 +337,30 @@ while [[ $# -gt 0 ]]; do
       shift
       LAUNCH_ARGS+=("robot_name:=$(require_value --robot-name "${1:-}")")
       ;;
+    --drive-scenario=*)
+      DRIVE_SCENARIO="$(require_value --drive-scenario "${1#*=}")"
+      ;;
+    --drive-scenario)
+      shift
+      DRIVE_SCENARIO="$(require_value --drive-scenario "${1:-}")"
+      ;;
+    --drive-start-delay=*)
+      DRIVE_START_DELAY="$(require_value --drive-start-delay "${1#*=}")"
+      DRIVE_OPTION_REQUESTED=true
+      ;;
+    --drive-start-delay)
+      shift
+      DRIVE_START_DELAY="$(require_value --drive-start-delay "${1:-}")"
+      DRIVE_OPTION_REQUESTED=true
+      ;;
+    --drive-loop)
+      DRIVE_LOOP=true
+      DRIVE_OPTION_REQUESTED=true
+      ;;
+    --drive-once)
+      DRIVE_LOOP=false
+      DRIVE_OPTION_REQUESTED=true
+      ;;
     --record-bag)
       RECORD_BAG=true
       ;;
@@ -339,6 +406,16 @@ while [[ $# -gt 0 ]]; do
   shift
 done
 
+if [[ -z "${DRIVE_SCENARIO}" && "${DRIVE_OPTION_REQUESTED}" == "true" ]]; then
+  echo "Drive options require --drive-scenario FILE." >&2
+  exit 2
+fi
+
+if [[ -n "${DRIVE_SCENARIO}" && ! -f "${DRIVE_SCENARIO}" ]]; then
+  echo "Drive scenario file not found: ${DRIVE_SCENARIO}" >&2
+  exit 2
+fi
+
 # 単体シミュレーションとして自己完結するTF木を出すため、Gazeboのodom TFは常に有効にする。
 LAUNCH_ARGS+=("publish_odom_tf:=true")
 
@@ -383,6 +460,19 @@ if [[ "${RECORD_BAG}" == "true" ]]; then
   append_unique_topics BAG_TOPICS "${EXTRA_BAG_TOPICS[@]}"
   append_unique_topics BAG_TOPICS "/clock" "/tf" "/tf_static"
   start_rosbag_record "${BAG_OUTPUT}" true "${BAG_TOPICS[@]}"
+fi
+
+if [[ -n "${DRIVE_SCENARIO}" ]]; then
+  # シミュレーションを先に起動し、/clockを待てる状態で自動運転ノードを同時起動する。
+  ros2 launch ai_ship_robot_gazebo simulation.launch.py "${LAUNCH_ARGS[@]}" &
+  SIMULATION_PID=$!
+  start_scripted_drive
+
+  set +e
+  wait "${SIMULATION_PID}"
+  simulation_status=$?
+  set -e
+  exit "${simulation_status}"
 fi
 
 ros2 launch ai_ship_robot_gazebo simulation.launch.py "${LAUNCH_ARGS[@]}"

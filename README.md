@@ -137,7 +137,8 @@ bash aitran/scripts/install/setup.sh && bash sim/scripts/install/setup.sh
 | Livox SDK | `Livox-SDK/Livox-SDK2` | Livox公式SDK。driver buildに必要 | ライセンス表記はGitHub API上 `NOASSERTION` のため、本番配布前に同梱ライセンス確認が必要 |
 | Livox Gazebo simulation | `stm32f303ret6/livox_laser_simulation_RO2` | Gazebo ClassicでLivox系非反復走査を再現できる実装が限られるため、シミュレーション用途に限定して採用 | 非公式repo。実機向けの `install_third_party.sh` には含めない |
 | factor graph | `borglab/gtsam` | GTSAM公式/有名ライブラリ。LIO-SAM依存 | `4.2`相当の検証済みcommitに固定 |
-| SLAM core | `TixiaoShan/LIO-SAM` | LiDAR-Inertial SLAMの実績がある有名repo。ROS 2 branchを利用 | 固定commitで導入し、Mid-360固有の点群差分はproject側adapterで吸収 |
+| AutoRC interface | `UV-Lab/autoRCcar_indoor` | UV-Lab版LIO-SAMが依存する `autorccar_interfaces` を提供 | sparse checkoutで `ros2/src/autorccar_interfaces` のみ取得 |
+| SLAM core | `UV-Lab/LIO-SAM_MID360_ROS2` | Mid-360向けにLivox CustomMsgを直接扱えるLIO-SAM派生repo | 固定commitで導入し、third_party本体は改修せず、このproject側のfusion nodeでsimulation固有のline/offset_time差分を補正 |
 
 セットアップ後、新しいターミナルではROS 2とビルド済みworkspace overlayが自動で読み込まれます。現在のターミナルへ反映する場合は次を実行します。
 
@@ -194,12 +195,25 @@ bash sim/scripts/app/run_simulation.sh --no-rviz
 bash sim/scripts/app/run_simulation.sh --no-gui
 bash sim/scripts/app/run_simulation.sh --lite
 bash sim/scripts/app/run_simulation.sh --build
+bash sim/scripts/app/run_simulation.sh --drive-scenario sim/config/drive_scenarios/arc_left.yaml
 ```
 
 - `--no-rviz`: RViz2を起動しない
 - `--no-gui`: Gazebo Classic GUIを起動しない
 - `--lite`: GUIなし、LiDAR ray数を低減して軽量起動する
 - `--build`: 起動前にworkspace setupを実行する
+- `--drive-scenario`: シミュレータ起動時に指定YAMLで自動運転を開始する
+
+シミュレーション起動と同時にYAMLシナリオで自動運転する例です。
+
+```bash
+bash sim/scripts/app/run_simulation.sh \
+  --drive-scenario sim/config/drive_scenarios/arc_left.yaml \
+  --drive-start-delay 5.0
+```
+
+- `--drive-start-delay` は `drive_robot.sh --start-delay` に渡され、sim time基準で待機します
+- `--drive-loop` を付けると、シミュレーション終了までシナリオを繰り返します
 
 rosbagを記録する例です。
 
@@ -207,7 +221,7 @@ rosbagを記録する例です。
 bash sim/scripts/app/run_simulation.sh --record-bag
 ```
 
-- 記録対象の既定値: `/left_lidar/custom`, `/right_lidar/custom`, `/left_lidar/imu`, `/right_lidar/imu`, `/clock`, `/tf`, `/tf_static`
+- 記録対象の既定値: `/livox/lidar`, `/livox/imu`, `/clock`, `/tf`, `/tf_static`
 - `--bag-output` 未指定時は `rosbag2/sim_<timestamp>` に保存します
 - 記録時刻は `ros2 bag record --use-sim-time` で `/clock` を基準にします
 - 追加topicは `--bag-topics /cmd_vel,/scan_debug` のようにCSVで指定できます
@@ -240,11 +254,11 @@ YAMLシナリオで自動運転する例です。
 
 ```bash
 bash sim/scripts/app/drive_robot.sh \
-  --auto \
   --scenario sim/config/drive_scenarios/arc_left.yaml \
   --start-delay 1.0
 ```
 
+- `--scenario` を指定すると、キーボード操作ではなくシナリオ自動運転を実行します
 - `--loop` を付けるとシナリオを繰り返します
 - ステップごとに速度成分はリセットされ、終了時には `Twist=0` をpublishします
 
@@ -305,18 +319,20 @@ bash sim/scripts/app/drive_robot.sh
 
 主なSLAM関連topicです。
 
-- LIO-SAM用変換後点群: `/left_lidar/lio_sam_points`
-- SLAM用IMU入力: `/left_lidar/imu`
-- 左LiDAR入力CustomMsg: `/left_lidar/custom`
-- 融合入力CustomMsg: `/left_lidar/custom`, `/right_lidar/custom`
+- LIO-SAM用Livox CustomMsg: `/livox/lidar`
+- Livox raw IMU: `/livox/imu`
+- LIO-SAM用6軸初期姿勢付きIMU: `/livox/imu_oriented`
+- simulation raw左LiDAR CustomMsg: `/left_lidar/custom`
+- simulation raw左LiDAR IMU: `/left_lidar/imu`
 - SLAM用LiDAR frame: `left_lidar_link`
 - SLAM用IMU frame: `left_lidar_imu_link`
 
 確認コマンドです。
 
 ```bash
-ros2 topic hz /left_lidar/custom
-ros2 topic hz /left_lidar/imu
+ros2 topic hz /livox/lidar
+ros2 topic hz /livox/imu
+ros2 topic hz /livox/imu_oriented
 ros2 run tf2_ros tf2_echo left_lidar_link left_lidar_imu_link
 ros2 run tf2_ros tf2_echo odom base_footprint
 ```
@@ -328,8 +344,9 @@ bash aitran/scripts/install/install.sh
 bash aitran/scripts/install/install_third_party.sh
 bash aitran/scripts/install/setup.sh
 bash aitran/scripts/app/run_slam.sh \
-  --points /left_lidar/custom \
-  --imu /left_lidar/imu \
+  --points /livox/lidar \
+  --raw-imu /livox/imu \
+  --imu /livox/imu_oriented \
   --config aitran/ros2_ws/src/ai_ship_robot_slam/config/lio_sam_mid360.yaml
 ```
 
@@ -337,8 +354,9 @@ bash aitran/scripts/app/run_slam.sh \
 
 ```bash
 bash aitran/scripts/app/run_slam.sh \
-  --points /left_lidar/custom \
-  --imu /left_lidar/imu \
+  --points /livox/lidar \
+  --raw-imu /livox/imu \
+  --imu /livox/imu_oriented \
   --record-bag
 ```
 
@@ -350,8 +368,9 @@ bash aitran/scripts/app/run_slam.sh \
 ```bash
 bash aitran/scripts/app/run_slam.sh \
   --bag-play rosbag2/sim_20260611_120000 \
-  --imu /left_lidar/imu \
-  --input-points /left_lidar/custom,/right_lidar/custom
+  --raw-imu /livox/imu \
+  --imu /livox/imu_oriented \
+  --input-points /livox/lidar
 ```
 
 - bag再生時は `use_sim_time=true` を強制します
@@ -407,6 +426,7 @@ sim/ros2_ws/src/ai_ship_robot_description/urdf/lidar/models/mid360_lidar.urdf.xa
 - 1台構成CustomMsg: `/center_lidar/custom`
 - 2台構成点群: `/left_lidar/points`, `/right_lidar/points`
 - 2台構成CustomMsg: `/left_lidar/custom`, `/right_lidar/custom`
+- 実機Livox driver相当の補完後topic: `/livox/lidar`, `/livox/imu`
 
 ## 確認コマンド
 

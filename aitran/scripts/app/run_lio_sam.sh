@@ -17,17 +17,23 @@ Options:
   --build                     Build/install required workspace profile before launch.
   --config PATH               Use a LIO-SAM params YAML file.
   --fusion-config PATH        Use a multi-LiDAR fusion params YAML file.
-  --input-points CSV          Set input PointCloud2 topics as comma-separated list.
+  --input-points CSV          Set optional fusion input CustomMsg topics as comma-separated list.
   --left-points TOPIC         Compatibility alias for adding / replacing left LiDAR CustomMsg input.
   --right-points TOPIC        Compatibility alias for adding / replacing right LiDAR CustomMsg input.
-  --reference-points TOPIC    Set reference LiDAR PointCloud2 topic.
+  --reference-points TOPIC    Set reference LiDAR CustomMsg topic.
   --reference-lidar-frame FRAME
                               Set reference LiDAR frame used for fusion output.
-  --fused-points TOPIC        Set fused PointCloud2 topic before adapter.
-  --imu TOPIC                 Set reference LiDAR IMU topic.
-  --lio-points TOPIC          Set adapted PointCloud2 topic passed to LIO-SAM.
-  --adapter                   Enable Mid-360 PointCloud2 adapter. Default.
-  --no-adapter                Disable adapter and pass --lio-points directly to LIO-SAM.
+  --fused-points TOPIC        Set optional fusion PointCloud2 debug topic.
+  --raw-imu TOPIC             Set raw 6-axis IMU topic for initial orientation estimation.
+  --imu TOPIC                 Set LIO-SAM IMU topic. Default is /livox/imu_oriented.
+  --lio-custom TOPIC          Set corrected CustomMsg topic passed to UV-Lab LIO-SAM.
+  --lio-points TOPIC          Compatibility alias for --lio-custom.
+  --imu-initializer           Enable 6-axis IMU initial roll/pitch estimator. Default.
+  --no-imu-initializer        Disable 6-axis IMU initial roll/pitch estimator.
+  --fusion                    Enable optional multi-LiDAR fusion node.
+  --no-fusion                 Disable optional multi-LiDAR fusion node. Default.
+  --adapter                   Enable legacy PointCloud2 adapter for debugging.
+  --no-adapter                Disable legacy PointCloud2 adapter. Default.
   --lidar-frame FRAME         Set LIO-SAM lidar frame.
   --base-frame FRAME          Set LIO-SAM base frame.
   --odom-frame FRAME          Set LIO-SAM odom frame.
@@ -177,6 +183,7 @@ while [[ $# -gt 0 ]]; do
         echo "--input-points requires at least one topic." >&2
         exit 2
       fi
+      LAUNCH_ARGS+=("use_fusion:=true")
       LAUNCH_ARGS+=("input_points_topics:=$(format_topic_list "${input_topics[@]}")")
       ;;
     --input-points)
@@ -187,18 +194,21 @@ while [[ $# -gt 0 ]]; do
         echo "--input-points requires at least one topic." >&2
         exit 2
       fi
+      LAUNCH_ARGS+=("use_fusion:=true")
       LAUNCH_ARGS+=("input_points_topics:=$(format_topic_list "${input_topics[@]}")")
       ;;
     --points=*)
       points_topic="${1#*=}"
       LAUNCH_ARGS+=("input_points_topics:=$(format_topic_list "${points_topic}")")
       LAUNCH_ARGS+=("reference_points_topic:=${points_topic}")
+      LAUNCH_ARGS+=("lio_custom_topic:=${points_topic}")
       ;;
     --points)
       shift
       points_topic="$(require_value --points "${1:-}")"
       LAUNCH_ARGS+=("input_points_topics:=$(format_topic_list "${points_topic}")")
       LAUNCH_ARGS+=("reference_points_topic:=${points_topic}")
+      LAUNCH_ARGS+=("lio_custom_topic:=${points_topic}")
       ;;
     --left-points=*)
       LEFT_POINTS_TOPIC="${1#*=}"
@@ -215,10 +225,12 @@ while [[ $# -gt 0 ]]; do
       RIGHT_POINTS_TOPIC="$(require_value --right-points "${1:-}")"
       ;;
     --reference-points=*)
+      LAUNCH_ARGS+=("use_fusion:=true")
       LAUNCH_ARGS+=("reference_points_topic:=${1#*=}")
       ;;
     --reference-points)
       shift
+      LAUNCH_ARGS+=("use_fusion:=true")
       LAUNCH_ARGS+=("reference_points_topic:=$(require_value --reference-points "${1:-}")")
       ;;
     --reference-lidar-frame=*)
@@ -229,10 +241,12 @@ while [[ $# -gt 0 ]]; do
       LAUNCH_ARGS+=("reference_lidar_frame:=$(require_value --reference-lidar-frame "${1:-}")")
       ;;
     --fused-points=*)
+      LAUNCH_ARGS+=("use_fusion:=true")
       LAUNCH_ARGS+=("fused_points_topic:=${1#*=}")
       ;;
     --fused-points)
       shift
+      LAUNCH_ARGS+=("use_fusion:=true")
       LAUNCH_ARGS+=("fused_points_topic:=$(require_value --fused-points "${1:-}")")
       ;;
     --imu=*)
@@ -242,18 +256,44 @@ while [[ $# -gt 0 ]]; do
       shift
       LAUNCH_ARGS+=("imu_topic:=$(require_value --imu "${1:-}")")
       ;;
+    --raw-imu=*)
+      LAUNCH_ARGS+=("raw_imu_topic:=${1#*=}")
+      ;;
+    --raw-imu)
+      shift
+      LAUNCH_ARGS+=("raw_imu_topic:=$(require_value --raw-imu "${1:-}")")
+      ;;
+    --imu-initializer)
+      LAUNCH_ARGS+=("use_imu_orientation_initializer:=true")
+      ;;
+    --no-imu-initializer)
+      LAUNCH_ARGS+=("use_imu_orientation_initializer:=false")
+      ;;
     --lio-points=*)
-      LAUNCH_ARGS+=("lio_points_topic:=${1#*=}")
+      LAUNCH_ARGS+=("lio_custom_topic:=${1#*=}")
       ;;
     --lio-points)
       shift
-      LAUNCH_ARGS+=("lio_points_topic:=$(require_value --lio-points "${1:-}")")
+      LAUNCH_ARGS+=("lio_custom_topic:=$(require_value --lio-points "${1:-}")")
+      ;;
+    --lio-custom=*)
+      LAUNCH_ARGS+=("lio_custom_topic:=${1#*=}")
+      ;;
+    --lio-custom)
+      shift
+      LAUNCH_ARGS+=("lio_custom_topic:=$(require_value --lio-custom "${1:-}")")
       ;;
     --adapter)
       LAUNCH_ARGS+=("use_adapter:=true")
       ;;
     --no-adapter)
       LAUNCH_ARGS+=("use_adapter:=false")
+      ;;
+    --fusion)
+      LAUNCH_ARGS+=("use_fusion:=true")
+      ;;
+    --no-fusion)
+      LAUNCH_ARGS+=("use_fusion:=false")
       ;;
     --lidar-frame=*)
       LAUNCH_ARGS+=("lidar_frame:=${1#*=}")
@@ -355,6 +395,7 @@ if [[ -n "${LEFT_POINTS_TOPIC}" || -n "${RIGHT_POINTS_TOPIC}" ]]; then
   [[ -n "${LEFT_POINTS_TOPIC}" ]] && input_topics+=("${LEFT_POINTS_TOPIC}")
   [[ -n "${RIGHT_POINTS_TOPIC}" ]] && input_topics+=("${RIGHT_POINTS_TOPIC}")
   LAUNCH_ARGS+=("input_points_topics:=$(format_topic_list "${input_topics[@]}")")
+  LAUNCH_ARGS+=("use_fusion:=true")
   if [[ -n "${LEFT_POINTS_TOPIC}" ]]; then
     LAUNCH_ARGS+=("reference_points_topic:=${LEFT_POINTS_TOPIC}")
   fi

@@ -1,7 +1,7 @@
 <?xml version="1.0" ?>
 <sdf version="1.6">
   <world name="lidar_placement">
-    <gravity>0 0 -9.81</gravity>
+    <gravity>0 0 -9.80511</gravity>
     <magnetic_field>6.0e-6 2.3e-5 -4.2e-5</magnetic_field>
     <atmosphere type="adiabatic" />
     <!-- /clock の更新粒度を上げるため、physics step を 1ms 基準に固定する。 -->

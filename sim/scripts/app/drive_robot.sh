@@ -17,9 +17,8 @@ Usage: bash sim/scripts/app/drive_robot.sh [OPTIONS]
 
 Options:
   --build                  Run one-time environment setup before starting keyboard drive.
-  --auto                   Run scripted drive instead of keyboard drive.
-  --scenario FILE          YAML scenario file for scripted drive.
-  --once                   Run scenario once. Default for --auto.
+  --scenario FILE          Run scripted drive with a YAML scenario file.
+  --once                   Run scenario once. Default when --scenario is set.
   --loop                   Loop scenario until interrupted.
   --start-delay SEC        Wait before starting scripted drive. Default: 0.0
   --linear-speed VALUE     Forward/backward speed in m/s. Default: 0.20
@@ -48,6 +47,18 @@ require_value() {
   if [[ -z "${value}" || "${value}" == --* ]]; then
     echo "${option} requires a value." >&2
     exit 2
+  fi
+
+  printf '%s' "${value}"
+}
+
+normalize_ros_double() {
+  local value="$1"
+
+  # ROS 2のYAML引数で整数型に解釈されないよう、整数表記だけdouble表記へ揃える。
+  if [[ "${value}" =~ ^[+-]?[0-9]+$ ]]; then
+    printf '%s.0' "${value}"
+    return 0
   fi
 
   printf '%s' "${value}"
@@ -112,7 +123,6 @@ source_overlay_if_current() {
 trap cleanup_terminal EXIT
 
 BUILD_WORKSPACE=false
-AUTO_MODE=false
 SCENARIO_FILE=""
 START_DELAY_SEC="0.0"
 LOOP_SCENARIO=false
@@ -131,11 +141,8 @@ while [[ $# -gt 0 ]]; do
     --build)
       BUILD_WORKSPACE=true
       ;;
-    --auto)
-      AUTO_MODE=true
-      ;;
     --scenario=*)
-      SCENARIO_FILE="${1#*=}"
+      SCENARIO_FILE="$(require_value --scenario "${1#*=}")"
       ;;
     --scenario)
       shift
@@ -148,39 +155,39 @@ while [[ $# -gt 0 ]]; do
       LOOP_SCENARIO=true
       ;;
     --start-delay=*)
-      START_DELAY_SEC="${1#*=}"
+      START_DELAY_SEC="$(normalize_ros_double "$(require_value --start-delay "${1#*=}")")"
       ;;
     --start-delay)
       shift
-      START_DELAY_SEC="$(require_value --start-delay "${1:-}")"
+      START_DELAY_SEC="$(normalize_ros_double "$(require_value --start-delay "${1:-}")")"
       ;;
     --linear-speed=*)
-      LINEAR_SPEED="${1#*=}"
+      LINEAR_SPEED="$(normalize_ros_double "$(require_value --linear-speed "${1#*=}")")"
       ;;
     --linear-speed)
       shift
-      LINEAR_SPEED="$(require_value --linear-speed "${1:-}")"
+      LINEAR_SPEED="$(normalize_ros_double "$(require_value --linear-speed "${1:-}")")"
       ;;
     --lateral-speed=*)
-      LATERAL_SPEED="${1#*=}"
+      LATERAL_SPEED="$(normalize_ros_double "$(require_value --lateral-speed "${1#*=}")")"
       ;;
     --lateral-speed)
       shift
-      LATERAL_SPEED="$(require_value --lateral-speed "${1:-}")"
+      LATERAL_SPEED="$(normalize_ros_double "$(require_value --lateral-speed "${1:-}")")"
       ;;
     --angular-speed=*)
-      ANGULAR_SPEED="${1#*=}"
+      ANGULAR_SPEED="$(normalize_ros_double "$(require_value --angular-speed "${1#*=}")")"
       ;;
     --angular-speed)
       shift
-      ANGULAR_SPEED="$(require_value --angular-speed "${1:-}")"
+      ANGULAR_SPEED="$(normalize_ros_double "$(require_value --angular-speed "${1:-}")")"
       ;;
     --publish-rate=*)
-      PUBLISH_RATE="${1#*=}"
+      PUBLISH_RATE="$(normalize_ros_double "$(require_value --publish-rate "${1#*=}")")"
       ;;
     --publish-rate)
       shift
-      PUBLISH_RATE="$(require_value --publish-rate "${1:-}")"
+      PUBLISH_RATE="$(normalize_ros_double "$(require_value --publish-rate "${1:-}")")"
       ;;
     --cmd-vel-topic=*)
       CMD_VEL_TOPIC="${1#*=}"
@@ -218,12 +225,8 @@ fi
 
 source_workspace_environment
 
-# 自動モードは専用ノードを使い、TTY依存のkeyboard_driveとは実行経路を分離する。
-if [[ "${AUTO_MODE}" == "true" ]]; then
-  if [[ -z "${SCENARIO_FILE}" ]]; then
-    echo "--auto requires --scenario FILE." >&2
-    exit 2
-  fi
+# scenario指定時は専用ノードを使い、TTY依存のkeyboard_driveとは実行経路を分離する。
+if [[ -n "${SCENARIO_FILE}" ]]; then
   DRIVE_EXECUTABLE="$(ros2 pkg prefix ai_ship_robot_gazebo)/lib/ai_ship_robot_gazebo/scripted_drive.py"
 else
   DRIVE_EXECUTABLE="$(ros2 pkg prefix ai_ship_robot_gazebo)/lib/ai_ship_robot_gazebo/keyboard_drive.py"
@@ -235,7 +238,7 @@ if [[ ! -x "${DRIVE_EXECUTABLE}" ]]; then
   exit 1
 fi
 
-if [[ "${AUTO_MODE}" == "true" ]]; then
+if [[ -n "${SCENARIO_FILE}" ]]; then
   "${DRIVE_EXECUTABLE}" --ros-args \
     -p cmd_vel_topic:="${CMD_VEL_TOPIC}" \
     -p scenario_file:="${SCENARIO_FILE}" \

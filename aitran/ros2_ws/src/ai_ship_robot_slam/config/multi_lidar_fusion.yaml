@@ -1,10 +1,10 @@
 multi_lidar_pointcloud_fusion_node:
   ros__parameters:
     input_custom_topics:
-      - /left_lidar/custom
-      # - /right_lidar/custom
-    output_points_topic: /left_lidar/fused_points
-    reference_custom_topic: /left_lidar/custom
+      - /livox/lidar
+    output_points_topic: /livox/fused_points
+    output_custom_topic: /livox/lidar_fused
+    reference_custom_topic: /livox/lidar
     reference_lidar_frame: left_lidar_link
     sync_queue_size: 10
     max_stamp_delta_sec: 0.05
@@ -12,6 +12,6 @@ multi_lidar_pointcloud_fusion_node:
     timestamp_unit_scale: 1.0e-9
     max_relative_time_sec: 0.2
     scan_pattern_csv_file: /opt/ai_ship_robot/ros_underlay/humble/third_party_ws/install/ros2_livox_simulation/share/ros2_livox_simulation/scan_mode/mid360.csv
-    synthesize_ring_from_pattern: true
+    synthesize_ring_from_pattern: false
     scan_pattern_physical_line_count: 4
     synthetic_ring_count: 4

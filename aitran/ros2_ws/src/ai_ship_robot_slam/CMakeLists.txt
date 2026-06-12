@@ -35,10 +35,20 @@ ament_target_dependencies(
   tf2_sensor_msgs
 )
 
+add_executable(six_axis_imu_initial_orientation_node src/six_axis_imu_initial_orientation_node.cpp)
+target_compile_features(six_axis_imu_initial_orientation_node PUBLIC cxx_std_17)
+ament_target_dependencies(
+  six_axis_imu_initial_orientation_node
+  rclcpp
+  sensor_msgs
+  tf2
+)
+
 install(
   TARGETS
     mid360_lio_sam_pointcloud_adapter_node
     multi_lidar_pointcloud_fusion_node
+    six_axis_imu_initial_orientation_node
   DESTINATION lib/${PROJECT_NAME}
 )
 

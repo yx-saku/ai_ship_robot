@@ -9,6 +9,9 @@
   "overrideCommand": true,
   "containerEnv": {
     "DISPLAY": "${localEnv:DISPLAY}",
+    "WAYLAND_DISPLAY": "${localEnv:WAYLAND_DISPLAY}",
+    "XAUTHORITY": "/tmp/.docker.xauth",
+    "XDG_RUNTIME_DIR": "/tmp/devcontainer-xdg-runtime",
     "QT_X11_NO_MITSHM": "1",
     "APT_PRIMARY_MIRROR": "${localEnv:APT_PRIMARY_MIRROR}",
     "APT_SECURITY_MIRROR": "${localEnv:APT_SECURITY_MIRROR}",
@@ -39,6 +42,8 @@
   "mounts": [
     "source=${localWorkspaceFolder},target=/workspaces/ai_ship_robot,type=bind,consistency=cached",
     "source=/tmp/.X11-unix,target=/tmp/.X11-unix,type=bind,consistency=cached",
+    "source=${localWorkspaceFolder}/.devcontainer/.local/gui/Xauthority,target=/tmp/.docker.xauth,type=bind,readonly",
+    "source=${localEnv:XDG_RUNTIME_DIR:/tmp},target=/tmp/devcontainer-xdg-runtime,type=bind,consistency=cached",
     "source=${localWorkspaceFolder}/.devcontainer/.config/kilo,target=/home/ros/.config/kilo,type=bind",
     "source=${localWorkspaceFolder}/.devcontainer/.local/state/kilo,target=/home/ros/.local/state/kilo,type=bind",
     "source=${localWorkspaceFolder}/.devcontainer/.local/share/kilo,target=/home/ros/.local/share/kilo,type=bind",
@@ -46,5 +51,5 @@
     "source=${localWorkspaceFolder}/.devcontainer/.local/apt/lists,target=/var/lib/apt/lists,type=bind",
     "source=${localWorkspaceFolder}/.devcontainer/.local/ros,target=/home/ros/.ros,type=bind"
   ],
-  "initializeCommand": "mkdir -p '${localWorkspaceFolder}/.devcontainer/.config/kilo' '${localWorkspaceFolder}/.devcontainer/.local/state/kilo' '${localWorkspaceFolder}/.devcontainer/.local/share/kilo' '${localWorkspaceFolder}/.devcontainer/.local/apt/cache/archives/partial' '${localWorkspaceFolder}/.devcontainer/.local/apt/lists/partial' '${localWorkspaceFolder}/.devcontainer/.local/ros/rosdep' '${localWorkspaceFolder}/.devcontainer/.local/ros/log'"
+  "initializeCommand": "mkdir -p '${localWorkspaceFolder}/.devcontainer/.config/kilo' '${localWorkspaceFolder}/.devcontainer/.local/state/kilo' '${localWorkspaceFolder}/.devcontainer/.local/share/kilo' '${localWorkspaceFolder}/.devcontainer/.local/apt/cache/archives/partial' '${localWorkspaceFolder}/.devcontainer/.local/apt/lists/partial' '${localWorkspaceFolder}/.devcontainer/.local/ros/rosdep' '${localWorkspaceFolder}/.devcontainer/.local/ros/log' '${localWorkspaceFolder}/.devcontainer/.local/gui' && gui_xauth='${localWorkspaceFolder}/.devcontainer/.local/gui/Xauthority'; if [ -n \"$XAUTHORITY\" ] && [ -r \"$XAUTHORITY\" ]; then cp \"$XAUTHORITY\" \"$gui_xauth\"; elif [ -n \"$XDG_RUNTIME_DIR\" ] && [ -r \"$XDG_RUNTIME_DIR/gdm/Xauthority\" ]; then cp \"$XDG_RUNTIME_DIR/gdm/Xauthority\" \"$gui_xauth\"; else : > \"$gui_xauth\"; fi && chmod 0600 \"$gui_xauth\""
 }

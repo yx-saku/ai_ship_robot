@@ -10,12 +10,18 @@ from launch_ros.substitutions import FindPackageShare
 def generate_launch_description():
     use_sim_time = LaunchConfiguration("use_sim_time")
     use_rviz = LaunchConfiguration("use_rviz")
+    use_fusion = LaunchConfiguration("use_fusion")
     use_adapter = LaunchConfiguration("use_adapter")
+    use_imu_orientation_initializer = LaunchConfiguration("use_imu_orientation_initializer")
     params_file = LaunchConfiguration("params_file")
     fusion_config = LaunchConfiguration("fusion_config")
     rviz_config = LaunchConfiguration("rviz_config")
+    input_points_topics = LaunchConfiguration("input_points_topics")
+    reference_points_topic = LaunchConfiguration("reference_points_topic")
     fused_points_topic = LaunchConfiguration("fused_points_topic")
+    lio_custom_topic = LaunchConfiguration("lio_custom_topic")
     reference_lidar_frame = LaunchConfiguration("reference_lidar_frame")
+    raw_imu_topic = LaunchConfiguration("raw_imu_topic")
     imu_topic = LaunchConfiguration("imu_topic")
     lio_points_topic = LaunchConfiguration("lio_points_topic")
     lidar_frame = LaunchConfiguration("lidar_frame")
@@ -28,17 +34,29 @@ def generate_launch_description():
     fusion_timestamp_unit_scale = LaunchConfiguration("fusion_timestamp_unit_scale")
     publish_map_to_odom_tf = LaunchConfiguration("publish_map_to_odom_tf")
     lio_sam_package = LaunchConfiguration("lio_sam_package")
+    expected_acceleration_norm = LaunchConfiguration("expected_acceleration_norm")
+    acceleration_norm_tolerance = LaunchConfiguration("acceleration_norm_tolerance")
+    max_initial_angular_velocity = LaunchConfiguration("max_initial_angular_velocity")
+    min_initial_imu_samples = LaunchConfiguration("min_initial_imu_samples")
+    min_initial_imu_duration = LaunchConfiguration("min_initial_imu_duration")
 
-    # 複数LiDARを基準LiDAR座標系へ集約し、LIO-SAMへ渡す入力点群を1本化する。
+    # 複数LiDAR fusionは任意機能にし、既定では実機Livox driver topicをLIO-SAMへ直接渡す。
     fusion = Node(
         package="ai_ship_robot_slam",
         executable="multi_lidar_pointcloud_fusion_node",
         name="multi_lidar_pointcloud_fusion_node",
         output="screen",
+        condition=IfCondition(use_fusion),
         parameters=[
             fusion_config,
             {
                 "use_sim_time": use_sim_time,
+                "input_custom_topics": input_points_topics,
+                "output_points_topic": fused_points_topic,
+                "output_custom_topic": lio_custom_topic,
+                "reference_custom_topic": reference_points_topic,
+                "reference_lidar_frame": reference_lidar_frame,
+                "timestamp_unit_scale": ParameterValue(fusion_timestamp_unit_scale, value_type=float),
             },
         ],
     )
@@ -47,7 +65,7 @@ def generate_launch_description():
         params_file,
         {
             "use_sim_time": use_sim_time,
-            "pointCloudTopic": lio_points_topic,
+            "pointCloudTopic": lio_custom_topic,
             "imuTopic": imu_topic,
             "lidarFrame": lidar_frame,
             "baselinkFrame": base_frame,
@@ -72,6 +90,29 @@ def generate_launch_description():
                 "derived_ring_count": ParameterValue(derived_ring_count, value_type=int),
                 "min_vertical_angle_deg": ParameterValue(min_vertical_angle_deg, value_type=float),
                 "max_vertical_angle_deg": ParameterValue(max_vertical_angle_deg, value_type=float),
+            }
+        ],
+    )
+
+    # Mid-360内蔵6軸IMU向けに、静止時加速度から初期roll/pitchだけを推定したIMU topicを作る。
+    imu_orientation_initializer = Node(
+        package="ai_ship_robot_slam",
+        executable="six_axis_imu_initial_orientation_node",
+        name="six_axis_imu_initial_orientation_node",
+        output="screen",
+        condition=IfCondition(use_imu_orientation_initializer),
+        parameters=[
+            {
+                "use_sim_time": use_sim_time,
+                "input_imu_topic": raw_imu_topic,
+                "output_imu_topic": imu_topic,
+                "expected_acceleration_norm": ParameterValue(expected_acceleration_norm, value_type=float),
+                "acceleration_norm_tolerance": ParameterValue(acceleration_norm_tolerance, value_type=float),
+                "max_initial_angular_velocity_rad_s": ParameterValue(
+                    max_initial_angular_velocity, value_type=float
+                ),
+                "min_initial_samples": ParameterValue(min_initial_imu_samples, value_type=int),
+                "min_initial_duration_sec": ParameterValue(min_initial_imu_duration, value_type=float),
             }
         ],
     )
@@ -148,10 +189,16 @@ def generate_launch_description():
         [
             DeclareLaunchArgument("use_sim_time", default_value="false"),
             DeclareLaunchArgument("use_rviz", default_value="true"),
-            DeclareLaunchArgument("use_adapter", default_value="true"),
-            DeclareLaunchArgument("fused_points_topic", default_value="/left_lidar/fused_points"),
+            DeclareLaunchArgument("use_fusion", default_value="false"),
+            DeclareLaunchArgument("use_adapter", default_value="false"),
+            DeclareLaunchArgument("use_imu_orientation_initializer", default_value="true"),
+            DeclareLaunchArgument("input_points_topics", default_value="['/livox/lidar']"),
+            DeclareLaunchArgument("reference_points_topic", default_value="/livox/lidar"),
+            DeclareLaunchArgument("fused_points_topic", default_value="/livox/fused_points"),
+            DeclareLaunchArgument("lio_custom_topic", default_value="/livox/lidar"),
             DeclareLaunchArgument("reference_lidar_frame", default_value="left_lidar_link"),
-            DeclareLaunchArgument("imu_topic", default_value="/left_lidar/imu"),
+            DeclareLaunchArgument("raw_imu_topic", default_value="/livox/imu"),
+            DeclareLaunchArgument("imu_topic", default_value="/livox/imu_oriented"),
             DeclareLaunchArgument("lio_points_topic", default_value="/left_lidar/lio_sam_points"),
             DeclareLaunchArgument("lidar_frame", default_value="left_lidar_link"),
             DeclareLaunchArgument("base_frame", default_value="base_footprint"),
@@ -163,6 +210,11 @@ def generate_launch_description():
             DeclareLaunchArgument("fusion_timestamp_unit_scale", default_value="1.0e-9"),
             DeclareLaunchArgument("publish_map_to_odom_tf", default_value="true"),
             DeclareLaunchArgument("lio_sam_package", default_value="lio_sam"),
+            DeclareLaunchArgument("expected_acceleration_norm", default_value="1.0"),
+            DeclareLaunchArgument("acceleration_norm_tolerance", default_value="0.35"),
+            DeclareLaunchArgument("max_initial_angular_velocity", default_value="0.2"),
+            DeclareLaunchArgument("min_initial_imu_samples", default_value="50"),
+            DeclareLaunchArgument("min_initial_imu_duration", default_value="0.5"),
             DeclareLaunchArgument(
                 "fusion_config",
                 default_value=PathJoinSubstitution(
@@ -181,6 +233,7 @@ def generate_launch_description():
             ),
             fusion,
             adapter,
+            imu_orientation_initializer,
             map_to_odom_tf,
             imu_preintegration,
             image_projection,

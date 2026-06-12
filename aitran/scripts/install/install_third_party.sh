@@ -11,6 +11,8 @@ THIRD_PARTY_LOG_DIR="${THIRD_PARTY_WS}/log"
 LIVOX_DRIVER_DIR="${THIRD_PARTY_SRC_DIR}/livox_ros_driver2"
 GTSAM_DIR="${THIRD_PARTY_SRC_DIR}/gtsam"
 LIO_SAM_DIR="${THIRD_PARTY_SRC_DIR}/lio_sam"
+AUTO_RCCAR_INDOOR_DIR="${THIRD_PARTY_SRC_DIR}/autoRCcar_indoor"
+AUTO_RCCAR_INTERFACES_DIR="${AUTO_RCCAR_INDOOR_DIR}/ros2/src/autorccar_interfaces"
 LIVOX_SDK_ROOT="${AI_SHIP_ROBOT_OPT_ROOT}/vendor/livox_sdk2"
 LIVOX_SDK_SRC_DIR="${LIVOX_SDK_ROOT}/src"
 LIVOX_SDK_BUILD_DIR="${LIVOX_SDK_ROOT}/build"
@@ -18,7 +20,8 @@ LIVOX_SDK_PREFIX="${LIVOX_SDK_ROOT}/install"
 LIVOX_DRIVER_REF="13eb05e4e6dd7a765b934d0c5fd6236676a57b49"
 LIVOX_SDK_REF="f5d9375f84efe2b15bc0a052d3e18482ed13adf4"
 GTSAM_REF="4f66a491ffc83cf092d0d818b11dc35135521612"
-LIO_SAM_REF="08af3f32f01725372d4269838dc44c19c6d9e76b"
+LIO_SAM_REF="066a3e44c6a8e3cb1bd1bdd49b2cb2365711a213"
+AUTO_RCCAR_INDOOR_REF="bc06c0176c4f6f1fdead58377045cea473a0b74c"
 ROSDEP_UPDATE_MAX_AGE_SECONDS="${ROSDEP_UPDATE_MAX_AGE_SECONDS:-86400}"
 ROSDEP_UPDATED=0
 
@@ -128,6 +131,43 @@ ensure_git_repo() {
   git -C "${target_dir}" checkout --detach FETCH_HEAD
 }
 
+ensure_sparse_git_repo() {
+  local target_dir="$1"
+  local repo_url="$2"
+  local expected_ref="$3"
+  local sparse_path="$4"
+  local current_ref=""
+
+  if [[ -d "${target_dir}/.git" ]]; then
+    current_ref="$(git -C "${target_dir}" rev-parse HEAD)"
+    if [[ "${current_ref}" != "${expected_ref}" ]]; then
+      echo "Unexpected repository revision at ${target_dir}" >&2
+      echo "  expected: ${expected_ref}" >&2
+      echo "  current : ${current_ref}" >&2
+      echo "Remove the directory or update the pinned ref after validating the new revision." >&2
+      return 1
+    fi
+    git -C "${target_dir}" sparse-checkout set "${sparse_path}"
+    return 0
+  fi
+
+  if [[ -e "${target_dir}" ]]; then
+    if [[ ! -d "${target_dir}" ]] || ! directory_is_empty "${target_dir}"; then
+      echo "Existing path is not a git repository: ${target_dir}" >&2
+      return 1
+    fi
+  fi
+
+  # 大きなupstream workspaceから必要なinterface packageだけを取得し、LIO-SAM本体は無改修でbuildする。
+  mkdir -p "$(dirname "${target_dir}")"
+  git init "${target_dir}"
+  git -C "${target_dir}" remote add origin "${repo_url}"
+  git -C "${target_dir}" sparse-checkout init --cone
+  git -C "${target_dir}" sparse-checkout set "${sparse_path}"
+  git -C "${target_dir}" fetch --depth 1 origin "${expected_ref}"
+  git -C "${target_dir}" checkout --detach FETCH_HEAD
+}
+
 prepare_livox_ros_driver2_manifest() {
   local ros2_manifest="${LIVOX_DRIVER_DIR}/package_ROS2.xml"
   local active_manifest="${LIVOX_DRIVER_DIR}/package.xml"
@@ -143,13 +183,40 @@ prepare_livox_ros_driver2_manifest() {
   fi
 }
 
+patch_lio_sam_mid360_imu_converter() {
+  local utility_header="${LIO_SAM_DIR}/include/lio_sam/utility.hpp"
+  local old_expression="Eigen::Quaterniond q_final = extQRPY; //q_from * extQRPY;"
+  local new_expression="Eigen::Quaterniond q_final = q_from * extQRPY;"
+
+  if [[ ! -f "${utility_header}" ]]; then
+    echo "Missing LIO-SAM utility header: ${utility_header}" >&2
+    return 1
+  fi
+  if grep -Fq "${new_expression}" "${utility_header}"; then
+    return 0
+  fi
+  if ! grep -Fq "${old_expression}" "${utility_header}"; then
+    echo "Unexpected LIO-SAM imuConverter implementation. Review before patching: ${utility_header}" >&2
+    return 1
+  fi
+
+  # Mid-360の6軸IMU初期姿勢はproject側でorientationへ入れるため、LIO-SAM本体にq_fromを読ませる。
+  if [[ -w "${utility_header}" ]]; then
+    perl -0pi -e 's/Eigen::Quaterniond q_final = extQRPY; \/\/q_from \* extQRPY;/Eigen::Quaterniond q_final = q_from * extQRPY;/g' "${utility_header}"
+  else
+    ${SUDO} perl -0pi -e 's/Eigen::Quaterniond q_final = extQRPY; \/\/q_from \* extQRPY;/Eigen::Quaterniond q_final = q_from * extQRPY;/g' "${utility_header}"
+  fi
+}
+
 clone_common_repositories() {
   # MID-360実機とsimulationで共通利用するrepoをsystem側の固定workspaceへ取得する。
   ensure_git_repo "${LIVOX_SDK_SRC_DIR}" "https://github.com/Livox-SDK/Livox-SDK2.git" "${LIVOX_SDK_REF}"
   ensure_git_repo "${LIVOX_DRIVER_DIR}" "https://github.com/Livox-SDK/livox_ros_driver2.git" "${LIVOX_DRIVER_REF}"
   ensure_git_repo "${GTSAM_DIR}" "https://github.com/borglab/gtsam.git" "${GTSAM_REF}"
-  ensure_git_repo "${LIO_SAM_DIR}" "https://github.com/TixiaoShan/LIO-SAM.git" "${LIO_SAM_REF}"
+  ensure_sparse_git_repo "${AUTO_RCCAR_INDOOR_DIR}" "https://github.com/UV-Lab/autoRCcar_indoor.git" "${AUTO_RCCAR_INDOOR_REF}" "ros2/src/autorccar_interfaces"
+  ensure_git_repo "${LIO_SAM_DIR}" "https://github.com/UV-Lab/LIO-SAM_MID360_ROS2.git" "${LIO_SAM_REF}"
   prepare_livox_ros_driver2_manifest
+  patch_lio_sam_mid360_imu_converter
 }
 
 prepend_env_path() {
@@ -263,7 +330,7 @@ ensure_rosdep_updated() {
 }
 
 selected_common_ros_paths() {
-  printf '%s\n' "${LIVOX_DRIVER_DIR}" "${GTSAM_DIR}" "${LIO_SAM_DIR}"
+  printf '%s\n' "${LIVOX_DRIVER_DIR}" "${GTSAM_DIR}" "${AUTO_RCCAR_INTERFACES_DIR}" "${LIO_SAM_DIR}"
 }
 
 install_rosdeps_for_paths() {
@@ -326,7 +393,7 @@ build_third_party_paths() {
 }
 
 build_common_underlay_workspace() {
-  if [[ ! -d "${LIVOX_DRIVER_DIR}" || ! -d "${GTSAM_DIR}" || ! -d "${LIO_SAM_DIR}" ]]; then
+  if [[ ! -d "${LIVOX_DRIVER_DIR}" || ! -d "${GTSAM_DIR}" || ! -d "${AUTO_RCCAR_INTERFACES_DIR}" || ! -d "${LIO_SAM_DIR}" ]]; then
     echo "Missing common third-party repositories under ${THIRD_PARTY_SRC_DIR}" >&2
     return 1
   fi
@@ -334,6 +401,7 @@ build_common_underlay_workspace() {
   # 実機driverとLIO-SAMを同じinstall-baseへ積み、プロジェクトworkspaceの下地にする。
   build_third_party_paths 17 "${LIVOX_DRIVER_DIR}"
   build_third_party_paths 17 "${GTSAM_DIR}"
+  build_third_party_paths 17 "${AUTO_RCCAR_INTERFACES_DIR}"
   build_third_party_paths 17 "${LIO_SAM_DIR}"
 }
 

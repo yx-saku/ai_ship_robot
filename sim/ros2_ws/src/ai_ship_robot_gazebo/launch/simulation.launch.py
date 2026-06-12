@@ -21,6 +21,13 @@ def generate_launch_description():
     half_lidar_resolution = LaunchConfiguration("half_lidar_resolution")
     quarter_lidar_resolution = LaunchConfiguration("quarter_lidar_resolution")
     publish_odom_tf = LaunchConfiguration("publish_odom_tf")
+    use_mid360_sim_adapter = LaunchConfiguration("use_mid360_sim_adapter")
+    sim_lidar_topic = LaunchConfiguration("sim_lidar_topic")
+    sim_imu_topic = LaunchConfiguration("sim_imu_topic")
+    livox_lidar_topic = LaunchConfiguration("livox_lidar_topic")
+    livox_imu_topic = LaunchConfiguration("livox_imu_topic")
+    livox_lidar_frame = LaunchConfiguration("livox_lidar_frame")
+    livox_imu_frame = LaunchConfiguration("livox_imu_frame")
     gazebo_params_file = PathJoinSubstitution(
         [FindPackageShare("ai_ship_robot_gazebo"), "config", "gazebo_ros.yaml"]
     )
@@ -108,6 +115,26 @@ def generate_launch_description():
         ],
     )
 
+    # Gazebo pluginのraw topicを実機Livox driverに近いtopic/単位へ補完し、SLAM側からsimulation差分を隠す。
+    mid360_sim_adapter = Node(
+        package="ai_ship_robot_gazebo",
+        executable="mid360_sim_adapter.py",
+        name="mid360_sim_adapter",
+        output="screen",
+        condition=IfCondition(use_mid360_sim_adapter),
+        parameters=[
+            {
+                "use_sim_time": use_sim_time,
+                "input_custom_topic": sim_lidar_topic,
+                "input_imu_topic": sim_imu_topic,
+                "output_custom_topic": livox_lidar_topic,
+                "output_imu_topic": livox_imu_topic,
+                "output_lidar_frame": livox_lidar_frame,
+                "output_imu_frame": livox_imu_frame,
+            }
+        ],
+    )
+
     rviz = Node(
         package="rviz2",
         executable="rviz2",
@@ -130,6 +157,13 @@ def generate_launch_description():
             DeclareLaunchArgument("half_lidar_resolution", default_value="false"),
             DeclareLaunchArgument("quarter_lidar_resolution", default_value="false"),
             DeclareLaunchArgument("publish_odom_tf", default_value="true"),
+            DeclareLaunchArgument("use_mid360_sim_adapter", default_value="true"),
+            DeclareLaunchArgument("sim_lidar_topic", default_value="/left_lidar/custom"),
+            DeclareLaunchArgument("sim_imu_topic", default_value="/left_lidar/imu"),
+            DeclareLaunchArgument("livox_lidar_topic", default_value="/livox/lidar"),
+            DeclareLaunchArgument("livox_imu_topic", default_value="/livox/imu"),
+            DeclareLaunchArgument("livox_lidar_frame", default_value="left_lidar_link"),
+            DeclareLaunchArgument("livox_imu_frame", default_value="left_lidar_imu_link"),
             DeclareLaunchArgument(
                 "rviz_config",
                 default_value=PathJoinSubstitution(
@@ -145,6 +179,7 @@ def generate_launch_description():
             gazebo,
             robot_state_publisher,
             spawn_robot,
+            mid360_sim_adapter,
             rviz,
         ]
     )

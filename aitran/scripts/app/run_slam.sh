@@ -13,8 +13,10 @@ AI_SHIP_ROBOT_OPT_ROOT="${AI_SHIP_ROBOT_OPT_ROOT:-/opt/ai_ship_robot}"
 THIRD_PARTY_UNDERLAY_SETUP="${AI_SHIP_ROBOT_OPT_ROOT}/ros_underlay/${ROS_DISTRO}/third_party_ws/install/setup.bash"
 FORWARD_ARGS=()
 SIM_MODE=false
-DEFAULT_LIDAR_TOPICS=("/left_lidar/custom" "/right_lidar/custom")
-DEFAULT_IMU_TOPICS=("/left_lidar/imu" "/right_lidar/imu")
+DEFAULT_LIDAR_TOPICS=("/livox/lidar")
+DEFAULT_IMU_TOPICS=("/livox/imu")
+SIM_RECORD_LIDAR_TOPICS=("/left_lidar/custom" "/right_lidar/custom" "/livox/lidar")
+SIM_RECORD_IMU_TOPICS=("/left_lidar/imu" "/right_lidar/imu" "/livox/imu")
 ROSBAG_PID=""
 SLAM_PID=""
 ROSBAG_ROOT="${WORKSPACE_ROOT}/rosbag2"
@@ -41,7 +43,7 @@ Options:
 Examples:
   bash aitran/scripts/app/run_slam.sh --no-rviz
   bash aitran/scripts/app/run_slam.sh --sim --lite --no-gui
-  bash aitran/scripts/app/run_slam.sh --input-points /left_lidar/custom,/right_lidar/custom --imu /left_lidar/imu
+  bash aitran/scripts/app/run_slam.sh --points /livox/lidar --raw-imu /livox/imu --imu /livox/imu_oriented
 EOF
 }
 
@@ -296,6 +298,7 @@ run_bag_play_lio_sam() {
   local play_topics=()
   local derived_input_topics=""
   local derived_imu_topic=""
+  local derived_raw_imu_topic=""
 
   if [[ "${bag_loop}" == "true" ]]; then
     play_cmd+=(--loop)
@@ -324,6 +327,13 @@ run_bag_play_lio_sam() {
         ((i++))
         derived_imu_topic="${FORWARD_ARGS[i]}"
         ;;
+      --raw-imu=*)
+        derived_raw_imu_topic="${FORWARD_ARGS[i]#*=}"
+        ;;
+      --raw-imu)
+        ((i++))
+        derived_raw_imu_topic="${FORWARD_ARGS[i]}"
+        ;;
     esac
   done
 
@@ -333,8 +343,8 @@ run_bag_play_lio_sam() {
     play_topics=("${DEFAULT_LIDAR_TOPICS[@]}")
   fi
 
-  if [[ -n "${derived_imu_topic}" ]]; then
-    append_unique_topics play_topics "${derived_imu_topic}"
+  if [[ -n "${derived_raw_imu_topic}" ]]; then
+    append_unique_topics play_topics "${derived_raw_imu_topic}"
   else
     append_unique_topics play_topics "${DEFAULT_IMU_TOPICS[@]}"
   fi
@@ -360,8 +370,8 @@ run_sim_lio_sam() {
   local record_bag=false
   local bag_output=""
   local bag_topics=()
-  local lidar_topics=("${DEFAULT_LIDAR_TOPICS[@]}")
-  local imu_topics=("${DEFAULT_IMU_TOPICS[@]}")
+  local lidar_topics=("${SIM_RECORD_LIDAR_TOPICS[@]}")
+  local imu_topics=("${SIM_RECORD_IMU_TOPICS[@]}")
 
   format_topic_list() {
     local values=("$@")
@@ -422,12 +432,14 @@ run_sim_lio_sam() {
         points_topic="${1#*=}"
         launch_args+=("input_points_topics:=$(format_topic_list "${points_topic}")")
         launch_args+=("reference_points_topic:=${points_topic}")
+        launch_args+=("lio_custom_topic:=${points_topic}")
         ;;
       --points)
         shift
         points_topic="$(require_value --points "${1:-}")"
         launch_args+=("input_points_topics:=$(format_topic_list "${points_topic}")")
         launch_args+=("reference_points_topic:=${points_topic}")
+        launch_args+=("lio_custom_topic:=${points_topic}")
         ;;
       --left-points=*)
         left_points_topic="${1#*=}"
@@ -471,6 +483,19 @@ run_sim_lio_sam() {
         shift
         launch_args+=("imu_topic:=$(require_value --imu "${1:-}")")
         ;;
+      --raw-imu=*)
+        launch_args+=("raw_imu_topic:=${1#*=}")
+        ;;
+      --raw-imu)
+        shift
+        launch_args+=("raw_imu_topic:=$(require_value --raw-imu "${1:-}")")
+        ;;
+      --imu-initializer)
+        launch_args+=("use_imu_orientation_initializer:=true")
+        ;;
+      --no-imu-initializer)
+        launch_args+=("use_imu_orientation_initializer:=false")
+        ;;
       --record-bag)
         record_bag=true
         ;;
@@ -503,17 +528,30 @@ run_sim_lio_sam() {
         mapfile -t imu_topics < <(parse_csv_topics "$(require_value --imu-topics "${1:-}")")
         ;;
       --lio-points=*)
-        launch_args+=("lio_points_topic:=${1#*=}")
+        launch_args+=("lio_custom_topic:=${1#*=}")
         ;;
       --lio-points)
         shift
-        launch_args+=("lio_points_topic:=$(require_value --lio-points "${1:-}")")
+        launch_args+=("lio_custom_topic:=$(require_value --lio-points "${1:-}")")
+        ;;
+      --lio-custom=*)
+        launch_args+=("lio_custom_topic:=${1#*=}")
+        ;;
+      --lio-custom)
+        shift
+        launch_args+=("lio_custom_topic:=$(require_value --lio-custom "${1:-}")")
         ;;
       --adapter)
         launch_args+=("use_adapter:=true")
         ;;
       --no-adapter)
         launch_args+=("use_adapter:=false")
+        ;;
+      --fusion)
+        launch_args+=("use_fusion:=true")
+        ;;
+      --no-fusion)
+        launch_args+=("use_fusion:=false")
         ;;
       --lidar-frame=*)
         launch_args+=("lidar_frame:=${1#*=}")
@@ -681,13 +719,13 @@ run_sim_lio_sam() {
       bag_output="$(default_bag_output sim_slam)"
     fi
     derived_input_topics="$(get_launch_arg_value input_points_topics "${launch_args[@]}")"
-    derived_imu_topic="$(get_launch_arg_value imu_topic "${launch_args[@]}")"
+    derived_raw_imu_topic="$(get_launch_arg_value raw_imu_topic "${launch_args[@]}")"
     record_topics=()
     if [[ -n "${derived_input_topics}" ]]; then
       mapfile -t lidar_topics < <(parse_launch_topic_list "${derived_input_topics}")
     fi
-    if [[ -n "${derived_imu_topic}" && "${#imu_topics[@]}" -eq 2 && "${imu_topics[0]}" == "/left_lidar/imu" && "${imu_topics[1]}" == "/right_lidar/imu" ]]; then
-      imu_topics=("${derived_imu_topic}")
+    if [[ -n "${derived_raw_imu_topic}" && "${#imu_topics[@]}" -eq 3 && "${imu_topics[2]}" == "/livox/imu" ]]; then
+      imu_topics=("${derived_raw_imu_topic}")
     fi
     append_unique_topics record_topics "${lidar_topics[@]}"
     append_unique_topics record_topics "${imu_topics[@]}"
@@ -858,6 +896,7 @@ if [[ "${RECORD_BAG}" == "true" ]]; then
   RECORD_TOPICS=()
   DERIVED_INPUT_TOPICS=""
   DERIVED_IMU_TOPIC=""
+  DERIVED_RAW_IMU_TOPIC=""
   for ((i = 0; i < ${#FORWARD_ARGS[@]}; i++)); do
     case "${FORWARD_ARGS[i]}" in
       --input-points=*)
@@ -881,6 +920,13 @@ if [[ "${RECORD_BAG}" == "true" ]]; then
         ((i++))
         DERIVED_IMU_TOPIC="${FORWARD_ARGS[i]}"
         ;;
+      --raw-imu=*)
+        DERIVED_RAW_IMU_TOPIC="${FORWARD_ARGS[i]#*=}"
+        ;;
+      --raw-imu)
+        ((i++))
+        DERIVED_RAW_IMU_TOPIC="${FORWARD_ARGS[i]}"
+        ;;
     esac
   done
   if [[ -n "${DERIVED_INPUT_TOPICS}" ]]; then
@@ -888,8 +934,8 @@ if [[ "${RECORD_BAG}" == "true" ]]; then
   else
     LIDAR_TOPICS=("${DEFAULT_LIDAR_TOPICS[@]}")
   fi
-  if [[ -n "${DERIVED_IMU_TOPIC}" && "${#IMU_TOPICS[@]}" -eq 2 && "${IMU_TOPICS[0]}" == "/left_lidar/imu" && "${IMU_TOPICS[1]}" == "/right_lidar/imu" ]]; then
-    IMU_TOPICS=("${DERIVED_IMU_TOPIC}")
+  if [[ -n "${DERIVED_RAW_IMU_TOPIC}" && "${#IMU_TOPICS[@]}" -eq 1 && "${IMU_TOPICS[0]}" == "/livox/imu" ]]; then
+    IMU_TOPICS=("${DERIVED_RAW_IMU_TOPIC}")
   fi
   append_unique_topics RECORD_TOPICS "${LIDAR_TOPICS[@]}"
   append_unique_topics RECORD_TOPICS "${IMU_TOPICS[@]}"

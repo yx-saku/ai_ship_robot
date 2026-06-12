@@ -146,17 +146,20 @@ class ScriptedDrive(Node):
 
     def wait_for_sim_duration(self, duration_sec: float) -> bool:
         # 自動運転の待機はsim time基準で行い、Gazeboの進行に同期させる。
-        start_time = self.get_clock().now()
+        start_time = None
         target_duration_ns = int(duration_sec * 1_000_000_000)
 
         while rclpy.ok():
+            rclpy.spin_once(self, timeout_sec=0.01)
             current_time = self.get_clock().now()
-            if current_time.nanoseconds == 0 and start_time.nanoseconds == 0:
-                rclpy.spin_once(self, timeout_sec=0.1)
+            if current_time.nanoseconds == 0:
+                continue
+            if start_time is None:
+                # /clock受信前の0時刻を除外し、起動時に観測した有効なsim timeを待機起点にする。
+                start_time = current_time
                 continue
             if (current_time - start_time).nanoseconds >= target_duration_ns:
                 return True
-            rclpy.spin_once(self, timeout_sec=0.01)
 
         return False
 

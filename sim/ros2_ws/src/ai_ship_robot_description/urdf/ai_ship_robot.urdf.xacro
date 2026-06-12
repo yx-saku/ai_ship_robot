@@ -91,11 +91,13 @@
       <origin xyz="${x_position} ${y_position} 0" rpy="0 0 0" />
     </joint>
 
-    <!-- 支持球として扱うため、見た目と接地判定だけを残して駆動自由度は持たせない。 -->
+    <!-- 理想オムニホイール相当として接地判定を残しつつ、横滑り抵抗は極小にする。 -->
     <gazebo reference="${prefix}_omni_wheel_link">
       <material>Gazebo/Black</material>
-      <mu1>1.0</mu1>
-      <mu2>1.0</mu2>
+      <mu1>0.001</mu1>
+      <mu2>0.001</mu2>
+      <slip1>1.0</slip1>
+      <slip2>1.0</slip2>
     </gazebo>
   </xacro:macro>
 
@@ -280,6 +282,9 @@
         <odometry_topic>odom</odometry_topic>
         <odometry_frame>odom</odometry_frame>
         <robot_base_frame>base_footprint</robot_base_frame>
+        <!-- 速度強制はphysics stepと同じ1kHzで行い、IMU有限差分に出る段差を抑える。 -->
+        <update_rate>1000</update_rate>
+        <publish_rate>200</publish_rate>
         <publish_odom>true</publish_odom>
         <publish_odom_tf>$(arg publish_odom_tf)</publish_odom_tf>
       </plugin>

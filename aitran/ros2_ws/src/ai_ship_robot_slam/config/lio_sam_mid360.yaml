@@ -1,8 +1,8 @@
 /**:
   ros__parameters:
-    # LIO-SAMへ渡すtopicは、複数LiDAR合成後にadapterで整形した点群を既定にする。
-    pointCloudTopic: /left_lidar/lio_sam_points
-    imuTopic: /left_lidar/imu
+    # UV-Lab版LIO-SAMはLivox driver相当のtopicを直接読む。
+    pointCloudTopic: /livox/lidar
+    imuTopic: /livox/imu_oriented
     odomTopic: odometry/imu
     gpsTopic: odometry/gps
 
@@ -22,7 +22,7 @@
     savePCD: false
     savePCDDirectory: /tmp/ai_ship_robot_lio_sam/
 
-    # Mid-360はLivox系として扱い、fusion後のadapterがring/timeをLIO-SAM互換へ正規化する。
+    # Mid-360はLivox系として扱い、simulation時はsim側adapterがline/IMU単位を補正する。
     sensor: livox
     N_SCAN: 4
     Horizon_SCAN: 10000
@@ -36,9 +36,9 @@
     imuAccBiasN: 0.001
     imuGyrBiasN: 0.00001
     imuGravity: 9.80511
-    imuRPYWeight: 0.01
+    imuRPYWeight: 0.0
 
-    # 現状既定の基準系は左LiDARと左IMUの組み合わせで、extrinsicもその対応を使う。
+    # 現状既定の基準系は左LiDARと左IMUの組み合わせで、IMU->LiDAR相対回転はidentityになる。
     extrinsicTrans: [0.011, 0.02329, -0.04412]
     extrinsicRot: [1.0, 0.0, 0.0,
                    0.0, 1.0, 0.0,
