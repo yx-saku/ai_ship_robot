@@ -26,6 +26,19 @@ def generate_launch_description():
     base_frame = LaunchConfiguration("base_frame")
     odom_frame = LaunchConfiguration("odom_frame")
     map_frame = LaunchConfiguration("map_frame")
+    base_lidar_init_frame = LaunchConfiguration("base_lidar_init_frame")
+    base_lidar_init_x = LaunchConfiguration("base_lidar_init_x")
+    base_lidar_init_y = LaunchConfiguration("base_lidar_init_y")
+    base_lidar_init_z = LaunchConfiguration("base_lidar_init_z")
+    base_lidar_init_roll = LaunchConfiguration("base_lidar_init_roll")
+    base_lidar_init_pitch = LaunchConfiguration("base_lidar_init_pitch")
+    base_lidar_init_yaw = LaunchConfiguration("base_lidar_init_yaw")
+    odom_to_base_x = LaunchConfiguration("odom_to_base_x")
+    odom_to_base_y = LaunchConfiguration("odom_to_base_y")
+    odom_to_base_z = LaunchConfiguration("odom_to_base_z")
+    odom_to_base_roll = LaunchConfiguration("odom_to_base_roll")
+    odom_to_base_pitch = LaunchConfiguration("odom_to_base_pitch")
+    odom_to_base_yaw = LaunchConfiguration("odom_to_base_yaw")
     use_adapter = LaunchConfiguration("use_adapter")
     use_imu_orientation_initializer = LaunchConfiguration("use_imu_orientation_initializer")
     derived_ring_count = LaunchConfiguration("derived_ring_count")
@@ -39,6 +52,7 @@ def generate_launch_description():
     sim_imu_topic = LaunchConfiguration("sim_imu_topic")
     livox_lidar_topic = LaunchConfiguration("livox_lidar_topic")
     livox_imu_topic = LaunchConfiguration("livox_imu_topic")
+    use_scan_pattern_line_lookup = LaunchConfiguration("use_scan_pattern_line_lookup")
     expected_acceleration_norm = LaunchConfiguration("expected_acceleration_norm")
     acceleration_norm_tolerance = LaunchConfiguration("acceleration_norm_tolerance")
     max_initial_angular_velocity = LaunchConfiguration("max_initial_angular_velocity")
@@ -78,6 +92,7 @@ def generate_launch_description():
                     "sim_imu_topic": sim_imu_topic,
                     "livox_lidar_topic": livox_lidar_topic,
                     "livox_imu_topic": livox_imu_topic,
+                    "use_scan_pattern_line_lookup": use_scan_pattern_line_lookup,
                 }.items(),
             )
         ],
@@ -105,6 +120,19 @@ def generate_launch_description():
             "base_frame": base_frame,
             "odom_frame": odom_frame,
             "map_frame": map_frame,
+            "base_lidar_init_frame": base_lidar_init_frame,
+            "base_lidar_init_x": base_lidar_init_x,
+            "base_lidar_init_y": base_lidar_init_y,
+            "base_lidar_init_z": base_lidar_init_z,
+            "base_lidar_init_roll": base_lidar_init_roll,
+            "base_lidar_init_pitch": base_lidar_init_pitch,
+            "base_lidar_init_yaw": base_lidar_init_yaw,
+            "odom_to_base_x": odom_to_base_x,
+            "odom_to_base_y": odom_to_base_y,
+            "odom_to_base_z": odom_to_base_z,
+            "odom_to_base_roll": odom_to_base_roll,
+            "odom_to_base_pitch": odom_to_base_pitch,
+            "odom_to_base_yaw": odom_to_base_yaw,
             "use_adapter": use_adapter,
             "use_imu_orientation_initializer": use_imu_orientation_initializer,
             "derived_ring_count": derived_ring_count,
@@ -144,6 +172,7 @@ def generate_launch_description():
             DeclareLaunchArgument("sim_imu_topic", default_value="/left_lidar/imu"),
             DeclareLaunchArgument("livox_lidar_topic", default_value="/livox/lidar"),
             DeclareLaunchArgument("livox_imu_topic", default_value="/livox/imu"),
+            DeclareLaunchArgument("use_scan_pattern_line_lookup", default_value="false"),
             DeclareLaunchArgument("input_points_topics", default_value="['/livox/lidar']"),
             DeclareLaunchArgument("reference_points_topic", default_value="/livox/lidar"),
             DeclareLaunchArgument("fused_points_topic", default_value="/livox/fused_points"),
@@ -156,6 +185,19 @@ def generate_launch_description():
             DeclareLaunchArgument("base_frame", default_value="base_footprint"),
             DeclareLaunchArgument("odom_frame", default_value="odom"),
             DeclareLaunchArgument("map_frame", default_value="map"),
+            DeclareLaunchArgument("base_lidar_init_frame", default_value="base_lidar_init"),
+            DeclareLaunchArgument("base_lidar_init_x", default_value="0.3925"),
+            DeclareLaunchArgument("base_lidar_init_y", default_value="0.3275"),
+            DeclareLaunchArgument("base_lidar_init_z", default_value="0.25"),
+            DeclareLaunchArgument("base_lidar_init_roll", default_value="0.0"),
+            DeclareLaunchArgument("base_lidar_init_pitch", default_value="2.0943951023931953"),
+            DeclareLaunchArgument("base_lidar_init_yaw", default_value="0.0"),
+            DeclareLaunchArgument("odom_to_base_x", default_value="0.41275635094610965"),
+            DeclareLaunchArgument("odom_to_base_y", default_value="-0.3275"),
+            DeclareLaunchArgument("odom_to_base_z", default_value="-0.21491470245117265"),
+            DeclareLaunchArgument("odom_to_base_roll", default_value="0.0"),
+            DeclareLaunchArgument("odom_to_base_pitch", default_value="-2.0943951023931953"),
+            DeclareLaunchArgument("odom_to_base_yaw", default_value="0.0"),
             DeclareLaunchArgument("use_adapter", default_value="false"),
             DeclareLaunchArgument("use_imu_orientation_initializer", default_value="true"),
             DeclareLaunchArgument("derived_ring_count", default_value="4"),

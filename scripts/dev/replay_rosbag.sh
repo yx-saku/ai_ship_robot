@@ -8,13 +8,19 @@ AITRAN_ROOT="${WORKSPACE_ROOT}/aitran"
 SIM_ROOT="${WORKSPACE_ROOT}/sim"
 AI_SHIP_ROBOT_OPT_ROOT="${AI_SHIP_ROBOT_OPT_ROOT:-/opt/ai_ship_robot}"
 THIRD_PARTY_UNDERLAY_SETUP="${AI_SHIP_ROBOT_OPT_ROOT}/ros_underlay/${ROS_DISTRO}/third_party_ws/install/setup.bash"
-DEFAULT_RVIZ_CONFIG="${SIM_ROOT}/ros2_ws/src/ai_ship_robot_gazebo/config/mid360_points.rviz"
+SLAM_RVIZ_CONFIG="${AITRAN_ROOT}/ros2_ws/src/ai_ship_robot_slam/rviz/lio_sam.rviz"
+SIMULATION_RVIZ_CONFIG="${SIM_ROOT}/ros2_ws/src/ai_ship_robot_gazebo/config/mid360_points.rviz"
 ROSBAG_PID=""
 RVIZ_PID=""
+ROSBAG_ROOT="${WORKSPACE_ROOT}/rosbag2"
 
 usage() {
   cat <<'EOF'
-Usage: bash scripts/dev/replay_rosbag.sh BAG_PATH [OPTIONS]
+Usage: bash scripts/dev/replay_rosbag.sh MODE [BAG_PATH] [OPTIONS]
+
+Arguments:
+  MODE                 Required replay mode: sim or slam.
+  BAG_PATH             Optional rosbag path. If omitted, the latest rosbag2/MODE_* bag is used.
 
 Options:
   --rviz-config PATH   Use a custom RViz config.
@@ -35,6 +41,67 @@ require_value() {
   fi
 
   printf '%s' "${value}"
+}
+
+set_replay_mode() {
+  local requested_mode="$1"
+
+  # 収録元に応じてRViz表示内容を切り替えるため、再生モードは明示指定だけを許可する。
+  if [[ -n "${REPLAY_MODE}" ]]; then
+    echo "Replay mode is already set: ${REPLAY_MODE}" >&2
+    exit 2
+  fi
+
+  case "${requested_mode}" in
+    sim)
+      REPLAY_MODE="sim"
+      ;;
+    slam)
+      REPLAY_MODE="slam"
+      ;;
+    *)
+      echo "Unsupported replay mode: ${requested_mode}. Use sim or slam." >&2
+      exit 2
+      ;;
+  esac
+}
+
+rviz_config_for_mode() {
+  local replay_mode="$1"
+
+  # 既定RViz設定はモードから導出し、従来の単一デフォルトに戻らないようにする。
+  case "${replay_mode}" in
+    slam)
+      printf '%s' "${SLAM_RVIZ_CONFIG}"
+      ;;
+    sim)
+      printf '%s' "${SIMULATION_RVIZ_CONFIG}"
+      ;;
+  esac
+}
+
+latest_bag_for_prefix() {
+  local prefix="$1"
+  local candidate_metadata=""
+  local candidate_dir=""
+  local newest_dir=""
+
+  shopt -s nullglob
+  for candidate_metadata in "${ROSBAG_ROOT}/${prefix}_"*/metadata.yaml; do
+    candidate_dir="${candidate_metadata%/metadata.yaml}"
+    if [[ -z "${newest_dir}" || "${candidate_metadata}" -nt "${newest_dir}/metadata.yaml" ]]; then
+      newest_dir="${candidate_dir}"
+    fi
+  done
+  shopt -u nullglob
+
+  # metadata.yamlを持つ収録済みbagだけを選び、作成途中ディレクトリを誤って再生しないようにする。
+  if [[ -z "${newest_dir}" ]]; then
+    echo "No rosbag found for prefix '${prefix}_' in ${ROSBAG_ROOT}." >&2
+    exit 1
+  fi
+
+  printf '%s' "${newest_dir}"
 }
 
 source_overlay_if_current() {
@@ -98,17 +165,41 @@ cleanup_background_processes() {
 
 trap cleanup_background_processes EXIT
 
+REPLAY_MODE=""
 BAG_PATH=""
-RVIZ_CONFIG="${DEFAULT_RVIZ_CONFIG}"
+RVIZ_CONFIG=""
 PLAY_RATE="1.0"
 START_OFFSET="0"
 LOOP_PLAYBACK=false
+
+if [[ $# -gt 0 && "$1" != "-h" && "$1" != "--help" ]]; then
+  if [[ "$1" == "--mode" || "$1" == --mode=* ]]; then
+    echo "--mode has been removed. Use the first argument as mode: sim or slam." >&2
+    exit 2
+  fi
+  if [[ "$1" == --* ]]; then
+    echo "First argument must be replay mode: sim or slam." >&2
+    exit 2
+  fi
+  set_replay_mode "$1"
+  shift
+
+  # 第二引数がoptionでなければ明示bag pathとして扱い、省略時だけprefix最新bagへfallbackする。
+  if [[ $# -gt 0 && "$1" != --* ]]; then
+    BAG_PATH="$1"
+    shift
+  fi
+fi
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
     -h|--help)
       usage
       exit 0
+      ;;
+    --mode|--mode=*)
+      echo "--mode has been removed. Use the first argument as mode: sim or slam." >&2
+      exit 2
       ;;
     --rviz-config=*)
       RVIZ_CONFIG="${1#*=}"
@@ -140,21 +231,26 @@ while [[ $# -gt 0 ]]; do
       exit 2
       ;;
     *)
-      if [[ -z "${BAG_PATH}" ]]; then
-        BAG_PATH="$1"
-      else
-        echo "Unknown option: $1" >&2
-        echo "Run with --help to see available options." >&2
-        exit 2
-      fi
+      echo "Unexpected positional argument: $1" >&2
+      echo "Use: bash scripts/dev/replay_rosbag.sh MODE [BAG_PATH] [OPTIONS]" >&2
+      exit 2
       ;;
   esac
   shift
 done
 
-if [[ -z "${BAG_PATH}" ]]; then
-  echo "BAG_PATH is required." >&2
+if [[ -z "${REPLAY_MODE}" ]]; then
+  echo "Replay mode is required. Use first argument: sim or slam." >&2
   exit 2
+fi
+
+if [[ -z "${BAG_PATH}" ]]; then
+  BAG_PATH="$(latest_bag_for_prefix "${REPLAY_MODE}")"
+  echo "Using latest ${REPLAY_MODE} rosbag: ${BAG_PATH}" >&2
+fi
+
+if [[ -z "${RVIZ_CONFIG}" ]]; then
+  RVIZ_CONFIG="$(rviz_config_for_mode "${REPLAY_MODE}")"
 fi
 
 if [[ ! -e "${BAG_PATH}" ]]; then
@@ -174,6 +270,7 @@ if [[ "${LOOP_PLAYBACK}" == "true" ]]; then
   PLAY_CMD+=(--loop)
 fi
 
+echo "Replay mode: ${REPLAY_MODE}" >&2
 echo "RViz config: ${RVIZ_CONFIG}" >&2
 echo "Rosbag replay: ${BAG_PATH}" >&2
 rviz2 -d "${RVIZ_CONFIG}" &
@@ -181,4 +278,18 @@ RVIZ_PID=$!
 sleep 2
 "${PLAY_CMD[@]}" &
 ROSBAG_PID=$!
+set +e
 wait "${ROSBAG_PID}"
+play_status=$?
+ROSBAG_PID=""
+set -e
+
+if [[ "${play_status}" -ne 0 ]]; then
+  exit "${play_status}"
+fi
+
+# 再生完了後もRVizを残し、結果確認中にwindowが自動で閉じないようにする。
+echo "Rosbag playback finished. RViz will remain open; close RViz or press Ctrl-C to exit." >&2
+if [[ -n "${RVIZ_PID}" ]] && kill -0 "${RVIZ_PID}" 2>/dev/null; then
+  wait "${RVIZ_PID}"
+fi

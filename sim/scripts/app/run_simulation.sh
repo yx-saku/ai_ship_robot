@@ -14,6 +14,12 @@ ROSBAG_PID=""
 SIMULATION_PID=""
 DRIVE_PID=""
 ROSBAG_ROOT="${WORKSPACE_ROOT}/rosbag2"
+AUTO_STOP_AFTER_DRIVE_SECONDS="5"
+SIM_READY_TIMEOUT_SECONDS="300"
+PROCESS_STOP_GRACE_SECONDS="15"
+PROCESS_STOP_TERM_SECONDS="5"
+ROSBAG_STOP_GRACE_SECONDS="60"
+TEMP_WORLD_FILE=""
 
 print_available_lidar_patterns() {
   local indent="${1:-}"
@@ -50,6 +56,12 @@ Options:
   -1, --full-resolution
                       Use full LiDAR sample counts.
   --world PATH        Use a custom Gazebo Classic world.
+  --real-time-factor VALUE
+                      Slow down or speed up Gazebo sim time. Example: 0.2
+  --sim-ready-timeout SEC
+                      Wait up to SEC for simulation topics before recording. Default: 300
+  --scan-pattern-line-lookup
+                      Use precise but slow scan-pattern line lookup.
   --rviz-config PATH  Use a custom RViz config.
   --lidar-pattern FILE
                        Use a LiDAR pattern xacro file name.
@@ -57,12 +69,13 @@ Options:
   --drive-scenario FILE
                       Start drive_robot.sh with a YAML scenario file.
   --drive-start-delay SEC
-                      Wait before starting scripted drive. Default: 0.0
+                      Wait before starting scripted drive. With --record-bag, the wait is completed before recording. Default: 0.0
   --drive-loop        Loop drive scenario until interrupted.
   --drive-once        Run drive scenario once. Default.
-  --record-bag        Record all topics during simulation.
+  --no-auto-exit      Keep simulation running after a non-loop drive scenario finishes.
+  --record-bag        Record all topics after simulation readiness checks complete.
   --bag-output PATH   Set rosbag output directory or prefix.
-  --bag-topics CSV    Record only the given comma-separated topics.
+  --bag-topics CSV    Record only the given comma-separated topics. Default records all topics.
   -h, --help          Show this help.
 
 Available LiDAR patterns:
@@ -104,6 +117,91 @@ validate_lidar_pattern_file() {
   echo "Available LiDAR patterns:" >&2
   print_available_lidar_patterns "  " >&2
   exit 2
+}
+
+validate_positive_double() {
+  local option="$1"
+  local value="$2"
+
+  # physics設定へ渡す値は数値として厳密に扱い、Gazebo起動後の不明瞭な失敗を避ける。
+  if [[ ! "${value}" =~ ^[+]?[0-9]+([.][0-9]*)?([eE][+-]?[0-9]+)?$ && ! "${value}" =~ ^[+]?[.][0-9]+([eE][+-]?[0-9]+)?$ ]]; then
+    echo "${option} must be a positive number: ${value}" >&2
+    exit 2
+  fi
+  if ! awk -v value="${value}" 'BEGIN { exit(value > 0.0 ? 0 : 1) }'; then
+    echo "${option} must be greater than 0: ${value}" >&2
+    exit 2
+  fi
+}
+
+validate_non_negative_double() {
+  local option="$1"
+  local value="$2"
+
+  # 待機時間は0を許容しつつ数値だけを受け入れ、sim時刻待機の計算失敗を起動前に検出する。
+  if [[ ! "${value}" =~ ^[+]?[0-9]+([.][0-9]*)?([eE][+-]?[0-9]+)?$ && ! "${value}" =~ ^[+]?[.][0-9]+([eE][+-]?[0-9]+)?$ ]]; then
+    echo "${option} must be a non-negative number: ${value}" >&2
+    exit 2
+  fi
+  if ! awk -v value="${value}" 'BEGIN { exit(value >= 0.0 ? 0 : 1) }'; then
+    echo "${option} must be greater than or equal to 0: ${value}" >&2
+    exit 2
+  fi
+}
+
+default_world_file() {
+  printf '%s/ros2_ws/src/ai_ship_robot_gazebo/worlds/lidar_placement.world' "${SIM_ROOT}"
+}
+
+make_real_time_factor_world() {
+  local source_world="$1"
+  local real_time_factor="$2"
+  local max_step_size="0.001"
+  local target_world=""
+  local update_rate=""
+
+  if [[ ! -f "${source_world}" ]]; then
+    echo "World file not found: ${source_world}" >&2
+    exit 2
+  fi
+
+  target_world="$(mktemp "${TMPDIR:-/tmp}/ai_ship_robot_world_XXXXXX.world")"
+  update_rate="$(awk -v factor="${real_time_factor}" -v step="${max_step_size}" 'BEGIN { printf "%.12g", factor / step }')"
+
+  # 既存worldのphysics blockだけを書き換え、モデルや地形定義は元ファイルをそのまま使う。
+  if ! awk \
+    -v update_rate="${update_rate}" \
+    -v max_step_size="${max_step_size}" \
+    -v real_time_factor="${real_time_factor}" '
+      {
+        if ($0 ~ /<real_time_update_rate>[^<]*<\/real_time_update_rate>/) {
+          sub(/<real_time_update_rate>[^<]*<\/real_time_update_rate>/, "<real_time_update_rate>" update_rate "</real_time_update_rate>")
+          update_seen = 1
+        }
+        if ($0 ~ /<max_step_size>[^<]*<\/max_step_size>/) {
+          sub(/<max_step_size>[^<]*<\/max_step_size>/, "<max_step_size>" max_step_size "</max_step_size>")
+          step_seen = 1
+        }
+        if ($0 ~ /<real_time_factor>[^<]*<\/real_time_factor>/) {
+          sub(/<real_time_factor>[^<]*<\/real_time_factor>/, "<real_time_factor>" real_time_factor "</real_time_factor>")
+          factor_seen = 1
+        }
+        print
+      }
+      END {
+        if (!update_seen || !step_seen || !factor_seen) {
+          exit 42
+        }
+      }
+    ' "${source_world}" > "${target_world}"; then
+    rm -f "${target_world}"
+    echo "World file must contain real_time_update_rate, max_step_size, and real_time_factor tags: ${source_world}" >&2
+    exit 2
+  fi
+
+  TEMP_WORLD_FILE="${target_world}"
+  echo "Using Gazebo real_time_factor=${real_time_factor} with max_step_size=${max_step_size}, real_time_update_rate=${update_rate}" >&2
+  printf '%s' "${target_world}"
 }
 
 source_workspace_environment() {
@@ -205,9 +303,9 @@ start_rosbag_record() {
     record_cmd+=(--use-sim-time)
   fi
 
-  # topic無指定時は全topic記録へ切り替え、wrapper側の既定挙動を一本化する。
+  # topic無指定時は明示的に全topic記録へ切り替え、起動後に現れるtopicもrecord対象にする。
   if [[ "${#topics[@]}" -eq 0 ]]; then
-    record_cmd+=(-a)
+    record_cmd+=(--all)
   else
     record_cmd+=("${topics[@]}")
   fi
@@ -221,11 +319,117 @@ start_rosbag_record() {
   ROSBAG_PID=$!
 }
 
+wait_for_topic_once() {
+  local topic="$1"
+  local timeout_seconds="$2"
+  shift 2
+  local echo_args=("$@")
+  local start_seconds=${SECONDS}
+
+  echo "Waiting for simulation topic: ${topic}" >&2
+  while true; do
+    ensure_simulation_process_running
+
+    # topic型の検出前はros2 topic echoが即終了するため、期限までは短いechoを再試行する。
+    if timeout 2s ros2 topic echo --once "${echo_args[@]}" "${topic}" >/dev/null 2>&1; then
+      return 0
+    fi
+    if awk -v elapsed="$((SECONDS - start_seconds))" -v timeout="${timeout_seconds}" 'BEGIN { exit(elapsed >= timeout ? 0 : 1) }'; then
+      echo "Timed out waiting for simulation topic: ${topic}" >&2
+      exit 1
+    fi
+    sleep 0.2
+  done
+}
+
+wait_for_topic_subscribers() {
+  local topic="$1"
+  local min_subscribers="$2"
+  local timeout_seconds="$3"
+  local start_seconds=${SECONDS}
+  local topic_info=""
+  local subscription_count=""
+
+  echo "Waiting for simulation topic subscriber: ${topic} >= ${min_subscribers}" >&2
+  while true; do
+    ensure_simulation_process_running
+
+    # 走行pluginの購読開始を確認し、シナリオ先頭のcmd_velがGazebo側で捨てられないようにする。
+    if topic_info="$(ros2 topic info "${topic}" 2>/dev/null)"; then
+      subscription_count="$(awk '/Subscription count:/ { print $3; exit }' <<< "${topic_info}")"
+      if [[ "${subscription_count}" =~ ^[0-9]+$ && "${subscription_count}" -ge "${min_subscribers}" ]]; then
+        return 0
+      fi
+    fi
+    if awk -v elapsed="$((SECONDS - start_seconds))" -v timeout="${timeout_seconds}" 'BEGIN { exit(elapsed >= timeout ? 0 : 1) }'; then
+      echo "Timed out waiting for simulation topic subscriber: ${topic}" >&2
+      exit 1
+    fi
+    sleep 0.2
+  done
+}
+
+ensure_no_existing_gazebo_server() {
+  local gazebo_master_uri="${GAZEBO_MASTER_URI:-http://localhost:11345}"
+  local gzserver_processes=()
+  local gzserver_process=""
+
+  if [[ "${gazebo_master_uri}" != "http://localhost:11345" ]]; then
+    return 0
+  fi
+
+  mapfile -t gzserver_processes < <(pgrep -a -x gzserver 2>/dev/null || true)
+  if [[ "${#gzserver_processes[@]}" -eq 0 ]]; then
+    return 0
+  fi
+
+  # 既定Gazebo masterは1プロセスしかbindできないため、残存serverを起動前に検出して原因を明示する。
+  echo "Another gzserver is already running on the default Gazebo master: ${gazebo_master_uri}" >&2
+  echo "Stop the existing simulation before starting a new one." >&2
+  for gzserver_process in "${gzserver_processes[@]}"; do
+    echo "  ${gzserver_process}" >&2
+  done
+  echo "Example: kill -INT <PID>" >&2
+  exit 1
+}
+
+ensure_simulation_process_running() {
+  local process_status=0
+
+  # readiness待機中にlaunchが落ちた場合は、topic待ちtimeoutではなくlaunchの終了を前面に出す。
+  if [[ -n "${SIMULATION_PID}" ]] && ! kill -0 "${SIMULATION_PID}" 2>/dev/null; then
+    set +e
+    wait "${SIMULATION_PID}"
+    process_status=$?
+    set -e
+    echo "Simulation exited before readiness check completed." >&2
+    exit "${process_status}"
+  fi
+}
+
+wait_for_simulation_ready() {
+  # spawn後の走行pluginとLIO-SAM入力topicが揃ってからrecord/driveを開始し、bag先頭の空白を避ける。
+  ensure_simulation_process_running
+  wait_for_topic_once "/clock" "${SIM_READY_TIMEOUT_SECONDS}" --qos-reliability best_effort
+  ensure_simulation_process_running
+  wait_for_topic_once "/tf_static" "${SIM_READY_TIMEOUT_SECONDS}" --qos-durability transient_local --qos-reliability reliable
+  ensure_simulation_process_running
+  wait_for_topic_once "/livox/lidar" "${SIM_READY_TIMEOUT_SECONDS}" --qos-reliability reliable
+  ensure_simulation_process_running
+  wait_for_topic_once "/livox/imu" "${SIM_READY_TIMEOUT_SECONDS}" --qos-reliability reliable
+  ensure_simulation_process_running
+  wait_for_topic_once "/odom" "${SIM_READY_TIMEOUT_SECONDS}"
+  ensure_simulation_process_running
+  wait_for_topic_subscribers "/cmd_vel" 1 "${SIM_READY_TIMEOUT_SECONDS}"
+  echo "Simulation topics are ready." >&2
+}
+
 start_scripted_drive() {
+  local start_delay="${1:-${DRIVE_START_DELAY}}"
   local drive_cmd=(
     bash "${SIM_ROOT}/scripts/app/drive_robot.sh"
     --scenario "${DRIVE_SCENARIO}"
-    --start-delay "${DRIVE_START_DELAY}"
+    --start-delay "${start_delay}"
   )
 
   # シナリオの繰り返し指定だけをdrive_robot.shへ転送し、速度系はscenario YAMLを唯一の入力にする。
@@ -245,27 +449,150 @@ default_bag_output() {
   printf '%s/sim_%(%Y%m%d_%H%M%S)T' "${ROSBAG_ROOT}" -1
 }
 
+collect_child_pids() {
+  local parent_pid="$1"
+  local child_pid=""
+
+  # ros2 launch配下のGazeboやnodeも停止対象に含め、親だけが残る/子だけが残る状態を避ける。
+  while IFS= read -r child_pid; do
+    [[ -n "${child_pid}" ]] || continue
+    collect_child_pids "${child_pid}"
+    printf '%s\n' "${child_pid}"
+  done < <(pgrep -P "${parent_pid}" 2>/dev/null || true)
+}
+
+signal_process_tree() {
+  local signal_name="$1"
+  local root_pid="$2"
+  local child_pids=()
+  local child_pid=""
+
+  mapfile -t child_pids < <(collect_child_pids "${root_pid}")
+  for child_pid in "${child_pids[@]}"; do
+    kill "-${signal_name}" "${child_pid}" 2>/dev/null || true
+  done
+  kill "-${signal_name}" "${root_pid}" 2>/dev/null || true
+}
+
+stop_background_process() {
+  local pid="$1"
+  local label="$2"
+  local grace_seconds="${3:-${PROCESS_STOP_GRACE_SECONDS}}"
+  local term_seconds="${4:-${PROCESS_STOP_TERM_SECONDS}}"
+  local stopper_pid=""
+  local process_status=0
+
+  [[ -n "${pid}" ]] || return 0
+  if ! kill -0 "${pid}" 2>/dev/null; then
+    wait "${pid}" 2>/dev/null || true
+    return 0
+  fi
+
+  echo "Stopping ${label}..." >&2
+  signal_process_tree INT "${pid}"
+  (
+    sleep "${grace_seconds}"
+    if kill -0 "${pid}" 2>/dev/null; then
+      echo "${label} did not stop after ${grace_seconds}s; sending TERM." >&2
+      signal_process_tree TERM "${pid}"
+      sleep "${term_seconds}"
+      if kill -0 "${pid}" 2>/dev/null; then
+        echo "${label} did not stop after TERM; sending KILL." >&2
+        signal_process_tree KILL "${pid}"
+      fi
+    fi
+  ) &
+  stopper_pid=$!
+
+  # 待機中にtimer側が段階的に強制停止し、無制限waitでscript全体が詰まることを防ぐ。
+  set +e
+  wait "${pid}" 2>/dev/null
+  process_status=$?
+  kill "${stopper_pid}" 2>/dev/null || true
+  wait "${stopper_pid}" 2>/dev/null || true
+  set -e
+  return "${process_status}"
+}
+
+stop_external_process() {
+  local pid="$1"
+  local label="$2"
+  local grace_seconds="${3:-${PROCESS_STOP_GRACE_SECONDS}}"
+  local term_seconds="${4:-${PROCESS_STOP_TERM_SECONDS}}"
+  local wait_started=${SECONDS}
+
+  [[ -n "${pid}" ]] || return 0
+  kill -0 "${pid}" 2>/dev/null || return 0
+
+  echo "Stopping ${label}..." >&2
+  kill -INT "${pid}" 2>/dev/null || true
+  while kill -0 "${pid}" 2>/dev/null; do
+    if [[ $((SECONDS - wait_started)) -ge "${grace_seconds}" ]]; then
+      echo "${label} did not stop after ${grace_seconds}s; sending TERM." >&2
+      kill -TERM "${pid}" 2>/dev/null || true
+      sleep "${term_seconds}"
+      if kill -0 "${pid}" 2>/dev/null; then
+        echo "${label} did not stop after TERM; sending KILL." >&2
+        kill -KILL "${pid}" 2>/dev/null || true
+      fi
+      break
+    fi
+    sleep 0.2
+  done
+}
+
+stop_gazebo_servers_for_world() {
+  local world_path="$1"
+  local gzserver_process=""
+  local gzserver_pid=""
+
+  [[ -n "${world_path}" ]] || return 0
+
+  # ros2 launch終了後にgzserverだけが孤立する場合があるため、このrunで使ったworldに限定して止める。
+  while IFS= read -r gzserver_process; do
+    [[ -n "${gzserver_process}" ]] || continue
+    if [[ "${gzserver_process}" == *" ${world_path}"* ]]; then
+      gzserver_pid="${gzserver_process%% *}"
+      stop_external_process "${gzserver_pid}" "gazebo server for ${world_path}" 10 3 || true
+    fi
+  done < <(pgrep -a -x gzserver 2>/dev/null || true)
+}
+
+log_recorded_bag_output() {
+  local rosbag_path="${BAG_OUTPUT%/}"
+  local rosbag_name=""
+
+  [[ "${RECORD_BAG}" == "true" && -n "${rosbag_path}" ]] || return 0
+  [[ -f "${rosbag_path}/metadata.yaml" ]] || return 0
+
+  # 実際にmetadataがflushされたbagだけを再掲し、起動失敗時に未作成bagを保存済み扱いしない。
+  rosbag_name="${rosbag_path##*/}"
+  echo "Rosbag saved: ${rosbag_name}" >&2
+  echo "Rosbag path: ${rosbag_path}" >&2
+}
+
 cleanup_background_processes() {
   # 先に自動運転を止め、終了処理中にcmd_vel publishが継続しないようにする。
-  if [[ -n "${DRIVE_PID}" ]] && kill -0 "${DRIVE_PID}" 2>/dev/null; then
-    kill -INT "${DRIVE_PID}" 2>/dev/null || true
-    wait "${DRIVE_PID}" 2>/dev/null || true
-  fi
+  stop_background_process "${DRIVE_PID}" "scripted drive" 5 3 || true
 
   # rosbag recordへINTを送り、metadata flushの機会を与えてbag破損を避ける。
-  if [[ -n "${ROSBAG_PID}" ]] && kill -0 "${ROSBAG_PID}" 2>/dev/null; then
-    kill -INT "${ROSBAG_PID}" 2>/dev/null || true
-    wait "${ROSBAG_PID}" 2>/dev/null || true
-  fi
+  stop_background_process "${ROSBAG_PID}" "rosbag recorder" "${ROSBAG_STOP_GRACE_SECONDS}" "${PROCESS_STOP_TERM_SECONDS}" || true
+  log_recorded_bag_output
 
   # シナリオ同時起動時はlaunchをbackground管理するため、終了時に明示停止する。
-  if [[ -n "${SIMULATION_PID}" ]] && kill -0 "${SIMULATION_PID}" 2>/dev/null; then
-    kill -INT "${SIMULATION_PID}" 2>/dev/null || true
-    wait "${SIMULATION_PID}" 2>/dev/null || true
+  stop_background_process "${SIMULATION_PID}" "simulation" "${PROCESS_STOP_GRACE_SECONDS}" "${PROCESS_STOP_TERM_SECONDS}" || true
+  stop_gazebo_servers_for_world "${WORLD_PATH}"
+
+  # real_time_factor指定時に生成した一時worldは、Gazebo終了後に確実に消す。
+  if [[ -n "${TEMP_WORLD_FILE}" && -f "${TEMP_WORLD_FILE}" ]]; then
+    rm -f "${TEMP_WORLD_FILE}"
   fi
 }
 
 LAUNCH_ARGS=()
+WORLD_PATH=""
+REAL_TIME_FACTOR=""
+SCAN_PATTERN_LINE_LOOKUP=false
 BUILD_WORKSPACE=false
 LITE_MODE=false
 LIDAR_RESOLUTION_MODE="default"
@@ -275,6 +602,7 @@ BAG_TOPICS=()
 DRIVE_SCENARIO=""
 DRIVE_START_DELAY="0.0"
 DRIVE_LOOP=false
+AUTO_EXIT_AFTER_DRIVE=true
 DRIVE_OPTION_REQUESTED=false
 
 trap cleanup_background_processes EXIT
@@ -313,11 +641,28 @@ while [[ $# -gt 0 ]]; do
       LIDAR_RESOLUTION_MODE="full"
       ;;
     --world=*)
-      LAUNCH_ARGS+=("world:=${1#*=}")
+      WORLD_PATH="${1#*=}"
       ;;
     --world)
       shift
-      LAUNCH_ARGS+=("world:=$(require_value --world "${1:-}")")
+      WORLD_PATH="$(require_value --world "${1:-}")"
+      ;;
+    --real-time-factor=*)
+      REAL_TIME_FACTOR="$(require_value --real-time-factor "${1#*=}")"
+      ;;
+    --real-time-factor)
+      shift
+      REAL_TIME_FACTOR="$(require_value --real-time-factor "${1:-}")"
+      ;;
+    --sim-ready-timeout=*)
+      SIM_READY_TIMEOUT_SECONDS="$(require_value --sim-ready-timeout "${1#*=}")"
+      ;;
+    --sim-ready-timeout)
+      shift
+      SIM_READY_TIMEOUT_SECONDS="$(require_value --sim-ready-timeout "${1:-}")"
+      ;;
+    --scan-pattern-line-lookup)
+      SCAN_PATTERN_LINE_LOOKUP=true
       ;;
     --rviz-config=*)
       LAUNCH_ARGS+=("rviz_config:=${1#*=}")
@@ -364,6 +709,9 @@ while [[ $# -gt 0 ]]; do
       DRIVE_LOOP=false
       DRIVE_OPTION_REQUESTED=true
       ;;
+    --no-auto-exit)
+      AUTO_EXIT_AFTER_DRIVE=false
+      ;;
     --record-bag)
       RECORD_BAG=true
       ;;
@@ -400,6 +748,10 @@ if [[ -z "${DRIVE_SCENARIO}" && "${DRIVE_OPTION_REQUESTED}" == "true" ]]; then
   exit 2
 fi
 
+if [[ -n "${DRIVE_SCENARIO}" ]]; then
+  validate_non_negative_double --drive-start-delay "${DRIVE_START_DELAY}"
+fi
+
 if [[ -n "${DRIVE_SCENARIO}" && ! -f "${DRIVE_SCENARIO}" ]]; then
   echo "Drive scenario file not found: ${DRIVE_SCENARIO}" >&2
   exit 2
@@ -407,6 +759,25 @@ fi
 
 # 単体シミュレーションとして自己完結するTF木を出すため、Gazeboのodom TFは常に有効にする。
 LAUNCH_ARGS+=("publish_odom_tf:=true")
+
+if [[ -n "${REAL_TIME_FACTOR}" ]]; then
+  validate_positive_double --real-time-factor "${REAL_TIME_FACTOR}"
+  if [[ -z "${WORLD_PATH}" ]]; then
+    WORLD_PATH="$(default_world_file)"
+  fi
+  WORLD_PATH="$(make_real_time_factor_world "${WORLD_PATH}" "${REAL_TIME_FACTOR}")"
+  TEMP_WORLD_FILE="${WORLD_PATH}"
+fi
+
+validate_positive_double --sim-ready-timeout "${SIM_READY_TIMEOUT_SECONDS}"
+
+if [[ -n "${WORLD_PATH}" ]]; then
+  # world指定は最終的な有効パスだけをlaunchへ渡し、通常worldと一時worldの経路を統一する。
+  LAUNCH_ARGS+=("world:=${WORLD_PATH}")
+fi
+
+# 既定は高速なindex割り当てにし、必要時だけ旧来のscan pattern逆引きを使う。
+LAUNCH_ARGS+=("use_scan_pattern_line_lookup:=${SCAN_PATTERN_LINE_LOOKUP}")
 
 # lite指定時は1/4解像度を既定値にし、個別オプションがあればそちらを優先する。
 LAUNCH_ARGS+=("lite:=${LITE_MODE}")
@@ -443,15 +814,59 @@ if [[ "${RECORD_BAG}" == "true" ]]; then
   if [[ -z "${BAG_OUTPUT}" ]]; then
     BAG_OUTPUT="$(default_bag_output)"
   fi
-  # 明示指定があればそのtopicだけを記録し、未指定時は全topicを記録する。
-  start_rosbag_record "${BAG_OUTPUT}" true "${BAG_TOPICS[@]}"
 fi
 
-if [[ -n "${DRIVE_SCENARIO}" ]]; then
-  # シミュレーションを先に起動し、/clockを待てる状態で自動運転ノードを同時起動する。
+if [[ -n "${DRIVE_SCENARIO}" || "${RECORD_BAG}" == "true" ]]; then
+  ensure_no_existing_gazebo_server
+
+  # readiness確認やrecord開始を行う場合は、launchをbackground管理して起動完了を待つ。
   ros2 launch ai_ship_robot_gazebo simulation.launch.py "${LAUNCH_ARGS[@]}" &
   SIMULATION_PID=$!
-  start_scripted_drive
+
+  wait_for_simulation_ready
+
+  if [[ "${RECORD_BAG}" == "true" ]]; then
+    # 明示指定があればそのtopicだけを記録し、未指定時は全topicを記録する。
+    start_rosbag_record "${BAG_OUTPUT}" true "${BAG_TOPICS[@]}"
+  fi
+
+  if [[ -n "${DRIVE_SCENARIO}" ]]; then
+    start_scripted_drive "${DRIVE_START_DELAY}"
+  fi
+
+  if [[ -z "${DRIVE_SCENARIO}" ]]; then
+    set +e
+    wait "${SIMULATION_PID}"
+    simulation_status=$?
+    set -e
+    exit "${simulation_status}"
+  fi
+
+  # loopなしの単発シナリオではdrive完了を確認し、成功時だけ自動停止または継続待機へ進む。
+  if [[ "${DRIVE_LOOP}" == "false" ]]; then
+    set +e
+    wait "${DRIVE_PID}"
+    drive_status=$?
+    set -e
+
+    if [[ "${drive_status}" -ne 0 ]]; then
+      exit "${drive_status}"
+    fi
+
+    if [[ "${AUTO_EXIT_AFTER_DRIVE}" == "true" ]] && kill -0 "${SIMULATION_PID}" 2>/dev/null; then
+      echo "Scripted drive finished. Stopping simulation after ${AUTO_STOP_AFTER_DRIVE_SECONDS}s..." >&2
+      sleep "${AUTO_STOP_AFTER_DRIVE_SECONDS}"
+      stop_background_process "${SIMULATION_PID}" "simulation" "${PROCESS_STOP_GRACE_SECONDS}" "${PROCESS_STOP_TERM_SECONDS}" || true
+      exit 0
+    fi
+
+    set +e
+    wait "${SIMULATION_PID}"
+    simulation_status=$?
+    set -e
+
+    exit "${simulation_status}"
+  fi
 
   set +e
   wait "${SIMULATION_PID}"

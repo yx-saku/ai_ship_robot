@@ -214,6 +214,7 @@ bash sim/scripts/app/run_simulation.sh \
 
 - `--drive-start-delay` は `drive_robot.sh --start-delay` に渡され、sim time基準で待機します
 - `--drive-loop` を付けると、シミュレーション終了までシナリオを繰り返します
+- `--drive-loop` を付けない場合、シナリオ終了後は数秒待って simulation も自動終了します
 
 rosbagを記録する例です。
 
@@ -393,16 +394,20 @@ bash aitran/scripts/app/run_slam.sh \
 - bag再生時は `use_sim_time=true` を強制します
 - `--bag-start-offset` は bag 内の再生開始位置、`--bag-start-delay` は実時間での再生開始待ち時間です
 - `--record-bag` を併用すると、再生中の topic と SLAM 出力を別の rosbag に同時記録できます
+- `--bag-loop` を付けない場合、bag再生終了後は数秒待って SLAM も自動終了します
 
 ## rosbagの中身を確認する
 
 開発用ツールとして、rosbag と RViz2 をまとめて起動するスクリプトを追加しています。
 
 ```bash
-bash scripts/dev/replay_rosbag.sh rosbag2/sim_20260611_120000
+bash scripts/dev/replay_rosbag.sh --mode simulation rosbag2/sim_20260611_120000
+bash scripts/dev/replay_rosbag.sh --mode slam rosbag2/lio_sam_20260611_120000
 ```
 
-- 既定の RViz 設定は `sim/ros2_ws/src/ai_ship_robot_gazebo/config/mid360_points.rviz` を使います
+- `run_simulation.sh` で記録したbagは `--mode simulation`、`run_slam.sh` で記録したbagは `--mode slam` を必ず指定します
+- `--mode simulation` の RViz 設定は `sim/ros2_ws/src/ai_ship_robot_gazebo/config/mid360_points.rviz` を使います
+- `--mode slam` の RViz 設定は `aitran/ros2_ws/src/ai_ship_robot_slam/rviz/lio_sam.rviz` を使います
 - `replay_rosbag.sh` は bag に含まれる `/tf` と `/tf_static` もそのまま再生します
 - 再生速度は `--rate 0.5`、ループ再生は `--loop`、開始オフセットは `--start-offset 5` で指定できます
 - 別の RViz 設定を使う場合は `--rviz-config path/to/file.rviz` を指定します

@@ -19,6 +19,10 @@ ROSBAG_PID=""
 ROSBAG_PLAY_PID=""
 SLAM_PID=""
 ROSBAG_ROOT="${WORKSPACE_ROOT}/rosbag2"
+AUTO_STOP_AFTER_BAG_PLAY_SECONDS="5"
+PROCESS_STOP_GRACE_SECONDS="15"
+PROCESS_STOP_TERM_SECONDS="5"
+ROSBAG_STOP_GRACE_SECONDS="60"
 
 usage() {
   cat <<'EOF'
@@ -28,15 +32,17 @@ Options:
   --sim              Launch Gazebo simulation and LIO-SAM together.
   --record-bag       Record all topics during SLAM execution.
   --bag-output PATH  Set rosbag output directory or prefix.
-  --bag-topics CSV   Record only the given comma-separated topics.
-  --bag-play PATH    Play a recorded rosbag and run LIO-SAM without Gazebo.
+  --bag-topics CSV   Record only the given comma-separated topics. Default records all topics.
+  --bag-play [PATH]  Play a recorded rosbag and run LIO-SAM without Gazebo.
+                     If PATH is omitted, the latest rosbag2/sim_* bag is used.
   --bag-play-rate N  Set rosbag playback rate. Default: 1.0
   --bag-start-delay SEC
                      Delay rosbag playback start by the given seconds.
   --bag-start-offset SEC
                      Start rosbag playback after the given offset.
-  --bag-loop         Loop rosbag playback.
+  --no-auto-exit     Keep SLAM and recording running after rosbag playback finishes.
   --backend NAME     Select SLAM backend: lio-sam | glim
+  --rviz-config PATH Use a workspace RViz config file for LIO-SAM.
   --lio-sam          Select LIO-SAM backend.
   --glim             Select GLIM backend.
   -h, --help         Show this help.
@@ -245,9 +251,9 @@ start_rosbag_record() {
     record_cmd+=(--use-sim-time)
   fi
 
-  # topic無指定時は全topic記録へ切り替え、wrapperごとの差異をなくす。
+  # topic無指定時は明示的に全topic記録へ切り替え、入力topicの後追い発見もrecord対象にする。
   if [[ "${#topics[@]}" -eq 0 ]]; then
-    record_cmd+=(-a)
+    record_cmd+=(--all)
   else
     record_cmd+=("${topics[@]}")
   fi
@@ -262,27 +268,105 @@ start_rosbag_record() {
 }
 
 default_bag_output() {
-  local prefix="$1"
+  # run_slam経由の収録はbackendや入力形態に関係なくslam prefixへ統一する。
+  printf '%s/slam_%(%Y%m%d_%H%M%S)T' "${ROSBAG_ROOT}" -1
+}
 
-  # 用途別prefixを付け、収録元を識別しやすい保存先名にする。
-  printf '%s/%s_%(%Y%m%d_%H%M%S)T' "${ROSBAG_ROOT}" "${prefix}" -1
+latest_bag_for_prefix() {
+  local prefix="$1"
+  local candidate_metadata=""
+  local candidate_dir=""
+  local newest_dir=""
+
+  shopt -s nullglob
+  for candidate_metadata in "${ROSBAG_ROOT}/${prefix}_"*/metadata.yaml; do
+    candidate_dir="${candidate_metadata%/metadata.yaml}"
+    if [[ -z "${newest_dir}" || "${candidate_metadata}" -nt "${newest_dir}/metadata.yaml" ]]; then
+      newest_dir="${candidate_dir}"
+    fi
+  done
+  shopt -u nullglob
+
+  # metadata.yamlを持つbagだけを候補にし、作成途中や壊れたディレクトリを再生対象から外す。
+  if [[ -z "${newest_dir}" ]]; then
+    echo "No rosbag found for prefix '${prefix}_' in ${ROSBAG_ROOT}." >&2
+    exit 1
+  fi
+
+  printf '%s' "${newest_dir}"
+}
+
+collect_child_pids() {
+  local parent_pid="$1"
+  local child_pid=""
+
+  # launch wrapperやrosbag配下の子プロセスも停止対象にし、終了後の残存プロセスを防ぐ。
+  while IFS= read -r child_pid; do
+    [[ -n "${child_pid}" ]] || continue
+    collect_child_pids "${child_pid}"
+    printf '%s\n' "${child_pid}"
+  done < <(pgrep -P "${parent_pid}" 2>/dev/null || true)
+}
+
+signal_process_tree() {
+  local signal_name="$1"
+  local root_pid="$2"
+  local child_pids=()
+  local child_pid=""
+
+  mapfile -t child_pids < <(collect_child_pids "${root_pid}")
+  for child_pid in "${child_pids[@]}"; do
+    kill "-${signal_name}" "${child_pid}" 2>/dev/null || true
+  done
+  kill "-${signal_name}" "${root_pid}" 2>/dev/null || true
+}
+
+stop_background_process() {
+  local pid="$1"
+  local label="$2"
+  local grace_seconds="${3:-${PROCESS_STOP_GRACE_SECONDS}}"
+  local term_seconds="${4:-${PROCESS_STOP_TERM_SECONDS}}"
+  local stopper_pid=""
+  local process_status=0
+
+  [[ -n "${pid}" ]] || return 0
+  if ! kill -0 "${pid}" 2>/dev/null; then
+    wait "${pid}" 2>/dev/null || true
+    return 0
+  fi
+
+  echo "Stopping ${label}..." >&2
+  signal_process_tree INT "${pid}"
+  (
+    sleep "${grace_seconds}"
+    if kill -0 "${pid}" 2>/dev/null; then
+      echo "${label} did not stop after ${grace_seconds}s; sending TERM." >&2
+      signal_process_tree TERM "${pid}"
+      sleep "${term_seconds}"
+      if kill -0 "${pid}" 2>/dev/null; then
+        echo "${label} did not stop after TERM; sending KILL." >&2
+        signal_process_tree KILL "${pid}"
+      fi
+    fi
+  ) &
+  stopper_pid=$!
+
+  # 子プロセスの停止が遅い場合でもtimer側で段階停止し、cleanupのwaitが無制限に残らないようにする。
+  set +e
+  wait "${pid}" 2>/dev/null
+  process_status=$?
+  kill "${stopper_pid}" 2>/dev/null || true
+  wait "${stopper_pid}" 2>/dev/null || true
+  set -e
+  return "${process_status}"
 }
 
 cleanup_background_processes() {
   # bag再生終了時にSLAMも止め、逆に終了時はrecord/play側も確実に片付ける。
-  if [[ -n "${ROSBAG_PID}" ]] && kill -0 "${ROSBAG_PID}" 2>/dev/null; then
-    kill -INT "${ROSBAG_PID}" 2>/dev/null || kill -TERM "${ROSBAG_PID}" 2>/dev/null || true
-    wait "${ROSBAG_PID}" 2>/dev/null || true
-  fi
+  stop_background_process "${ROSBAG_PID}" "rosbag recorder" "${ROSBAG_STOP_GRACE_SECONDS}" "${PROCESS_STOP_TERM_SECONDS}" || true
   # bag再生プロセスはrecordとは別PIDで持ち、同時利用時も両方を確実に停止する。
-  if [[ -n "${ROSBAG_PLAY_PID}" ]] && kill -0 "${ROSBAG_PLAY_PID}" 2>/dev/null; then
-    kill -INT "${ROSBAG_PLAY_PID}" 2>/dev/null || kill -TERM "${ROSBAG_PLAY_PID}" 2>/dev/null || true
-    wait "${ROSBAG_PLAY_PID}" 2>/dev/null || true
-  fi
-  if [[ -n "${SLAM_PID}" ]] && kill -0 "${SLAM_PID}" 2>/dev/null; then
-    kill -INT "${SLAM_PID}" 2>/dev/null || kill -TERM "${SLAM_PID}" 2>/dev/null || true
-    wait "${SLAM_PID}" 2>/dev/null || true
-  fi
+  stop_background_process "${ROSBAG_PLAY_PID}" "rosbag player" "${PROCESS_STOP_GRACE_SECONDS}" "${PROCESS_STOP_TERM_SECONDS}" || true
+  stop_background_process "${SLAM_PID}" "SLAM" "${PROCESS_STOP_GRACE_SECONDS}" "${PROCESS_STOP_TERM_SECONDS}" || true
 }
 
 ensure_process_started() {
@@ -329,8 +413,8 @@ run_bag_play_lio_sam() {
   local bag_path="$1"
   local bag_rate="$2"
   local bag_offset="$3"
-  local bag_loop="$4"
-  local bag_start_delay="$5"
+  local bag_start_delay="$4"
+  local auto_exit="$5"
   local record_bag="$6"
   local bag_output="$7"
   shift 7
@@ -341,10 +425,6 @@ run_bag_play_lio_sam() {
   local derived_input_topics=""
   local derived_imu_topic=""
   local derived_raw_imu_topic=""
-
-  if [[ "${bag_loop}" == "true" ]]; then
-    play_cmd+=(--loop)
-  fi
 
   for ((i = 0; i < ${#FORWARD_ARGS[@]}; i++)); do
     case "${FORWARD_ARGS[i]}" in
@@ -408,15 +488,34 @@ run_bag_play_lio_sam() {
   fi
   "${play_cmd[@]}" &
   ROSBAG_PLAY_PID=$!
+  set +e
   wait "${ROSBAG_PLAY_PID}"
+  play_status=$?
+  set -e
+
+  # bag再生完了後は既定で短い猶予を置いて終了し、明示指定時だけSLAM/recordを継続する。
+  if [[ "${play_status}" -eq 0 ]]; then
+    if [[ "${auto_exit}" == "true" ]]; then
+      echo "Rosbag playback finished. Stopping SLAM after ${AUTO_STOP_AFTER_BAG_PLAY_SECONDS}s..." >&2
+      sleep "${AUTO_STOP_AFTER_BAG_PLAY_SECONDS}"
+    else
+      set +e
+      wait "${SLAM_PID}"
+      slam_status=$?
+      set -e
+      return "${slam_status}"
+    fi
+  fi
+
+  return "${play_status}"
 }
 
 run_bag_play_glim() {
   local bag_path="$1"
   local bag_rate="$2"
   local bag_offset="$3"
-  local bag_loop="$4"
-  local bag_start_delay="$5"
+  local bag_start_delay="$4"
+  local auto_exit="$5"
   local record_bag="$6"
   local bag_output="$7"
   shift 7
@@ -426,10 +525,6 @@ run_bag_play_glim() {
   local play_topics=()
   local derived_input_topics=""
   local derived_imu_topic=""
-
-  if [[ "${bag_loop}" == "true" ]]; then
-    play_cmd+=(--loop)
-  fi
 
   for ((i = 0; i < ${#FORWARD_ARGS[@]}; i++)); do
     case "${FORWARD_ARGS[i]}" in
@@ -486,7 +581,26 @@ run_bag_play_glim() {
   fi
   "${play_cmd[@]}" &
   ROSBAG_PLAY_PID=$!
+  set +e
   wait "${ROSBAG_PLAY_PID}"
+  play_status=$?
+  set -e
+
+  # bag再生完了後は既定で短い猶予を置いて終了し、明示指定時だけSLAM/recordを継続する。
+  if [[ "${play_status}" -eq 0 ]]; then
+    if [[ "${auto_exit}" == "true" ]]; then
+      echo "Rosbag playback finished. Stopping SLAM after ${AUTO_STOP_AFTER_BAG_PLAY_SECONDS}s..." >&2
+      sleep "${AUTO_STOP_AFTER_BAG_PLAY_SECONDS}"
+    else
+      set +e
+      wait "${SLAM_PID}"
+      slam_status=$?
+      set -e
+      return "${slam_status}"
+    fi
+  fi
+
+  return "${play_status}"
 }
 
 run_sim_lio_sam() {
@@ -793,6 +907,13 @@ run_sim_lio_sam() {
       --no-rviz)
         launch_args+=("use_rviz:=false")
         ;;
+      --rviz-config=*)
+        launch_args+=("rviz_config:=${1#*=}")
+        ;;
+      --rviz-config)
+        shift
+        launch_args+=("rviz_config:=$(require_value --rviz-config "${1:-}")")
+        ;;
       --lite)
         lite_mode=true
         ;;
@@ -894,7 +1015,7 @@ run_sim_lio_sam() {
   source_sim_slam_environment
   if [[ "${record_bag}" == "true" ]]; then
     if [[ -z "${bag_output}" ]]; then
-      bag_output="$(default_bag_output sim_slam)"
+      bag_output="$(default_bag_output)"
     fi
   fi
   if [[ "${record_bag}" == "true" ]]; then
@@ -1043,6 +1164,13 @@ run_sim_glim() {
       --no-rviz)
         launch_args+=("use_rviz:=false")
         ;;
+      --rviz-config=*)
+        launch_args+=("rviz_config:=${1#*=}")
+        ;;
+      --rviz-config)
+        shift
+        launch_args+=("rviz_config:=$(require_value --rviz-config "${1:-}")")
+        ;;
       --lite)
         lite_mode=true
         ;;
@@ -1142,7 +1270,7 @@ run_sim_glim() {
   source_sim_slam_environment
   if [[ "${record_bag}" == "true" ]]; then
     if [[ -z "${bag_output}" ]]; then
-      bag_output="$(default_bag_output sim_glim)"
+      bag_output="$(default_bag_output)"
     fi
     ros2 launch ai_ship_robot_gazebo sim_glim.launch.py "${launch_args[@]}" &
     # 明示指定があればそのtopicだけを記録し、未指定時は全topicを記録する。
@@ -1158,10 +1286,11 @@ RECORD_BAG=false
 BAG_OUTPUT=""
 BAG_TOPICS=()
 BAG_PLAY=""
+BAG_PLAY_REQUESTED=false
 BAG_PLAY_RATE="1.0"
 BAG_START_DELAY="0"
 BAG_START_OFFSET="0"
-BAG_LOOP=false
+BAG_AUTO_EXIT=true
 BACKEND="lio-sam"
 
 trap cleanup_background_processes EXIT
@@ -1199,11 +1328,17 @@ while [[ $# -gt 0 ]]; do
       FORWARD_ARGS+=("--bag-topics" "${bag_topics_value}")
       ;;
     --bag-play=*)
+      BAG_PLAY_REQUESTED=true
       BAG_PLAY="${1#*=}"
       ;;
     --bag-play)
-      shift
-      BAG_PLAY="$(require_value --bag-play "${1:-}")"
+      BAG_PLAY_REQUESTED=true
+      if [[ $# -gt 1 && "${2:-}" != --* ]]; then
+        shift
+        BAG_PLAY="${1}"
+      else
+        BAG_PLAY=""
+      fi
       ;;
     --bag-play-rate=*)
       BAG_PLAY_RATE="${1#*=}"
@@ -1226,8 +1361,12 @@ while [[ $# -gt 0 ]]; do
       shift
       BAG_START_OFFSET="$(require_value --bag-start-offset "${1:-}")"
       ;;
+    --no-auto-exit)
+      BAG_AUTO_EXIT=false
+      ;;
     --bag-loop)
-      BAG_LOOP=true
+      echo "--bag-loop has been removed. Use --no-auto-exit if you need to keep SLAM running after one playback." >&2
+      exit 2
       ;;
     --backend=*)
       BACKEND="$(normalize_backend "${1#*=}")"
@@ -1257,7 +1396,7 @@ while [[ $# -gt 0 ]]; do
 done
 
 if [[ "${SIM_MODE}" == "true" ]]; then
-  if [[ -n "${BAG_PLAY}" ]]; then
+  if [[ "${BAG_PLAY_REQUESTED}" == "true" ]]; then
     echo "--sim and --bag-play cannot be used together." >&2
     exit 2
   fi
@@ -1284,7 +1423,7 @@ if [[ "${SIM_MODE}" == "true" ]]; then
   exit $?
 fi
 
-if [[ -n "${BAG_PLAY}" ]]; then
+if [[ "${BAG_PLAY_REQUESTED}" == "true" ]]; then
   for arg in "${FORWARD_ARGS[@]}"; do
     if [[ "${arg}" == "--no-use-sim-time" ]]; then
       echo "--bag-play always runs with use_sim_time=true; --no-use-sim-time cannot be used." >&2
@@ -1292,13 +1431,21 @@ if [[ -n "${BAG_PLAY}" ]]; then
     fi
   done
   source_sim_slam_environment
+  if [[ -z "${BAG_PLAY}" ]]; then
+    BAG_PLAY="$(latest_bag_for_prefix sim)"
+    echo "Using latest simulation rosbag: ${BAG_PLAY}" >&2
+  fi
+  if [[ ! -e "${BAG_PLAY}" ]]; then
+    echo "Bag path not found: ${BAG_PLAY}" >&2
+    exit 1
+  fi
   if [[ "${RECORD_BAG}" == "true" && -z "${BAG_OUTPUT}" ]]; then
-    BAG_OUTPUT="$(default_bag_output bag_play)"
+    BAG_OUTPUT="$(default_bag_output)"
   fi
   if [[ "${BACKEND}" == "glim" ]]; then
-    run_bag_play_glim "${BAG_PLAY}" "${BAG_PLAY_RATE}" "${BAG_START_OFFSET}" "${BAG_LOOP}" "${BAG_START_DELAY}" "${RECORD_BAG}" "${BAG_OUTPUT}" "${BAG_TOPICS[@]}"
+    run_bag_play_glim "${BAG_PLAY}" "${BAG_PLAY_RATE}" "${BAG_START_OFFSET}" "${BAG_START_DELAY}" "${BAG_AUTO_EXIT}" "${RECORD_BAG}" "${BAG_OUTPUT}" "${BAG_TOPICS[@]}"
   else
-    run_bag_play_lio_sam "${BAG_PLAY}" "${BAG_PLAY_RATE}" "${BAG_START_OFFSET}" "${BAG_LOOP}" "${BAG_START_DELAY}" "${RECORD_BAG}" "${BAG_OUTPUT}" "${BAG_TOPICS[@]}"
+    run_bag_play_lio_sam "${BAG_PLAY}" "${BAG_PLAY_RATE}" "${BAG_START_OFFSET}" "${BAG_START_DELAY}" "${BAG_AUTO_EXIT}" "${RECORD_BAG}" "${BAG_OUTPUT}" "${BAG_TOPICS[@]}"
   fi
   exit $?
 fi
@@ -1306,7 +1453,7 @@ fi
 if [[ "${RECORD_BAG}" == "true" ]]; then
   source_sim_slam_environment
   if [[ -z "${BAG_OUTPUT}" ]]; then
-    BAG_OUTPUT="$(default_bag_output lio_sam)"
+    BAG_OUTPUT="$(default_bag_output)"
   fi
   if [[ "${BACKEND}" == "glim" ]]; then
     run_recorded_glim "${BAG_OUTPUT}" "${BAG_TOPICS[@]}"

@@ -1,5 +1,0 @@
-steps:
-  - duration_sec: 30.0
-    commands:
-      - type: yaw_right
-        speed: 0.5

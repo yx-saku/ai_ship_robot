@@ -11,6 +11,7 @@
     baselinkFrame: base_footprint
     odometryFrame: odom
     mapFrame: map
+    lidarInitFrame: base_lidar_init
 
     # GPSは初期検証対象外のため無効寄りにし、IMU/LiDARだけで起動確認できるようにする。
     useImuHeadingInitialization: false
@@ -84,9 +85,9 @@
     z_tollerance: 1000.0
     rotation_tollerance: 1000.0
 
-    # Jetson Orin NXのCPU運用を想定し、初期検証では最適化頻度を控えめにする。
+    # 10Hz LiDARの各scanをmapOptimizationへ渡し、公開odometry/TFの更新頻度を保つ。
     numberOfCores: 4
-    mappingProcessInterval: 0.20
+    mappingProcessInterval: 0.0
 
     # キーフレーム密度は低速走行で過剰に増えない値から開始する。
     surroundingkeyframeAddingDistThreshold: 1.0

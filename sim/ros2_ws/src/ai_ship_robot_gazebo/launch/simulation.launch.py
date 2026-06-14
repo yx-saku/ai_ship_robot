@@ -28,6 +28,7 @@ def generate_launch_description():
     livox_imu_topic = LaunchConfiguration("livox_imu_topic")
     livox_lidar_frame = LaunchConfiguration("livox_lidar_frame")
     livox_imu_frame = LaunchConfiguration("livox_imu_frame")
+    use_scan_pattern_line_lookup = LaunchConfiguration("use_scan_pattern_line_lookup")
     gazebo_params_file = PathJoinSubstitution(
         [FindPackageShare("ai_ship_robot_gazebo"), "config", "gazebo_ros.yaml"]
     )
@@ -118,7 +119,7 @@ def generate_launch_description():
     # Gazebo pluginのraw topicを実機Livox driverに近いtopic/単位へ補完し、SLAM側からsimulation差分を隠す。
     mid360_sim_adapter = Node(
         package="ai_ship_robot_gazebo",
-        executable="mid360_sim_adapter.py",
+        executable="mid360_sim_adapter",
         name="mid360_sim_adapter",
         output="screen",
         condition=IfCondition(use_mid360_sim_adapter),
@@ -131,6 +132,7 @@ def generate_launch_description():
                 "output_imu_topic": livox_imu_topic,
                 "output_lidar_frame": livox_lidar_frame,
                 "output_imu_frame": livox_imu_frame,
+                "use_scan_pattern_line_lookup": use_scan_pattern_line_lookup,
             }
         ],
     )
@@ -164,6 +166,7 @@ def generate_launch_description():
             DeclareLaunchArgument("livox_imu_topic", default_value="/livox/imu"),
             DeclareLaunchArgument("livox_lidar_frame", default_value="left_lidar_link"),
             DeclareLaunchArgument("livox_imu_frame", default_value="left_lidar_imu_link"),
+            DeclareLaunchArgument("use_scan_pattern_line_lookup", default_value="false"),
             DeclareLaunchArgument(
                 "rviz_config",
                 default_value=PathJoinSubstitution(

@@ -1,0 +1,9 @@
+steps:
+  - duration_sec: 5.0
+    commands:
+      - type: stop
+
+  - duration_sec: 8.0
+    commands:
+      - type: yaw_right
+        speed: 0.5

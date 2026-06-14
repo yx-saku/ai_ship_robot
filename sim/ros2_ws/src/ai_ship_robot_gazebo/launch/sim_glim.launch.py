@@ -17,6 +17,7 @@ def generate_launch_description():
     sim_imu_topic = LaunchConfiguration("sim_imu_topic")
     livox_lidar_topic = LaunchConfiguration("livox_lidar_topic")
     livox_imu_topic = LaunchConfiguration("livox_imu_topic")
+    use_scan_pattern_line_lookup = LaunchConfiguration("use_scan_pattern_line_lookup")
     input_points_topics = LaunchConfiguration("input_points_topics")
     reference_points_topic = LaunchConfiguration("reference_points_topic")
     fused_points_topic = LaunchConfiguration("fused_points_topic")
@@ -48,6 +49,7 @@ def generate_launch_description():
                     "sim_imu_topic": sim_imu_topic,
                     "livox_lidar_topic": livox_lidar_topic,
                     "livox_imu_topic": livox_imu_topic,
+                    "use_scan_pattern_line_lookup": use_scan_pattern_line_lookup,
                 }.items(),
             )
         ],
@@ -84,6 +86,7 @@ def generate_launch_description():
             DeclareLaunchArgument("sim_imu_topic", default_value="/left_lidar/imu"),
             DeclareLaunchArgument("livox_lidar_topic", default_value="/livox/lidar"),
             DeclareLaunchArgument("livox_imu_topic", default_value="/livox/imu"),
+            DeclareLaunchArgument("use_scan_pattern_line_lookup", default_value="false"),
             DeclareLaunchArgument("input_points_topics", default_value="['/livox/lidar']"),
             DeclareLaunchArgument("reference_points_topic", default_value="/livox/lidar"),
             DeclareLaunchArgument("fused_points_topic", default_value="/livox/fused_points"),

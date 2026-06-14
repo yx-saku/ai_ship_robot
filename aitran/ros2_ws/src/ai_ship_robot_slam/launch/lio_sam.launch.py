@@ -28,6 +28,19 @@ def generate_launch_description():
     base_frame = LaunchConfiguration("base_frame")
     odom_frame = LaunchConfiguration("odom_frame")
     map_frame = LaunchConfiguration("map_frame")
+    base_lidar_init_frame = LaunchConfiguration("base_lidar_init_frame")
+    base_lidar_init_x = LaunchConfiguration("base_lidar_init_x")
+    base_lidar_init_y = LaunchConfiguration("base_lidar_init_y")
+    base_lidar_init_z = LaunchConfiguration("base_lidar_init_z")
+    base_lidar_init_roll = LaunchConfiguration("base_lidar_init_roll")
+    base_lidar_init_pitch = LaunchConfiguration("base_lidar_init_pitch")
+    base_lidar_init_yaw = LaunchConfiguration("base_lidar_init_yaw")
+    odom_to_base_x = LaunchConfiguration("odom_to_base_x")
+    odom_to_base_y = LaunchConfiguration("odom_to_base_y")
+    odom_to_base_z = LaunchConfiguration("odom_to_base_z")
+    odom_to_base_roll = LaunchConfiguration("odom_to_base_roll")
+    odom_to_base_pitch = LaunchConfiguration("odom_to_base_pitch")
+    odom_to_base_yaw = LaunchConfiguration("odom_to_base_yaw")
     derived_ring_count = LaunchConfiguration("derived_ring_count")
     min_vertical_angle_deg = LaunchConfiguration("min_vertical_angle_deg")
     max_vertical_angle_deg = LaunchConfiguration("max_vertical_angle_deg")
@@ -82,6 +95,7 @@ def generate_launch_description():
             "baselinkFrame": base_frame,
             "odometryFrame": odom_frame,
             "mapFrame": map_frame,
+            "lidarInitFrame": base_lidar_init_frame,
             "imuType": imu_type,
             "imuAccelerationUnit": imu_acceleration_unit,
             "imuAccelerationScale": ParameterValue(imu_acceleration_scale, value_type=float),
@@ -152,30 +166,58 @@ def generate_launch_description():
         ],
     )
 
-    # 公式LIO-SAM launchと同じmap->odom初期TFを出し、map最適化前のTF木を成立させる。
-    map_to_odom_tf = Node(
+    # LIO-SAMの推定原点を、初期baseから初期LiDARへ移した中間frameとして明示する。
+    map_to_base_lidar_init_tf = Node(
         package="tf2_ros",
         executable="static_transform_publisher",
-        name="map_to_odom_static_transform_publisher",
+        name="map_to_base_lidar_init_static_transform_publisher",
         output="screen",
         condition=IfCondition(publish_map_to_odom_tf),
         arguments=[
             "--x",
-            "0.0",
+            base_lidar_init_x,
             "--y",
-            "0.0",
+            base_lidar_init_y,
             "--z",
-            "0.0",
+            base_lidar_init_z,
             "--roll",
-            "0.0",
+            base_lidar_init_roll,
             "--pitch",
-            "0.0",
+            base_lidar_init_pitch,
             "--yaw",
-            "0.0",
+            base_lidar_init_yaw,
             "--frame-id",
             map_frame,
             "--child-frame-id",
+            base_lidar_init_frame,
+        ],
+        parameters=[{"use_sim_time": use_sim_time}],
+    )
+
+    # LIO-SAMが現在LiDAR位置として動かすodomから、ロボットbaseへの固定外部変換を張る。
+    odom_to_base_tf = Node(
+        package="tf2_ros",
+        executable="static_transform_publisher",
+        name="odom_to_base_static_transform_publisher",
+        output="screen",
+        condition=IfCondition(publish_map_to_odom_tf),
+        arguments=[
+            "--x",
+            odom_to_base_x,
+            "--y",
+            odom_to_base_y,
+            "--z",
+            odom_to_base_z,
+            "--roll",
+            odom_to_base_roll,
+            "--pitch",
+            odom_to_base_pitch,
+            "--yaw",
+            odom_to_base_yaw,
+            "--frame-id",
             odom_frame,
+            "--child-frame-id",
+            base_frame,
         ],
         parameters=[{"use_sim_time": use_sim_time}],
     )
@@ -239,6 +281,19 @@ def generate_launch_description():
             DeclareLaunchArgument("base_frame", default_value="base_footprint"),
             DeclareLaunchArgument("odom_frame", default_value="odom"),
             DeclareLaunchArgument("map_frame", default_value="map"),
+            DeclareLaunchArgument("base_lidar_init_frame", default_value="base_lidar_init"),
+            DeclareLaunchArgument("base_lidar_init_x", default_value="0.3925"),
+            DeclareLaunchArgument("base_lidar_init_y", default_value="0.3275"),
+            DeclareLaunchArgument("base_lidar_init_z", default_value="0.25"),
+            DeclareLaunchArgument("base_lidar_init_roll", default_value="0.0"),
+            DeclareLaunchArgument("base_lidar_init_pitch", default_value="2.0943951023931953"),
+            DeclareLaunchArgument("base_lidar_init_yaw", default_value="0.0"),
+            DeclareLaunchArgument("odom_to_base_x", default_value="0.41275635094610965"),
+            DeclareLaunchArgument("odom_to_base_y", default_value="-0.3275"),
+            DeclareLaunchArgument("odom_to_base_z", default_value="-0.21491470245117265"),
+            DeclareLaunchArgument("odom_to_base_roll", default_value="0.0"),
+            DeclareLaunchArgument("odom_to_base_pitch", default_value="-2.0943951023931953"),
+            DeclareLaunchArgument("odom_to_base_yaw", default_value="0.0"),
             DeclareLaunchArgument("derived_ring_count", default_value="4"),
             DeclareLaunchArgument("min_vertical_angle_deg", default_value="-7.22"),
             DeclareLaunchArgument("max_vertical_angle_deg", default_value="55.22"),
@@ -275,12 +330,15 @@ def generate_launch_description():
             ),
             DeclareLaunchArgument(
                 "rviz_config",
-                default_value=PathJoinSubstitution([FindPackageShare("lio_sam"), "config", "rviz2.rviz"]),
+                default_value=PathJoinSubstitution(
+                    [FindPackageShare("ai_ship_robot_slam"), "rviz", "lio_sam.rviz"]
+                ),
             ),
             fusion,
             adapter,
             imu_orientation_initializer,
-            map_to_odom_tf,
+            map_to_base_lidar_init_tf,
+            odom_to_base_tf,
             imu_preintegration,
             image_projection,
             feature_extraction,

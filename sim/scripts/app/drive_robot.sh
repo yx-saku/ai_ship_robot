@@ -227,9 +227,9 @@ source_workspace_environment
 
 # scenario指定時は専用ノードを使い、TTY依存のkeyboard_driveとは実行経路を分離する。
 if [[ -n "${SCENARIO_FILE}" ]]; then
-  DRIVE_EXECUTABLE="$(ros2 pkg prefix ai_ship_robot_gazebo)/lib/ai_ship_robot_gazebo/scripted_drive.py"
+  DRIVE_EXECUTABLE="$(ros2 pkg prefix ai_ship_robot_gazebo)/lib/ai_ship_robot_gazebo/scripted_drive"
 else
-  DRIVE_EXECUTABLE="$(ros2 pkg prefix ai_ship_robot_gazebo)/lib/ai_ship_robot_gazebo/keyboard_drive.py"
+  DRIVE_EXECUTABLE="$(ros2 pkg prefix ai_ship_robot_gazebo)/lib/ai_ship_robot_gazebo/keyboard_drive"
 fi
 
 if [[ ! -x "${DRIVE_EXECUTABLE}" ]]; then
