@@ -1,3 +1,5 @@
+import math
+
 from launch import LaunchDescription
 from launch.actions import DeclareLaunchArgument
 from launch.conditions import IfCondition
@@ -5,6 +7,45 @@ from launch.substitutions import LaunchConfiguration, PathJoinSubstitution
 from launch_ros.actions import Node
 from launch_ros.parameter_descriptions import ParameterValue
 from launch_ros.substitutions import FindPackageShare
+
+
+def _format_float(value):
+    return f"{value:.16g}"
+
+
+def _rotation_matrix_from_rpy(roll, pitch, yaw):
+    cr = math.cos(roll)
+    sr = math.sin(roll)
+    cp = math.cos(pitch)
+    sp = math.sin(pitch)
+    cy = math.cos(yaw)
+    sy = math.sin(yaw)
+
+    # ROSのstatic_transform_publisherと同じRz(yaw) * Ry(pitch) * Rx(roll)で姿勢を扱う。
+    return (
+        (cy * cp, cy * sp * sr - sy * cr, cy * sp * cr + sy * sr),
+        (sy * cp, sy * sp * sr + cy * cr, sy * sp * cr - cy * sr),
+        (-sp, cp * sr, cp * cr),
+    )
+
+
+def _projected_x_axis_yaw(rotation_matrix):
+    x_axis_x = rotation_matrix[0][0]
+    x_axis_y = rotation_matrix[1][0]
+
+    # LiDARの+X軸を水平面へ射影し、SLAM初期frameのyawだけを実LiDAR前方へ合わせる。
+    if math.hypot(x_axis_x, x_axis_y) <= 1.0e-9:
+        return 0.0
+    return math.atan2(x_axis_y, x_axis_x)
+
+
+def _inverse_transform(translation, rotation_matrix):
+    inverse_rotation = tuple(tuple(rotation_matrix[row][col] for row in range(3)) for col in range(3))
+    inverse_translation = tuple(
+        -sum(inverse_rotation[row][col] * translation[col] for col in range(3))
+        for row in range(3)
+    )
+    return inverse_translation
 
 
 def generate_launch_description():
@@ -69,7 +110,7 @@ def generate_launch_description():
 
     # LIO-SAMの推定LiDAR frameを実機URDFのLiDAR frameから分離し、TF親子競合を避ける。
     map_frame = "map"
-    lidar_init_frame = "left_lidar-init"
+    lidar_init_frame = "left_lidar_init"
     lidar_odom_frame = "left_lidar_odom"
     base_frame = "base_footprint"
 
@@ -131,19 +172,28 @@ def generate_launch_description():
         ],
     )
 
-    # 最終的なworld/map合わせは外部で調整できるよう、SLAM初期LiDAR frameはmap直下の固定中間frameにする。
+    # URDF既定配置のbase_footprint -> left_lidar_linkから、SLAM初期frameとbase接続TFを一貫して導出する。
+    base_to_left_lidar_translation = (0.3925, 0.3275, 0.25)
+    base_to_left_lidar_rpy = (0.0, 2.0943951023931953, 0.0)
+    base_to_left_lidar_rotation = _rotation_matrix_from_rpy(*base_to_left_lidar_rpy)
+    lidar_init_yaw = _projected_x_axis_yaw(base_to_left_lidar_rotation)
+    lidar_to_base_translation = _inverse_transform(
+        base_to_left_lidar_translation, base_to_left_lidar_rotation
+    )
+
+    # left_lidar_initは水平を維持し、並進とLiDAR +X軸の水平投影yawだけを初期姿勢として使う。
     map_to_lidar_init_tf = Node(
         package="tf2_ros",
         executable="static_transform_publisher",
         name="map_to_left_lidar_init_static_transform_publisher",
         output="screen",
         arguments=[
-            "--x", "0.0",
-            "--y", "0.0",
-            "--z", "0.0",
+            "--x", _format_float(base_to_left_lidar_translation[0]),
+            "--y", _format_float(base_to_left_lidar_translation[1]),
+            "--z", _format_float(base_to_left_lidar_translation[2]),
             "--roll", "0.0",
             "--pitch", "0.0",
-            "--yaw", "0.0",
+            "--yaw", _format_float(lidar_init_yaw),
             "--frame-id", map_frame,
             "--child-frame-id", lidar_init_frame,
         ],
@@ -157,12 +207,12 @@ def generate_launch_description():
         name="left_lidar_odom_to_base_static_transform_publisher",
         output="screen",
         arguments=[
-            "--x", "0.41275635094610965",
-            "--y", "-0.3275",
-            "--z", "-0.21491496804892735",
-            "--roll", "0.0",
-            "--pitch", "-2.0943951023931953",
-            "--yaw", "0.0",
+            "--x", _format_float(lidar_to_base_translation[0]),
+            "--y", _format_float(lidar_to_base_translation[1]),
+            "--z", _format_float(lidar_to_base_translation[2]),
+            "--roll", _format_float(-base_to_left_lidar_rpy[0]),
+            "--pitch", _format_float(-base_to_left_lidar_rpy[1]),
+            "--yaw", _format_float(-base_to_left_lidar_rpy[2]),
             "--frame-id", lidar_odom_frame,
             "--child-frame-id", base_frame,
         ],

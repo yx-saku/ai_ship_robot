@@ -9,7 +9,7 @@
     # LIO-SAMの動的LiDAR frameをURDFの実LiDAR frameから分離し、base_footprintへ静的TFで接続する。
     lidarFrame: left_lidar_odom
     baselinkFrame: base_footprint
-    odometryFrame: left_lidar-init
+    odometryFrame: left_lidar_init
     mapFrame: map
 
     # GPSは初期検証対象外のため無効寄りにし、IMU/LiDARだけで起動確認できるようにする。

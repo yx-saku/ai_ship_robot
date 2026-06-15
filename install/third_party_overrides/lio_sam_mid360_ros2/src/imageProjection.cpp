@@ -394,8 +394,9 @@ public:
 
         if (shouldWaitForSixAxisImuInitialization())
         {
-            RCLCPP_INFO_THROTTLE(get_logger(), *get_clock(), 2000, "Waiting for initial 6-axis IMU roll/pitch estimate ...");
-            return DeskewStatus::Wait;
+            // 初期姿勢が未確定のscanを後で処理すると、古い点群に確定後の姿勢が適用され初期mapが歪む。
+            RCLCPP_INFO_THROTTLE(get_logger(), *get_clock(), 2000, "Drop scan until initial 6-axis IMU roll/pitch estimate is ready ...");
+            return DeskewStatus::Drop;
         }
 
         const bool needImuAngular = deskewMode == "imu_angular";
