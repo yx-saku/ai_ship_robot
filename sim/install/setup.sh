@@ -3,10 +3,9 @@ set -euo pipefail
 
 ROS_DISTRO="${ROS_DISTRO:-humble}"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-WORKSPACE_ROOT="$(cd "${SCRIPT_DIR}/../../.." && pwd)"
-AITRAN_ROOT="${WORKSPACE_ROOT}/aitran"
+WORKSPACE_ROOT="$(cd "${SCRIPT_DIR}/../.." && pwd)"
 SIM_ROOT="${WORKSPACE_ROOT}/sim"
-ROS_WS="${AITRAN_ROOT}/ros2_ws"
+ROS_WS="${WORKSPACE_ROOT}/ros2_ws"
 ROS_SIM_WS="${SIM_ROOT}/ros2_ws"
 ROS_SIM_WS_SRC_DIR="${ROS_SIM_WS}/src"
 AI_SHIP_ROBOT_OPT_ROOT="${AI_SHIP_ROBOT_OPT_ROOT:-/opt/ai_ship_robot}"
@@ -17,7 +16,7 @@ ROSDEP_UPDATED=0
 
 usage() {
   cat <<'EOF'
-Usage: bash sim/scripts/install/setup.sh
+Usage: bash sim/install/setup.sh
 
 simulation向け workspace セットアップを実行します。
 - /opt/ai_ship_robot の third_party underlay 読み込み
@@ -25,10 +24,10 @@ simulation向け workspace セットアップを実行します。
 - shell 自動読み込み設定更新
 
 事前に以下を実行してください。
-- bash aitran/scripts/install/install.sh
-- bash aitran/scripts/install/install_third_party.sh
-- bash sim/scripts/install/install.sh
-- bash sim/scripts/install/install_third_party.sh
+- bash install/install.sh
+- bash install/install_third_party.sh
+- bash sim/install/install.sh
+- bash sim/install/install_third_party.sh
 EOF
 }
 
@@ -49,7 +48,7 @@ fi
 
 require_ros2() {
   if [[ ! -f "/opt/ros/${ROS_DISTRO}/setup.bash" ]]; then
-    echo "Missing /opt/ros/${ROS_DISTRO}/setup.bash. Run bash aitran/scripts/install/install.sh first." >&2
+    echo "Missing /opt/ros/${ROS_DISTRO}/setup.bash. Run bash install/install.sh first." >&2
     exit 1
   fi
 }
@@ -57,7 +56,7 @@ require_ros2() {
 require_third_party_underlay() {
   if [[ ! -f "${THIRD_PARTY_UNDERLAY_SETUP}" ]]; then
     echo "Missing third-party underlay: ${THIRD_PARTY_UNDERLAY_SETUP}" >&2
-    echo "Run bash aitran/scripts/install/install_third_party.sh && bash sim/scripts/install/install_third_party.sh first." >&2
+    echo "Run bash install/install_third_party.sh && bash sim/install/install_third_party.sh first." >&2
     exit 1
   fi
 }
@@ -79,7 +78,7 @@ source_third_party_underlay() {
 require_simulation_underlay_package() {
   if ! ros2 pkg prefix ros2_livox_simulation >/dev/null 2>&1; then
     echo "Missing ros2_livox_simulation in third-party underlay." >&2
-    echo "Run bash sim/scripts/install/install_third_party.sh first." >&2
+    echo "Run bash sim/install/install_third_party.sh first." >&2
     exit 1
   fi
 }
@@ -139,7 +138,7 @@ write_shell_environment_setup() {
   # simulation追加後はsystem underlay、runtime、simulationの順に同じ入口から読み込めるようにする。
   mkdir -p "${env_script_dir}"
   cat > "${env_script_path}" <<EOF
-# This file is managed by sim/scripts/install/setup.sh.
+# This file is managed by sim/install/setup.sh.
 export AI_SHIP_ROBOT_WORKSPACE="${WORKSPACE_ROOT}"
 export AI_SHIP_ROBOT_OPT_ROOT="${AI_SHIP_ROBOT_OPT_ROOT}"
 export ROS_DISTRO="\${ROS_DISTRO:-${ROS_DISTRO}}"
@@ -164,7 +163,7 @@ if [ -f "/opt/ros/\${ROS_DISTRO}/setup.bash" ]; then
   fi
   source "/opt/ros/\${ROS_DISTRO}/setup.bash"
   _ai_ship_robot_source_overlay_if_current "\${AI_SHIP_ROBOT_OPT_ROOT}/ros_underlay/\${ROS_DISTRO}/third_party_ws/install/setup.bash"
-  _ai_ship_robot_source_overlay_if_current "\${AI_SHIP_ROBOT_WORKSPACE}/aitran/ros2_ws/install/setup.bash"
+  _ai_ship_robot_source_overlay_if_current "\${AI_SHIP_ROBOT_WORKSPACE}/ros2_ws/install/setup.bash"
   _ai_ship_robot_source_overlay_if_current "\${AI_SHIP_ROBOT_WORKSPACE}/sim/ros2_ws/install/setup.bash"
   if [ "\${_ai_ship_robot_had_nounset}" -eq 1 ]; then
     set -u

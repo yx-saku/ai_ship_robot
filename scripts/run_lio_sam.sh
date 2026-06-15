@@ -3,15 +3,14 @@ set -euo pipefail
 
 ROS_DISTRO="${ROS_DISTRO:-humble}"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-WORKSPACE_ROOT="$(cd "${SCRIPT_DIR}/../../.." && pwd)"
-AITRAN_ROOT="${WORKSPACE_ROOT}/aitran"
-SETUP_RUNTIME_SCRIPT="${AITRAN_ROOT}/scripts/install/setup.sh"
+WORKSPACE_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
+SETUP_RUNTIME_SCRIPT="${WORKSPACE_ROOT}/install/setup.sh"
 AI_SHIP_ROBOT_OPT_ROOT="${AI_SHIP_ROBOT_OPT_ROOT:-/opt/ai_ship_robot}"
 THIRD_PARTY_UNDERLAY_SETUP="${AI_SHIP_ROBOT_OPT_ROOT}/ros_underlay/${ROS_DISTRO}/third_party_ws/install/setup.bash"
 
 usage() {
   cat <<'EOF'
-Usage: bash aitran/scripts/app/run_lio_sam.sh [OPTIONS]
+Usage: bash scripts/run_lio_sam.sh [OPTIONS]
 
 Options:
   --build                     Build/install required workspace profile before launch.
@@ -100,7 +99,7 @@ source_overlay_if_current() {
     || grep -Fq "${WORKSPACE_ROOT}/third_party_ws" "${setup_file}" \
     || grep -Fq "${WORKSPACE_ROOT}/third_party_vendor" "${setup_file}"; then
     echo "Stale workspace setup detected: ${setup_file}" >&2
-    echo "Run bash aitran/scripts/install/install_third_party.sh && bash aitran/scripts/app/run_lio_sam.sh --build." >&2
+    echo "Run bash install/install_third_party.sh && bash scripts/run_lio_sam.sh --build." >&2
     return 1
   fi
 
@@ -129,7 +128,7 @@ source_workspace_environment() {
       fi
       return 1
     fi
-    if ! source_overlay_if_current "${AITRAN_ROOT}/ros2_ws/install/setup.bash"; then
+    if ! source_overlay_if_current "${WORKSPACE_ROOT}/ros2_ws/install/setup.bash"; then
       if [[ "${had_nounset}" -eq 1 ]]; then
         set -u
       fi
@@ -486,8 +485,8 @@ if [[ "${BUILD_WORKSPACE}" == "true" ]]; then
   bash "${SETUP_RUNTIME_SCRIPT}"
 fi
 
-if [[ ! -f "${AITRAN_ROOT}/ros2_ws/install/setup.bash" ]]; then
-  echo "Missing aitran/ros2_ws/install/setup.bash. Run bash aitran/scripts/install/setup.sh first." >&2
+if [[ ! -f "${WORKSPACE_ROOT}/ros2_ws/install/setup.bash" ]]; then
+  echo "Missing ros2_ws/install/setup.bash. Run bash install/setup.sh first." >&2
   exit 1
 fi
 

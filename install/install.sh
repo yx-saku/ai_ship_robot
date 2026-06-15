@@ -15,7 +15,7 @@ export DEBIAN_FRONTEND
 
 usage() {
   cat <<'EOF'
-Usage: bash aitran/scripts/install/install.sh
+Usage: bash install/install.sh
 
 本番環境向けの system 依存導入を実行します。
 - ROS 2 repository 設定

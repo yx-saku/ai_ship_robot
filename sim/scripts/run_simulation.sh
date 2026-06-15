@@ -3,10 +3,9 @@ set -euo pipefail
 
 ROS_DISTRO="${ROS_DISTRO:-humble}"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-WORKSPACE_ROOT="$(cd "${SCRIPT_DIR}/../../.." && pwd)"
-AITRAN_ROOT="${WORKSPACE_ROOT}/aitran"
+WORKSPACE_ROOT="$(cd "${SCRIPT_DIR}/../.." && pwd)"
 SIM_ROOT="${WORKSPACE_ROOT}/sim"
-SETUP_SIMULATION_SCRIPT="${SIM_ROOT}/scripts/install/setup.sh"
+SETUP_SIMULATION_SCRIPT="${SIM_ROOT}/install/setup.sh"
 LIDAR_PATTERN_DIR="${SIM_ROOT}/ros2_ws/src/ai_ship_robot_description/urdf/lidar/patterns"
 AI_SHIP_ROBOT_OPT_ROOT="${AI_SHIP_ROBOT_OPT_ROOT:-/opt/ai_ship_robot}"
 THIRD_PARTY_UNDERLAY_SETUP="${AI_SHIP_ROBOT_OPT_ROOT}/ros_underlay/${ROS_DISTRO}/third_party_ws/install/setup.bash"
@@ -40,7 +39,7 @@ print_available_lidar_patterns() {
 
 usage() {
   cat <<'EOF'
-Usage: bash sim/scripts/app/run_simulation.sh [OPTIONS]
+Usage: bash sim/scripts/run_simulation.sh [OPTIONS]
 
 Options:
   --build             Run one-time environment setup before launching simulation.
@@ -246,7 +245,7 @@ source_overlay_if_current() {
     || grep -Fq "${WORKSPACE_ROOT}/third_party_ws" "${setup_file}" \
     || grep -Fq "${WORKSPACE_ROOT}/third_party_vendor" "${setup_file}"; then
     echo "Stale workspace setup detected: ${setup_file}" >&2
-    echo "Run bash aitran/scripts/install/install_third_party.sh && bash sim/scripts/install/install_third_party.sh && bash sim/scripts/app/run_simulation.sh --build." >&2
+    echo "Run bash install/install_third_party.sh && bash sim/install/install_third_party.sh && bash sim/scripts/run_simulation.sh --build." >&2
     return 1
   fi
 
@@ -427,7 +426,7 @@ wait_for_simulation_ready() {
 start_scripted_drive() {
   local start_delay="${1:-${DRIVE_START_DELAY}}"
   local drive_cmd=(
-    bash "${SIM_ROOT}/scripts/app/drive_robot.sh"
+    bash "${SIM_ROOT}/scripts/drive_robot.sh"
     --scenario "${DRIVE_SCENARIO}"
     --start-delay "${start_delay}"
   )
@@ -799,12 +798,12 @@ esac
 source_workspace_environment false
 
 if [[ "${BUILD_WORKSPACE}" == "true" ]]; then
-  # simulation単体起動ではaitran/ros2_wsをbuildせず、simulation workspaceだけを更新する。
+  # simulation単体起動ではros2_wsをbuildせず、simulation workspaceだけを更新する。
   bash "${SETUP_SIMULATION_SCRIPT}"
 fi
 
 if [[ ! -f "${SIM_ROOT}/ros2_ws/install/setup.bash" ]]; then
-  echo "Missing sim/ros2_ws/install/setup.bash. Run bash sim/scripts/install/setup.sh first." >&2
+  echo "Missing sim/ros2_ws/install/setup.bash. Run bash sim/install/setup.sh first." >&2
   exit 1
 fi
 

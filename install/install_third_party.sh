@@ -3,7 +3,7 @@ set -euo pipefail
 
 ROS_DISTRO="${ROS_DISTRO:-humble}"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-AITRAN_ROOT="$(cd "${SCRIPT_DIR}/../.." && pwd)"
+WORKSPACE_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
 AI_SHIP_ROBOT_OPT_ROOT="${AI_SHIP_ROBOT_OPT_ROOT:-/opt/ai_ship_robot}"
 THIRD_PARTY_WS="${AI_SHIP_ROBOT_OPT_ROOT}/ros_underlay/${ROS_DISTRO}/third_party_ws"
 THIRD_PARTY_SRC_DIR="${THIRD_PARTY_WS}/src"
@@ -13,7 +13,7 @@ THIRD_PARTY_LOG_DIR="${THIRD_PARTY_WS}/log"
 LIVOX_DRIVER_DIR="${THIRD_PARTY_SRC_DIR}/livox_ros_driver2"
 GTSAM_DIR="${THIRD_PARTY_SRC_DIR}/gtsam"
 LIO_SAM_DIR="${THIRD_PARTY_SRC_DIR}/lio_sam_mid360_ros2"
-LIO_SAM_OVERRIDE_DIR="${AITRAN_ROOT}/third_party_overrides/lio_sam_mid360_ros2"
+LIO_SAM_OVERRIDE_DIR="${WORKSPACE_ROOT}/install/third_party_overrides/lio_sam_mid360_ros2"
 AUTO_RCCAR_INDOOR_DIR="${THIRD_PARTY_SRC_DIR}/autoRCcar_indoor"
 AUTO_RCCAR_INTERFACES_DIR="${AUTO_RCCAR_INDOOR_DIR}/ros2/src/autorccar_interfaces"
 LIVOX_SDK_ROOT="${AI_SHIP_ROBOT_OPT_ROOT}/vendor/livox_sdk2"
@@ -30,7 +30,7 @@ ROSDEP_UPDATED=0
 
 usage() {
   cat <<'EOF'
-Usage: bash aitran/scripts/install/install_third_party.sh
+Usage: bash install/install_third_party.sh
 
 実機・simulation共通の third_party を system 側へ導入します。
 - Livox-SDK2 を /opt/ai_ship_robot/vendor/livox_sdk2 に導入
@@ -56,7 +56,7 @@ fi
 
 require_ros2() {
   if [[ ! -f "/opt/ros/${ROS_DISTRO}/setup.bash" ]]; then
-    echo "Missing /opt/ros/${ROS_DISTRO}/setup.bash. Run bash aitran/scripts/install/install.sh first." >&2
+    echo "Missing /opt/ros/${ROS_DISTRO}/setup.bash. Run bash install/install.sh first." >&2
     exit 1
   fi
 }

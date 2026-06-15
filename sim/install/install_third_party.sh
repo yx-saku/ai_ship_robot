@@ -15,10 +15,10 @@ ROSDEP_UPDATED=0
 
 usage() {
   cat <<'EOF'
-Usage: bash sim/scripts/install/install_third_party.sh
+Usage: bash sim/install/install_third_party.sh
 
 simulation専用の third_party を system 側の ROS underlay へ追加導入します。
-- 事前に bash aitran/scripts/install/install_third_party.sh を実行してください。
+- 事前に bash install/install_third_party.sh を実行してください。
 - ros2_livox_simulation を /opt/ai_ship_robot/ros_underlay/${ROS_DISTRO}/third_party_ws へ追加します。
 EOF
 }
@@ -40,7 +40,7 @@ fi
 
 require_ros2() {
   if [[ ! -f "/opt/ros/${ROS_DISTRO}/setup.bash" ]]; then
-    echo "Missing /opt/ros/${ROS_DISTRO}/setup.bash. Run bash aitran/scripts/install/install.sh first." >&2
+    echo "Missing /opt/ros/${ROS_DISTRO}/setup.bash. Run bash install/install.sh first." >&2
     exit 1
   fi
 }
@@ -242,7 +242,7 @@ prepare_livox_simulation_build_environment() {
 source_common_underlay() {
   if [[ ! -f "${THIRD_PARTY_INSTALL_DIR}/setup.bash" ]]; then
     echo "Missing common third-party underlay: ${THIRD_PARTY_INSTALL_DIR}/setup.bash" >&2
-    echo "Run bash aitran/scripts/install/install_third_party.sh first." >&2
+    echo "Run bash install/install_third_party.sh first." >&2
     return 1
   fi
 
@@ -252,7 +252,7 @@ source_common_underlay() {
   set -u
   if ! ros2 pkg prefix livox_ros_driver2 >/dev/null 2>&1; then
     echo "Missing livox_ros_driver2 in common third-party underlay." >&2
-    echo "Run bash aitran/scripts/install/install_third_party.sh first." >&2
+    echo "Run bash install/install_third_party.sh first." >&2
     return 1
   fi
 }

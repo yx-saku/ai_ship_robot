@@ -15,14 +15,14 @@ export DEBIAN_FRONTEND
 
 usage() {
   cat <<'EOF'
-Usage: bash sim/scripts/install/install.sh
+Usage: bash sim/install/install.sh
 
 simulation向けの system 依存導入を実行します。
 - Gazebo / RViz / Livox simulation 用 apt 依存導入
 - ROS 2 repository 設定
 - rosdep 初期化
 
- 事前に `bash aitran/scripts/install/install.sh` を実行してください。
+ 事前に `bash install/install.sh` を実行してください。
 EOF
 }
 

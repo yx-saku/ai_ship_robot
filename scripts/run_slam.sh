@@ -3,11 +3,10 @@ set -euo pipefail
 
 ROS_DISTRO="${ROS_DISTRO:-humble}"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-WORKSPACE_ROOT="$(cd "${SCRIPT_DIR}/../../.." && pwd)"
-AITRAN_ROOT="${WORKSPACE_ROOT}/aitran"
+WORKSPACE_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
 SIM_ROOT="${WORKSPACE_ROOT}/sim"
-SETUP_RUNTIME_SCRIPT="${AITRAN_ROOT}/scripts/install/setup.sh"
-SETUP_SIMULATION_SCRIPT="${SIM_ROOT}/scripts/install/setup.sh"
+SETUP_RUNTIME_SCRIPT="${WORKSPACE_ROOT}/install/setup.sh"
+SETUP_SIMULATION_SCRIPT="${SIM_ROOT}/install/setup.sh"
 LIDAR_PATTERN_DIR="${SIM_ROOT}/ros2_ws/src/ai_ship_robot_description/urdf/lidar/patterns"
 AI_SHIP_ROBOT_OPT_ROOT="${AI_SHIP_ROBOT_OPT_ROOT:-/opt/ai_ship_robot}"
 THIRD_PARTY_UNDERLAY_SETUP="${AI_SHIP_ROBOT_OPT_ROOT}/ros_underlay/${ROS_DISTRO}/third_party_ws/install/setup.bash"
@@ -26,7 +25,7 @@ ROSBAG_STOP_GRACE_SECONDS="60"
 
 usage() {
   cat <<'EOF'
-Usage: bash aitran/scripts/app/run_slam.sh [OPTIONS]
+Usage: bash scripts/run_slam.sh [OPTIONS]
 
 Options:
   --sim              Launch Gazebo simulation and LIO-SAM together.
@@ -52,9 +51,9 @@ Options:
   -h, --help         Show this help.
 
 Examples:
-  bash aitran/scripts/app/run_slam.sh --no-rviz
-  bash aitran/scripts/app/run_slam.sh --sim --lite --no-gui
-  bash aitran/scripts/app/run_slam.sh --points /livox/lidar --raw-imu /livox/imu --imu /livox/imu_oriented
+  bash scripts/run_slam.sh --no-rviz
+  bash scripts/run_slam.sh --sim --lite --no-gui
+  bash scripts/run_slam.sh --points /livox/lidar --raw-imu /livox/imu --imu /livox/imu_oriented
 EOF
 }
 
@@ -123,7 +122,7 @@ source_overlay_if_current() {
     || grep -Fq "${WORKSPACE_ROOT}/third_party_ws" "${setup_file}" \
     || grep -Fq "${WORKSPACE_ROOT}/third_party_vendor" "${setup_file}"; then
     echo "Stale workspace setup detected: ${setup_file}" >&2
-    echo "Run bash aitran/scripts/install/install_third_party.sh && bash aitran/scripts/app/run_slam.sh --sim --build." >&2
+    echo "Run bash install/install_third_party.sh && bash scripts/run_slam.sh --sim --build." >&2
     return 1
   fi
 
@@ -147,7 +146,7 @@ source_sim_slam_environment() {
   source "/opt/ros/${ROS_DISTRO}/setup.bash"
   if [[ "${include_overlays}" == "true" ]]; then
     if ! source_overlay_if_current "${THIRD_PARTY_UNDERLAY_SETUP}" \
-      || ! source_overlay_if_current "${AITRAN_ROOT}/ros2_ws/install/setup.bash" \
+      || ! source_overlay_if_current "${WORKSPACE_ROOT}/ros2_ws/install/setup.bash" \
       || ! source_overlay_if_current "${SIM_ROOT}/ros2_ws/install/setup.bash"; then
       if [[ "${had_nounset}" -eq 1 ]]; then
         set -u
@@ -869,13 +868,13 @@ run_sim_lio_sam() {
     bash "${SETUP_SIMULATION_SCRIPT}"
   fi
 
-  if [[ ! -f "${AITRAN_ROOT}/ros2_ws/install/setup.bash" ]]; then
-    echo "Missing aitran/ros2_ws/install/setup.bash. Run bash aitran/scripts/install/setup.sh first." >&2
+  if [[ ! -f "${WORKSPACE_ROOT}/ros2_ws/install/setup.bash" ]]; then
+    echo "Missing ros2_ws/install/setup.bash. Run bash install/setup.sh first." >&2
     exit 1
   fi
 
   if [[ ! -f "${SIM_ROOT}/ros2_ws/install/setup.bash" ]]; then
-    echo "Missing sim/ros2_ws/install/setup.bash. Run bash sim/scripts/install/setup.sh first." >&2
+    echo "Missing sim/ros2_ws/install/setup.bash. Run bash sim/install/setup.sh first." >&2
     exit 1
   fi
 

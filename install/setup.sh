@@ -3,9 +3,8 @@ set -euo pipefail
 
 ROS_DISTRO="${ROS_DISTRO:-humble}"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-WORKSPACE_ROOT="$(cd "${SCRIPT_DIR}/../../.." && pwd)"
-AITRAN_ROOT="${WORKSPACE_ROOT}/aitran"
-ROS_WS="${AITRAN_ROOT}/ros2_ws"
+WORKSPACE_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
+ROS_WS="${WORKSPACE_ROOT}/ros2_ws"
 ROS_WS_SRC_DIR="${ROS_WS}/src"
 AI_SHIP_ROBOT_OPT_ROOT="${AI_SHIP_ROBOT_OPT_ROOT:-/opt/ai_ship_robot}"
 THIRD_PARTY_WS="${AI_SHIP_ROBOT_OPT_ROOT}/ros_underlay/${ROS_DISTRO}/third_party_ws"
@@ -15,14 +14,14 @@ ROSDEP_UPDATED=0
 
 usage() {
   cat <<'EOF'
-Usage: bash aitran/scripts/install/setup.sh
+Usage: bash install/setup.sh
 
 本番向け workspace セットアップを実行します。
 - /opt/ai_ship_robot の third_party underlay 読み込み
-- rosdep / aitran/ros2_ws build
+- rosdep / ros2_ws build
 - shell 自動読み込み設定更新
 
-事前に `bash aitran/scripts/install/install.sh` と `bash aitran/scripts/install/install_third_party.sh` を実行してください。
+事前に `bash install/install.sh` と `bash install/install_third_party.sh` を実行してください。
 EOF
 }
 
@@ -43,7 +42,7 @@ fi
 
 require_ros2() {
   if [[ ! -f "/opt/ros/${ROS_DISTRO}/setup.bash" ]]; then
-    echo "Missing /opt/ros/${ROS_DISTRO}/setup.bash. Run bash aitran/scripts/install/install.sh first." >&2
+    echo "Missing /opt/ros/${ROS_DISTRO}/setup.bash. Run bash install/install.sh first." >&2
     exit 1
   fi
 }
@@ -51,7 +50,7 @@ require_ros2() {
 require_third_party_underlay() {
   if [[ ! -f "${THIRD_PARTY_UNDERLAY_SETUP}" ]]; then
     echo "Missing third-party underlay: ${THIRD_PARTY_UNDERLAY_SETUP}" >&2
-    echo "Run bash aitran/scripts/install/install_third_party.sh first." >&2
+    echo "Run bash install/install_third_party.sh first." >&2
     exit 1
   fi
 }
@@ -110,7 +109,7 @@ write_shell_environment_setup() {
   # shell側ではsystem underlayとruntime workspaceを標準overlayとして読み込み、手動sourceの手間を減らす。
   mkdir -p "${env_script_dir}"
   cat > "${env_script_path}" <<EOF
-# This file is managed by aitran/scripts/install/setup.sh.
+# This file is managed by install/setup.sh.
 export AI_SHIP_ROBOT_WORKSPACE="${WORKSPACE_ROOT}"
 export AI_SHIP_ROBOT_OPT_ROOT="${AI_SHIP_ROBOT_OPT_ROOT}"
 export ROS_DISTRO="\${ROS_DISTRO:-${ROS_DISTRO}}"
@@ -135,7 +134,7 @@ if [ -f "/opt/ros/\${ROS_DISTRO}/setup.bash" ]; then
   fi
   source "/opt/ros/\${ROS_DISTRO}/setup.bash"
   _ai_ship_robot_source_overlay_if_current "\${AI_SHIP_ROBOT_OPT_ROOT}/ros_underlay/\${ROS_DISTRO}/third_party_ws/install/setup.bash"
-  _ai_ship_robot_source_overlay_if_current "\${AI_SHIP_ROBOT_WORKSPACE}/aitran/ros2_ws/install/setup.bash"
+  _ai_ship_robot_source_overlay_if_current "\${AI_SHIP_ROBOT_WORKSPACE}/ros2_ws/install/setup.bash"
   if [ -f "\${AI_SHIP_ROBOT_WORKSPACE}/sim/ros2_ws/install/setup.bash" ]; then
     _ai_ship_robot_source_overlay_if_current "\${AI_SHIP_ROBOT_WORKSPACE}/sim/ros2_ws/install/setup.bash"
   fi

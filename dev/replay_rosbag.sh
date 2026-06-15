@@ -3,12 +3,11 @@ set -euo pipefail
 
 ROS_DISTRO="${ROS_DISTRO:-humble}"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-WORKSPACE_ROOT="$(cd "${SCRIPT_DIR}/../.." && pwd)"
-AITRAN_ROOT="${WORKSPACE_ROOT}/aitran"
+WORKSPACE_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
 SIM_ROOT="${WORKSPACE_ROOT}/sim"
 AI_SHIP_ROBOT_OPT_ROOT="${AI_SHIP_ROBOT_OPT_ROOT:-/opt/ai_ship_robot}"
 THIRD_PARTY_UNDERLAY_SETUP="${AI_SHIP_ROBOT_OPT_ROOT}/ros_underlay/${ROS_DISTRO}/third_party_ws/install/setup.bash"
-SLAM_RVIZ_CONFIG="${AITRAN_ROOT}/ros2_ws/src/ai_ship_robot_slam/rviz/lio_sam.rviz"
+SLAM_RVIZ_CONFIG="${WORKSPACE_ROOT}/ros2_ws/src/ai_ship_robot_slam/rviz/lio_sam.rviz"
 SIMULATION_RVIZ_CONFIG="${SIM_ROOT}/ros2_ws/src/ai_ship_robot_gazebo/config/mid360_points.rviz"
 ROSBAG_PID=""
 RVIZ_PID=""
@@ -16,7 +15,7 @@ ROSBAG_ROOT="${WORKSPACE_ROOT}/rosbag2"
 
 usage() {
   cat <<'EOF'
-Usage: bash scripts/dev/replay_rosbag.sh MODE [BAG_PATH] [OPTIONS]
+Usage: bash dev/replay_rosbag.sh MODE [BAG_PATH] [OPTIONS]
 
 Arguments:
   MODE                 Required replay mode: sim or slam.
@@ -117,7 +116,7 @@ source_overlay_if_current() {
     || grep -Fq "${WORKSPACE_ROOT}/third_party_ws" "${setup_file}" \
     || grep -Fq "${WORKSPACE_ROOT}/third_party_vendor" "${setup_file}"; then
     echo "Stale workspace setup detected: ${setup_file}" >&2
-    echo "Run bash aitran/scripts/install/install_third_party.sh && bash aitran/scripts/install/setup.sh && bash sim/scripts/install/setup.sh." >&2
+    echo "Run bash install/install_third_party.sh && bash install/setup.sh && bash sim/install/setup.sh." >&2
     return 1
   fi
 
@@ -139,7 +138,7 @@ source_workspace_environment() {
   fi
   source "/opt/ros/${ROS_DISTRO}/setup.bash"
   if ! source_overlay_if_current "${THIRD_PARTY_UNDERLAY_SETUP}" \
-    || ! source_overlay_if_current "${AITRAN_ROOT}/ros2_ws/install/setup.bash" \
+    || ! source_overlay_if_current "${WORKSPACE_ROOT}/ros2_ws/install/setup.bash" \
     || ! source_overlay_if_current "${SIM_ROOT}/ros2_ws/install/setup.bash"; then
     if [[ "${had_nounset}" -eq 1 ]]; then
       set -u
@@ -232,7 +231,7 @@ while [[ $# -gt 0 ]]; do
       ;;
     *)
       echo "Unexpected positional argument: $1" >&2
-      echo "Use: bash scripts/dev/replay_rosbag.sh MODE [BAG_PATH] [OPTIONS]" >&2
+      echo "Use: bash dev/replay_rosbag.sh MODE [BAG_PATH] [OPTIONS]" >&2
       exit 2
       ;;
   esac

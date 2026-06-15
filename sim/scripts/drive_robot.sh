@@ -3,17 +3,16 @@ set -euo pipefail
 
 ROS_DISTRO="${ROS_DISTRO:-humble}"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-WORKSPACE_ROOT="$(cd "${SCRIPT_DIR}/../../.." && pwd)"
-AITRAN_ROOT="${WORKSPACE_ROOT}/aitran"
+WORKSPACE_ROOT="$(cd "${SCRIPT_DIR}/../.." && pwd)"
 SIM_ROOT="${WORKSPACE_ROOT}/sim"
-SETUP_RUNTIME_SCRIPT="${AITRAN_ROOT}/scripts/install/setup.sh"
-SETUP_SIMULATION_SCRIPT="${SIM_ROOT}/scripts/install/setup.sh"
+SETUP_RUNTIME_SCRIPT="${WORKSPACE_ROOT}/install/setup.sh"
+SETUP_SIMULATION_SCRIPT="${SIM_ROOT}/install/setup.sh"
 AI_SHIP_ROBOT_OPT_ROOT="${AI_SHIP_ROBOT_OPT_ROOT:-/opt/ai_ship_robot}"
 THIRD_PARTY_UNDERLAY_SETUP="${AI_SHIP_ROBOT_OPT_ROOT}/ros_underlay/${ROS_DISTRO}/third_party_ws/install/setup.bash"
 
 usage() {
   cat <<'EOF'
-Usage: bash sim/scripts/app/drive_robot.sh [OPTIONS]
+Usage: bash sim/scripts/drive_robot.sh [OPTIONS]
 
 Options:
   --build                  Run one-time environment setup before starting keyboard drive.
@@ -36,7 +35,7 @@ Keys:
   space/x/k: stop all, Q/Esc: quit
 
 This script only publishes cmd_vel. Start Gazebo/LiDAR separately with:
-  bash sim/scripts/app/run_simulation.sh
+  bash sim/scripts/run_simulation.sh
 EOF
 }
 
@@ -87,7 +86,7 @@ source_workspace_environment() {
   source "/opt/ros/${ROS_DISTRO}/setup.bash"
   if [[ "${include_overlays}" == "true" ]]; then
     if ! source_overlay_if_current "${THIRD_PARTY_UNDERLAY_SETUP}" \
-      || ! source_overlay_if_current "${AITRAN_ROOT}/ros2_ws/install/setup.bash" \
+      || ! source_overlay_if_current "${WORKSPACE_ROOT}/ros2_ws/install/setup.bash" \
       || ! source_overlay_if_current "${SIM_ROOT}/ros2_ws/install/setup.bash"; then
       if [[ "${had_nounset}" -eq 1 ]]; then
         set -u
@@ -113,7 +112,7 @@ source_overlay_if_current() {
     || grep -Fq "${WORKSPACE_ROOT}/third_party_ws" "${setup_file}" \
     || grep -Fq "${WORKSPACE_ROOT}/third_party_vendor" "${setup_file}"; then
     echo "Stale workspace setup detected: ${setup_file}" >&2
-    echo "Run bash aitran/scripts/install/install_third_party.sh && bash sim/scripts/install/install_third_party.sh && bash sim/scripts/app/drive_robot.sh --build." >&2
+    echo "Run bash install/install_third_party.sh && bash sim/install/install_third_party.sh && bash sim/scripts/drive_robot.sh --build." >&2
     return 1
   fi
 
@@ -219,7 +218,7 @@ if [[ "${BUILD_WORKSPACE}" == "true" ]]; then
 fi
 
 if [[ ! -f "${SIM_ROOT}/ros2_ws/install/setup.bash" ]]; then
-  echo "Missing sim/ros2_ws/install/setup.bash. Run bash aitran/scripts/install/setup.sh && bash sim/scripts/install/setup.sh first." >&2
+  echo "Missing sim/ros2_ws/install/setup.bash. Run bash install/setup.sh && bash sim/install/setup.sh first." >&2
   exit 1
 fi
 
@@ -234,7 +233,7 @@ fi
 
 if [[ ! -x "${DRIVE_EXECUTABLE}" ]]; then
   echo "Missing drive executable: ${DRIVE_EXECUTABLE}" >&2
-  echo "Run bash sim/scripts/app/drive_robot.sh --build or bash aitran/scripts/install/setup.sh && bash sim/scripts/install/setup.sh first." >&2
+  echo "Run bash sim/scripts/drive_robot.sh --build or bash install/setup.sh && bash sim/install/setup.sh first." >&2
   exit 1
 fi
 

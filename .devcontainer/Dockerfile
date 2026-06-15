@@ -59,32 +59,32 @@ RUN if ! getent group ${USER_GID} >/dev/null; then groupadd --gid ${USER_GID} ${
     && chmod 0440 /etc/sudoers.d/${USERNAME}
 
 # install script と固定third_party overrideだけを image build に含め、workspace build は container 起動後へ分離する。
-RUN mkdir -p /workspaces/ai_ship_robot/aitran/scripts/install \
-    /workspaces/ai_ship_robot/aitran/third_party_overrides \
-    /workspaces/ai_ship_robot/sim/scripts/install
-COPY aitran/scripts/install/ /workspaces/ai_ship_robot/aitran/scripts/install/
-COPY aitran/third_party_overrides/ /workspaces/ai_ship_robot/aitran/third_party_overrides/
-COPY sim/scripts/install/ /workspaces/ai_ship_robot/sim/scripts/install/
+RUN mkdir -p /workspaces/ai_ship_robot/install \
+    /workspaces/ai_ship_robot/install/third_party_overrides \
+    /workspaces/ai_ship_robot/sim/install
+COPY install/ /workspaces/ai_ship_robot/install/
+COPY install/third_party_overrides/ /workspaces/ai_ship_robot/install/third_party_overrides/
+COPY sim/install/ /workspaces/ai_ship_robot/sim/install/
 
 # 本番向けの system 依存だけを独立layerにし、workspace build は mount 後の setup へ回す。
 RUN --mount=type=cache,id=ai-ship-robot-apt-cache,target=/var/cache/apt,sharing=locked \
     --mount=type=cache,id=ai-ship-robot-apt-lists,target=/var/lib/apt/lists,sharing=locked \
-    bash /workspaces/ai_ship_robot/aitran/scripts/install/install.sh
+    bash /workspaces/ai_ship_robot/install/install.sh
 
 # 実機とsimulationで共通するthird_partyは、workspace mountに隠れない /opt 配下のunderlayとして導入する。
 RUN --mount=type=cache,id=ai-ship-robot-apt-cache,target=/var/cache/apt,sharing=locked \
     --mount=type=cache,id=ai-ship-robot-apt-lists,target=/var/lib/apt/lists,sharing=locked \
-    bash /workspaces/ai_ship_robot/aitran/scripts/install/install_third_party.sh
+    bash /workspaces/ai_ship_robot/install/install_third_party.sh
 
 # シミュレーション追加分も system 依存だけを別layerに分け、Gazebo系依存の更新を再利用しやすくする。
 RUN --mount=type=cache,id=ai-ship-robot-apt-cache,target=/var/cache/apt,sharing=locked \
     --mount=type=cache,id=ai-ship-robot-apt-lists,target=/var/lib/apt/lists,sharing=locked \
-    bash /workspaces/ai_ship_robot/sim/scripts/install/install.sh
+    bash /workspaces/ai_ship_robot/sim/install/install.sh
 
 # Gazebo専用third_partyだけを共通underlayへ追加し、simulation workspace本体のbuildとは分離する。
 RUN --mount=type=cache,id=ai-ship-robot-apt-cache,target=/var/cache/apt,sharing=locked \
     --mount=type=cache,id=ai-ship-robot-apt-lists,target=/var/lib/apt/lists,sharing=locked \
-    bash /workspaces/ai_ship_robot/sim/scripts/install/install_third_party.sh \
+    bash /workspaces/ai_ship_robot/sim/install/install_third_party.sh \
     && mkdir -p /home/${USERNAME}/.ros/log \
     && chown -R ${USER_UID}:${USER_GID} /home/${USERNAME}/.ros
 
