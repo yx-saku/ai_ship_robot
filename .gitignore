@@ -20,3 +20,4 @@ __pycache__/
 .kilo
 
 rosbag2/
+cloud_map/

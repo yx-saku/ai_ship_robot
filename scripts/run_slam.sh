@@ -43,6 +43,7 @@ Options:
                       Seconds to keep SLAM running after playback finishes. Default: 30.
   --no-auto-exit     Keep SLAM and recording running after rosbag playback finishes.
   --rviz-config PATH Use a workspace RViz config file for LIO-SAM.
+  --map              Enable PCD map saver service (/save_pcd_map).
   --deskew-mode MODE Set LIO-SAM deskew mode: imu_angular | odom_interpolation | off.
   --force-zero-offset-time
                      Force simulated Livox point offset_time to zero. Default for --sim.
@@ -786,6 +787,9 @@ run_sim_lio_sam() {
         shift
         launch_args+=("rviz_config:=$(require_value --rviz-config "${1:-}")")
         ;;
+      --map)
+        launch_args+=("use_map_saver:=true")
+        ;;
       --lite)
         lite_mode=true
         ;;
@@ -879,6 +883,7 @@ run_sim_lio_sam() {
   fi
 
   source_sim_slam_environment
+  export AI_SHIP_ROBOT_WORKSPACE_ROOT="${WORKSPACE_ROOT}"
   if [[ "${record_bag}" == "true" ]]; then
     if [[ -z "${bag_output}" ]]; then
       bag_output="$(default_bag_output)"
@@ -1033,6 +1038,7 @@ if [[ "${BAG_PLAY_REQUESTED}" == "true" ]]; then
     fi
   done
   source_sim_slam_environment
+  export AI_SHIP_ROBOT_WORKSPACE_ROOT="${WORKSPACE_ROOT}"
   if [[ -z "${BAG_PLAY}" ]]; then
     BAG_PLAY="$(latest_bag_for_prefix sim)"
     echo "Using latest simulation rosbag: ${BAG_PLAY}" >&2
@@ -1050,6 +1056,7 @@ fi
 
 if [[ "${RECORD_BAG}" == "true" ]]; then
   source_sim_slam_environment
+  export AI_SHIP_ROBOT_WORKSPACE_ROOT="${WORKSPACE_ROOT}"
   if [[ -z "${BAG_OUTPUT}" ]]; then
     BAG_OUTPUT="$(default_bag_output)"
   fi

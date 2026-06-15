@@ -1,4 +1,5 @@
 import math
+import os
 
 from launch import LaunchDescription
 from launch.actions import DeclareLaunchArgument
@@ -53,6 +54,7 @@ def generate_launch_description():
     use_rviz = LaunchConfiguration("use_rviz")
     use_fusion = LaunchConfiguration("use_fusion")
     use_adapter = LaunchConfiguration("use_adapter")
+    use_map_saver = LaunchConfiguration("use_map_saver")
     use_imu_orientation_initializer = LaunchConfiguration("use_imu_orientation_initializer")
     params_file = LaunchConfiguration("params_file")
     fusion_config = LaunchConfiguration("fusion_config")
@@ -86,6 +88,7 @@ def generate_launch_description():
     use_imu_rotation_initial_guess = LaunchConfiguration("use_imu_rotation_initial_guess")
     deskew_mode = LaunchConfiguration("deskew_mode")
     max_point_offset_time_sec = LaunchConfiguration("max_point_offset_time_sec")
+    cloud_map_directory = LaunchConfiguration("cloud_map_directory")
 
     # 複数LiDAR fusionは任意機能にし、既定では実機Livox driver topicをLIO-SAMへ直接渡す。
     fusion = Node(
@@ -282,12 +285,30 @@ def generate_launch_description():
         parameters=[{"use_sim_time": use_sim_time}],
     )
 
+    # 登録済み点群をmap frameへ変換して蓄積し、TriggerサービスでPCDとして保存する。
+    pcd_map_saver = Node(
+        package="ai_ship_robot_slam",
+        executable="pcd_map_saver_node",
+        name="pcd_map_saver_node",
+        output="screen",
+        condition=IfCondition(use_map_saver),
+        parameters=[
+            {
+                "use_sim_time": use_sim_time,
+                "cloud_topic": "/lio_sam/mapping/cloud_registered",
+                "target_frame": map_frame,
+                "output_directory": cloud_map_directory,
+            }
+        ],
+    )
+
     return LaunchDescription(
         [
             DeclareLaunchArgument("use_sim_time", default_value="false"),
             DeclareLaunchArgument("use_rviz", default_value="true"),
             DeclareLaunchArgument("use_fusion", default_value="false"),
             DeclareLaunchArgument("use_adapter", default_value="false"),
+            DeclareLaunchArgument("use_map_saver", default_value="false"),
             DeclareLaunchArgument("use_imu_orientation_initializer", default_value="false"),
             DeclareLaunchArgument("input_points_topics", default_value="['/livox/lidar']"),
             DeclareLaunchArgument("reference_points_topic", default_value="/livox/lidar"),
@@ -319,6 +340,12 @@ def generate_launch_description():
             DeclareLaunchArgument("deskew_mode", default_value="odom_interpolation"),
             DeclareLaunchArgument("max_point_offset_time_sec", default_value="0.2"),
             DeclareLaunchArgument(
+                "cloud_map_directory",
+                default_value=os.path.join(
+                    os.environ.get("AI_SHIP_ROBOT_WORKSPACE_ROOT", os.getcwd()), "cloud_map"
+                ),
+            ),
+            DeclareLaunchArgument(
                 "fusion_config",
                 default_value=PathJoinSubstitution(
                     [FindPackageShare("ai_ship_robot_slam"), "config", "multi_lidar_fusion.yaml"]
@@ -345,6 +372,7 @@ def generate_launch_description():
             image_projection,
             feature_extraction,
             map_optimization,
+            pcd_map_saver,
             rviz,
         ]
     )

@@ -13,6 +13,7 @@ find_package(tf2_ros REQUIRED)
 find_package(tf2_sensor_msgs REQUIRED)
 find_package(rclcpp REQUIRED)
 find_package(sensor_msgs REQUIRED)
+find_package(std_srvs REQUIRED)
 
 add_executable(mid360_lio_sam_pointcloud_adapter_node src/mid360_lio_sam_pointcloud_adapter_node.cpp)
 target_compile_features(mid360_lio_sam_pointcloud_adapter_node PUBLIC cxx_std_17)
@@ -44,10 +45,23 @@ ament_target_dependencies(
   tf2
 )
 
+add_executable(pcd_map_saver_node src/pcd_map_saver_node.cpp)
+target_compile_features(pcd_map_saver_node PUBLIC cxx_std_17)
+ament_target_dependencies(
+  pcd_map_saver_node
+  rclcpp
+  sensor_msgs
+  std_srvs
+  tf2
+  tf2_ros
+  tf2_sensor_msgs
+)
+
 install(
   TARGETS
     mid360_lio_sam_pointcloud_adapter_node
     multi_lidar_pointcloud_fusion_node
+    pcd_map_saver_node
     six_axis_imu_initial_orientation_node
   DESTINATION lib/${PROJECT_NAME}
 )

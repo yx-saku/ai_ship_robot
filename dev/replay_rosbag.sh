@@ -11,6 +11,7 @@ SLAM_RVIZ_CONFIG="${WORKSPACE_ROOT}/ros2_ws/src/ai_ship_robot_slam/rviz/lio_sam.
 SIMULATION_RVIZ_CONFIG="${SIM_ROOT}/ros2_ws/src/ai_ship_robot_gazebo/config/mid360_points.rviz"
 ROSBAG_PID=""
 RVIZ_PID=""
+MAP_SAVER_PID=""
 ROSBAG_ROOT="${WORKSPACE_ROOT}/rosbag2"
 
 usage() {
@@ -26,6 +27,7 @@ Options:
   --rate VALUE         Set rosbag playback rate. Default: 1.0
   --start-offset SEC   Start playback after the given offset. Default: 0
   --loop               Loop rosbag playback.
+  --map                Save accumulated map by calling /save_pcd_map after replay.
   -h, --help           Show this help.
 EOF
 }
@@ -160,6 +162,10 @@ cleanup_background_processes() {
     kill -INT "${RVIZ_PID}" 2>/dev/null || kill -TERM "${RVIZ_PID}" 2>/dev/null || true
     wait "${RVIZ_PID}" 2>/dev/null || true
   fi
+  if [[ -n "${MAP_SAVER_PID}" ]] && kill -0 "${MAP_SAVER_PID}" 2>/dev/null; then
+    kill -INT "${MAP_SAVER_PID}" 2>/dev/null || kill -TERM "${MAP_SAVER_PID}" 2>/dev/null || true
+    wait "${MAP_SAVER_PID}" 2>/dev/null || true
+  fi
 }
 
 trap cleanup_background_processes EXIT
@@ -170,6 +176,7 @@ RVIZ_CONFIG=""
 PLAY_RATE="1.0"
 START_OFFSET="0"
 LOOP_PLAYBACK=false
+SAVE_MAP=false
 
 if [[ $# -gt 0 && "$1" != "-h" && "$1" != "--help" ]]; then
   if [[ "$1" == "--mode" || "$1" == --mode=* ]]; then
@@ -224,6 +231,9 @@ while [[ $# -gt 0 ]]; do
     --loop)
       LOOP_PLAYBACK=true
       ;;
+    --map)
+      SAVE_MAP=true
+      ;;
     *:=*)
       echo "Do not use ROS 2 launch argument syntax here: $1" >&2
       echo "Use shell options instead. Run with --help to see available options." >&2
@@ -263,6 +273,7 @@ if [[ ! -f "${RVIZ_CONFIG}" ]]; then
 fi
 
 source_workspace_environment
+export AI_SHIP_ROBOT_WORKSPACE_ROOT="${WORKSPACE_ROOT}"
 
 PLAY_CMD=(ros2 bag play "${BAG_PATH}" --clock --rate "${PLAY_RATE}" --start-offset "${START_OFFSET}")
 if [[ "${LOOP_PLAYBACK}" == "true" ]]; then
@@ -272,6 +283,11 @@ fi
 echo "Replay mode: ${REPLAY_MODE}" >&2
 echo "RViz config: ${RVIZ_CONFIG}" >&2
 echo "Rosbag replay: ${BAG_PATH}" >&2
+if [[ "${SAVE_MAP}" == "true" ]]; then
+  ros2 run ai_ship_robot_slam pcd_map_saver_node --ros-args -p use_sim_time:=true &
+  MAP_SAVER_PID=$!
+  sleep 1
+fi
 rviz2 -d "${RVIZ_CONFIG}" &
 RVIZ_PID=$!
 sleep 2
@@ -285,6 +301,10 @@ set -e
 
 if [[ "${play_status}" -ne 0 ]]; then
   exit "${play_status}"
+fi
+
+if [[ "${SAVE_MAP}" == "true" ]]; then
+  ros2 service call /save_pcd_map std_srvs/srv/Trigger '{}'
 fi
 
 # 再生完了後もRVizを残し、結果確認中にwindowが自動で閉じないようにする。

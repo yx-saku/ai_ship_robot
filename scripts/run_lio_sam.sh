@@ -69,6 +69,7 @@ Options:
   --rviz                      Enable RViz2.
   --no-rviz                   Disable RViz2.
   --rviz-config PATH          Use a workspace RViz config file.
+  --map                       Enable PCD map saver service (/save_pcd_map).
   --lio-sam-package NAME      Set LIO-SAM ROS package name.
   -h, --help                  Show this help.
 EOF
@@ -446,6 +447,9 @@ while [[ $# -gt 0 ]]; do
       shift
       LAUNCH_ARGS+=("rviz_config:=$(require_value --rviz-config "${1:-}")")
       ;;
+    --map)
+      LAUNCH_ARGS+=("use_map_saver:=true")
+      ;;
     --lio-sam-package=*)
       LAUNCH_ARGS+=("lio_sam_package:=${1#*=}")
       ;;
@@ -491,5 +495,7 @@ if [[ ! -f "${WORKSPACE_ROOT}/ros2_ws/install/setup.bash" ]]; then
 fi
 
 source_workspace_environment
+
+export AI_SHIP_ROBOT_WORKSPACE_ROOT="${WORKSPACE_ROOT}"
 
 ros2 launch ai_ship_robot_slam lio_sam.launch.py "${LAUNCH_ARGS[@]}"
