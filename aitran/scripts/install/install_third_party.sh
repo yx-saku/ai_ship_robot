@@ -3,6 +3,7 @@ set -euo pipefail
 
 ROS_DISTRO="${ROS_DISTRO:-humble}"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+AITRAN_ROOT="$(cd "${SCRIPT_DIR}/../.." && pwd)"
 AI_SHIP_ROBOT_OPT_ROOT="${AI_SHIP_ROBOT_OPT_ROOT:-/opt/ai_ship_robot}"
 THIRD_PARTY_WS="${AI_SHIP_ROBOT_OPT_ROOT}/ros_underlay/${ROS_DISTRO}/third_party_ws"
 THIRD_PARTY_SRC_DIR="${THIRD_PARTY_WS}/src"
@@ -11,7 +12,8 @@ THIRD_PARTY_INSTALL_DIR="${THIRD_PARTY_WS}/install"
 THIRD_PARTY_LOG_DIR="${THIRD_PARTY_WS}/log"
 LIVOX_DRIVER_DIR="${THIRD_PARTY_SRC_DIR}/livox_ros_driver2"
 GTSAM_DIR="${THIRD_PARTY_SRC_DIR}/gtsam"
-LIO_SAM_DIR="${THIRD_PARTY_SRC_DIR}/lio_sam"
+LIO_SAM_DIR="${THIRD_PARTY_SRC_DIR}/lio_sam_mid360_ros2"
+LIO_SAM_OVERRIDE_DIR="${AITRAN_ROOT}/third_party_overrides/lio_sam_mid360_ros2"
 AUTO_RCCAR_INDOOR_DIR="${THIRD_PARTY_SRC_DIR}/autoRCcar_indoor"
 AUTO_RCCAR_INTERFACES_DIR="${AUTO_RCCAR_INDOOR_DIR}/ros2/src/autorccar_interfaces"
 LIVOX_SDK_ROOT="${AI_SHIP_ROBOT_OPT_ROOT}/vendor/livox_sdk2"
@@ -188,19 +190,65 @@ prepare_livox_ros_driver2_manifest() {
   fi
 }
 
-patch_lio_sam_mid360_imu_converter() {
-  local patch_script="${SCRIPT_DIR}/patch_lio_sam_mid360_6axis.py"
+copy_lio_sam_mid360_overrides() {
+  local current_ref=""
+  local relative_path=""
+  local source_path=""
+  local destination_path=""
+  local override_files=(
+    "README.md"
+    "LICENSE"
+    "include/lio_sam/utility.hpp"
+    "src/imageProjection.cpp"
+    "src/featureExtraction.cpp"
+    "src/mapOptmization.cpp"
+    "src/imuPreintegration.cpp"
+  )
 
-  if [[ ! -f "${patch_script}" ]]; then
-    echo "Missing LIO-SAM patch script: ${patch_script}" >&2
+  if [[ ! -d "${LIO_SAM_OVERRIDE_DIR}" ]]; then
+    echo "Missing LIO-SAM override directory: ${LIO_SAM_OVERRIDE_DIR}" >&2
     return 1
   fi
 
-  # LIO-SAM本体への変更は固定commitに対する再現可能なpatch scriptとして適用する。
-  if [[ -w "${LIO_SAM_DIR}/include/lio_sam/utility.hpp" ]]; then
-    python3 "${patch_script}" "${LIO_SAM_DIR}"
-  else
-    ${SUDO} python3 "${patch_script}" "${LIO_SAM_DIR}"
+  current_ref="$(git -c safe.directory="${LIO_SAM_DIR}" -C "${LIO_SAM_DIR}" rev-parse HEAD)"
+  if [[ "${current_ref}" != "${LIO_SAM_REF}" ]]; then
+    echo "Refusing to copy LIO-SAM overrides to an unexpected revision." >&2
+    echo "  expected: ${LIO_SAM_REF}" >&2
+    echo "  current : ${current_ref}" >&2
+    return 1
+  fi
+
+  # 固定commitのupstream fileを、workspaceで管理するレビュー済みoverrideへ置き換える。
+  for relative_path in "${override_files[@]}"; do
+    source_path="${LIO_SAM_OVERRIDE_DIR}/${relative_path}"
+    destination_path="${LIO_SAM_DIR}/${relative_path}"
+    if [[ ! -f "${source_path}" ]]; then
+      echo "Missing LIO-SAM override file: ${source_path}" >&2
+      return 1
+    fi
+    if [[ -f "${destination_path}" ]] && cmp -s "${source_path}" "${destination_path}"; then
+      continue
+    fi
+
+    if [[ -w "${destination_path}" ]]; then
+      install -m 0644 "${source_path}" "${destination_path}"
+    else
+      ${SUDO} install -m 0644 "${source_path}" "${destination_path}"
+    fi
+  done
+}
+
+prepare_lio_sam_build_cache() {
+  local cache_file="${THIRD_PARTY_BUILD_DIR}/lio_sam/CMakeCache.txt"
+  local expected_home="CMAKE_HOME_DIRECTORY:INTERNAL=${LIO_SAM_DIR}"
+
+  if [[ ! -f "${cache_file}" ]]; then
+    return 0
+  fi
+
+  # clone先ディレクトリ名変更後はCMake cacheが旧source pathを指すため、LIO-SAM分だけ再configureさせる。
+  if ! grep -Fxq "${expected_home}" "${cache_file}"; then
+    rm -rf "${THIRD_PARTY_BUILD_DIR}/lio_sam"
   fi
 }
 
@@ -212,7 +260,8 @@ clone_common_repositories() {
   ensure_sparse_git_repo "${AUTO_RCCAR_INDOOR_DIR}" "https://github.com/UV-Lab/autoRCcar_indoor.git" "${AUTO_RCCAR_INDOOR_REF}" "ros2/src/autorccar_interfaces"
   ensure_git_repo "${LIO_SAM_DIR}" "https://github.com/UV-Lab/LIO-SAM_MID360_ROS2.git" "${LIO_SAM_REF}"
   prepare_livox_ros_driver2_manifest
-  patch_lio_sam_mid360_imu_converter
+  copy_lio_sam_mid360_overrides
+  prepare_lio_sam_build_cache
 }
 
 prepend_env_path() {

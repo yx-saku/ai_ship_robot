@@ -58,9 +58,12 @@ RUN if ! getent group ${USER_GID} >/dev/null; then groupadd --gid ${USER_GID} ${
     && echo "${USERNAME} ALL=(root) NOPASSWD:ALL" > /etc/sudoers.d/${USERNAME} \
     && chmod 0440 /etc/sudoers.d/${USERNAME}
 
-# install script だけを image build に含め、workspace build は container 起動後の setup script へ分離する。
-RUN mkdir -p /workspaces/ai_ship_robot/aitran/scripts/install /workspaces/ai_ship_robot/sim/scripts/install
+# install script と固定third_party overrideだけを image build に含め、workspace build は container 起動後へ分離する。
+RUN mkdir -p /workspaces/ai_ship_robot/aitran/scripts/install \
+    /workspaces/ai_ship_robot/aitran/third_party_overrides \
+    /workspaces/ai_ship_robot/sim/scripts/install
 COPY aitran/scripts/install/ /workspaces/ai_ship_robot/aitran/scripts/install/
+COPY aitran/third_party_overrides/ /workspaces/ai_ship_robot/aitran/third_party_overrides/
 COPY sim/scripts/install/ /workspaces/ai_ship_robot/sim/scripts/install/
 
 # 本番向けの system 依存だけを独立layerにし、workspace build は mount 後の setup へ回す。

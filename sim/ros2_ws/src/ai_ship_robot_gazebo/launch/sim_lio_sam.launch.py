@@ -169,6 +169,7 @@ def generate_launch_description():
             DeclareLaunchArgument("max_initial_angular_velocity", default_value="0.2"),
             DeclareLaunchArgument("min_initial_imu_samples", default_value="50"),
             DeclareLaunchArgument("min_initial_imu_duration", default_value="0.5"),
+            # Gazebo入力はm/s^2単位で、理想LiDAR点群はscan内deskewなしで扱う。
             DeclareLaunchArgument("imu_type", default_value="six_axis"),
             DeclareLaunchArgument("imu_acceleration_unit", default_value="mps2"),
             DeclareLaunchArgument("imu_acceleration_scale", default_value="1.0"),

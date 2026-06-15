@@ -73,6 +73,7 @@ def generate_launch_description():
     lidar_odom_frame = "left_lidar_odom"
     base_frame = "base_footprint"
 
+    # YAMLは実機既定値を持ち、launch argumentはsimulationやbag再生時の差分だけを上書きする。
     lio_sam_parameters = [
         params_file,
         {
@@ -168,7 +169,7 @@ def generate_launch_description():
         parameters=[{"use_sim_time": use_sim_time}],
     )
 
-    # Mid-360内蔵6軸IMU向けに、静止時加速度から初期roll/pitchだけを推定したIMU topicを作る。
+    # LIO-SAM本体内の初期化を使わない検証用に、外部nodeでroll/pitchを付与したIMU topicを作る。
     imu_orientation_initializer = Node(
         package="ai_ship_robot_slam",
         executable="six_axis_imu_initial_orientation_node",
@@ -265,7 +266,7 @@ def generate_launch_description():
             DeclareLaunchArgument("use_imu_preintegration_initial_guess", default_value="true"),
             DeclareLaunchArgument("use_imu_translation_initial_guess", default_value="false"),
             DeclareLaunchArgument("use_imu_rotation_initial_guess", default_value="true"),
-            DeclareLaunchArgument("deskew_mode", default_value="imu_angular"),
+            DeclareLaunchArgument("deskew_mode", default_value="odom_interpolation"),
             DeclareLaunchArgument("max_point_offset_time_sec", default_value="0.2"),
             DeclareLaunchArgument(
                 "fusion_config",
