@@ -14,12 +14,12 @@ THIRD_PARTY_UNDERLAY_SETUP="${AI_SHIP_ROBOT_OPT_ROOT}/ros_underlay/${ROS_DISTRO}
 FORWARD_ARGS=()
 SIM_MODE=false
 DEFAULT_LIDAR_TOPICS=("/livox/lidar")
-DEFAULT_IMU_TOPICS=("/livox/imu")
+DEFAULT_IMU_TOPICS=("/left_lidar/imu")
 ROSBAG_PID=""
 ROSBAG_PLAY_PID=""
 SLAM_PID=""
 ROSBAG_ROOT="${WORKSPACE_ROOT}/rosbag2"
-AUTO_STOP_AFTER_BAG_PLAY_SECONDS="5"
+AUTO_STOP_AFTER_BAG_PLAY_SECONDS="${AUTO_STOP_AFTER_BAG_PLAY_SECONDS:-30}"
 PROCESS_STOP_GRACE_SECONDS="15"
 PROCESS_STOP_TERM_SECONDS="5"
 ROSBAG_STOP_GRACE_SECONDS="60"
@@ -39,10 +39,17 @@ Options:
   --bag-start-delay SEC
                      Delay rosbag playback start by the given seconds.
   --bag-start-offset SEC
-                     Start rosbag playback after the given offset.
+                      Start rosbag playback after the given offset.
+  --auto-stop-after-bag-play SEC
+                      Seconds to keep SLAM running after playback finishes. Default: 30.
   --no-auto-exit     Keep SLAM and recording running after rosbag playback finishes.
   --backend NAME     Select SLAM backend: lio-sam | glim
   --rviz-config PATH Use a workspace RViz config file for LIO-SAM.
+  --deskew-mode MODE Set LIO-SAM deskew mode: imu_angular | odom_interpolation | off.
+  --force-zero-offset-time
+                     Force simulated Livox point offset_time to zero. Default for --sim.
+  --no-force-zero-offset-time
+                     Preserve simulated Livox point offset_time.
   --lio-sam          Select LIO-SAM backend.
   --glim             Select GLIM backend.
   -h, --help         Show this help.
@@ -474,7 +481,18 @@ run_bag_play_lio_sam() {
   play_cmd+=(--topics "${play_topics[@]}")
 
   mapfile -t slam_args < <(build_passthrough_args)
-  bash "${SCRIPT_DIR}/run_lio_sam.sh" --use-sim-time "${slam_args[@]}" &
+  bash "${SCRIPT_DIR}/run_lio_sam.sh" \
+    --use-sim-time \
+    --points /livox/lidar \
+    --raw-imu /left_lidar/imu \
+    --imu /left_lidar/imu \
+    --no-imu-initializer \
+    --imu-acceleration-unit mps2 \
+    --expected-acceleration-norm 9.80511 \
+    --acceleration-norm-tolerance 3.5 \
+    --deskew-mode off \
+    --imu-frequency 200.0 \
+    "${slam_args[@]}" &
   SLAM_PID=$!
   sleep 2
   ensure_process_started "${SLAM_PID}" "LIO-SAM"
@@ -765,6 +783,12 @@ run_sim_lio_sam() {
         shift
         launch_args+=("deskew_mode:=$(require_value --deskew-mode "${1:-}")")
         ;;
+      --force-zero-offset-time)
+        launch_args+=("force_zero_offset_time:=true")
+        ;;
+      --no-force-zero-offset-time)
+        launch_args+=("force_zero_offset_time:=false")
+        ;;
       --wait-for-imu-initialization)
         launch_args+=("wait_for_imu_initialization:=true")
         ;;
@@ -845,34 +869,6 @@ run_sim_lio_sam() {
       --no-fusion)
         launch_args+=("use_fusion:=false")
         ;;
-      --lidar-frame=*)
-        launch_args+=("lidar_frame:=${1#*=}")
-        ;;
-      --lidar-frame)
-        shift
-        launch_args+=("lidar_frame:=$(require_value --lidar-frame "${1:-}")")
-        ;;
-      --base-frame=*)
-        launch_args+=("base_frame:=${1#*=}")
-        ;;
-      --base-frame)
-        shift
-        launch_args+=("base_frame:=$(require_value --base-frame "${1:-}")")
-        ;;
-      --odom-frame=*)
-        launch_args+=("odom_frame:=${1#*=}")
-        ;;
-      --odom-frame)
-        shift
-        launch_args+=("odom_frame:=$(require_value --odom-frame "${1:-}")")
-        ;;
-      --map-frame=*)
-        launch_args+=("map_frame:=${1#*=}")
-        ;;
-      --map-frame)
-        shift
-        launch_args+=("map_frame:=$(require_value --map-frame "${1:-}")")
-        ;;
       --derived-ring-count=*)
         launch_args+=("derived_ring_count:=${1#*=}")
         ;;
@@ -945,12 +941,6 @@ run_sim_lio_sam() {
         shift
         launch_args+=("robot_name:=$(require_value --robot-name "${1:-}")")
         robot_name_set=true
-        ;;
-      --publish-map-to-odom-tf)
-        launch_args+=("publish_map_to_odom_tf:=true")
-        ;;
-      --no-publish-map-to-odom-tf)
-        launch_args+=("publish_map_to_odom_tf:=false")
         ;;
       --lio-sam-package=*)
         launch_args+=("lio_sam_package:=${1#*=}")
@@ -1360,6 +1350,13 @@ while [[ $# -gt 0 ]]; do
     --bag-start-offset)
       shift
       BAG_START_OFFSET="$(require_value --bag-start-offset "${1:-}")"
+      ;;
+    --auto-stop-after-bag-play=*)
+      AUTO_STOP_AFTER_BAG_PLAY_SECONDS="${1#*=}"
+      ;;
+    --auto-stop-after-bag-play)
+      shift
+      AUTO_STOP_AFTER_BAG_PLAY_SECONDS="$(require_value --auto-stop-after-bag-play "${1:-}")"
       ;;
     --no-auto-exit)
       BAG_AUTO_EXIT=false

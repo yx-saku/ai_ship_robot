@@ -29,6 +29,10 @@ def generate_launch_description():
     livox_lidar_frame = LaunchConfiguration("livox_lidar_frame")
     livox_imu_frame = LaunchConfiguration("livox_imu_frame")
     use_scan_pattern_line_lookup = LaunchConfiguration("use_scan_pattern_line_lookup")
+    force_zero_offset_time = LaunchConfiguration("force_zero_offset_time")
+    input_lidar_reliable = LaunchConfiguration("input_lidar_reliable")
+    output_lidar_reliable = LaunchConfiguration("output_lidar_reliable")
+    enable_imu_passthrough = LaunchConfiguration("enable_imu_passthrough")
     gazebo_params_file = PathJoinSubstitution(
         [FindPackageShare("ai_ship_robot_gazebo"), "config", "gazebo_ros.yaml"]
     )
@@ -116,7 +120,7 @@ def generate_launch_description():
         ],
     )
 
-    # Gazebo pluginのraw topicを実機Livox driverに近いtopic/単位へ補完し、SLAM側からsimulation差分を隠す。
+    # Gazebo pluginのraw topicをSLAM用の理想LiDARとして整形し、点群内時刻差を持たない入力にする。
     mid360_sim_adapter = Node(
         package="ai_ship_robot_gazebo",
         executable="mid360_sim_adapter",
@@ -133,6 +137,10 @@ def generate_launch_description():
                 "output_lidar_frame": livox_lidar_frame,
                 "output_imu_frame": livox_imu_frame,
                 "use_scan_pattern_line_lookup": use_scan_pattern_line_lookup,
+                "force_zero_offset_time": force_zero_offset_time,
+                "input_lidar_reliable": input_lidar_reliable,
+                "output_lidar_reliable": output_lidar_reliable,
+                "enable_imu_passthrough": enable_imu_passthrough,
             }
         ],
     )
@@ -167,6 +175,10 @@ def generate_launch_description():
             DeclareLaunchArgument("livox_lidar_frame", default_value="left_lidar_link"),
             DeclareLaunchArgument("livox_imu_frame", default_value="left_lidar_imu_link"),
             DeclareLaunchArgument("use_scan_pattern_line_lookup", default_value="false"),
+            DeclareLaunchArgument("force_zero_offset_time", default_value="true"),
+            DeclareLaunchArgument("input_lidar_reliable", default_value="true"),
+            DeclareLaunchArgument("output_lidar_reliable", default_value="true"),
+            DeclareLaunchArgument("enable_imu_passthrough", default_value="true"),
             DeclareLaunchArgument(
                 "rviz_config",
                 default_value=PathJoinSubstitution(

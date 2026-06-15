@@ -24,28 +24,10 @@ def generate_launch_description():
     raw_imu_topic = LaunchConfiguration("raw_imu_topic")
     imu_topic = LaunchConfiguration("imu_topic")
     lio_points_topic = LaunchConfiguration("lio_points_topic")
-    lidar_frame = LaunchConfiguration("lidar_frame")
-    base_frame = LaunchConfiguration("base_frame")
-    odom_frame = LaunchConfiguration("odom_frame")
-    map_frame = LaunchConfiguration("map_frame")
-    base_lidar_init_frame = LaunchConfiguration("base_lidar_init_frame")
-    base_lidar_init_x = LaunchConfiguration("base_lidar_init_x")
-    base_lidar_init_y = LaunchConfiguration("base_lidar_init_y")
-    base_lidar_init_z = LaunchConfiguration("base_lidar_init_z")
-    base_lidar_init_roll = LaunchConfiguration("base_lidar_init_roll")
-    base_lidar_init_pitch = LaunchConfiguration("base_lidar_init_pitch")
-    base_lidar_init_yaw = LaunchConfiguration("base_lidar_init_yaw")
-    odom_to_base_x = LaunchConfiguration("odom_to_base_x")
-    odom_to_base_y = LaunchConfiguration("odom_to_base_y")
-    odom_to_base_z = LaunchConfiguration("odom_to_base_z")
-    odom_to_base_roll = LaunchConfiguration("odom_to_base_roll")
-    odom_to_base_pitch = LaunchConfiguration("odom_to_base_pitch")
-    odom_to_base_yaw = LaunchConfiguration("odom_to_base_yaw")
     derived_ring_count = LaunchConfiguration("derived_ring_count")
     min_vertical_angle_deg = LaunchConfiguration("min_vertical_angle_deg")
     max_vertical_angle_deg = LaunchConfiguration("max_vertical_angle_deg")
     fusion_timestamp_unit_scale = LaunchConfiguration("fusion_timestamp_unit_scale")
-    publish_map_to_odom_tf = LaunchConfiguration("publish_map_to_odom_tf")
     lio_sam_package = LaunchConfiguration("lio_sam_package")
     expected_acceleration_norm = LaunchConfiguration("expected_acceleration_norm")
     acceleration_norm_tolerance = LaunchConfiguration("acceleration_norm_tolerance")
@@ -85,17 +67,22 @@ def generate_launch_description():
         ],
     )
 
+    # LIO-SAMの推定LiDAR frameを実機URDFのLiDAR frameから分離し、TF親子競合を避ける。
+    map_frame = "map"
+    lidar_init_frame = "left_lidar-init"
+    lidar_odom_frame = "left_lidar_odom"
+    base_frame = "base_footprint"
+
     lio_sam_parameters = [
         params_file,
         {
             "use_sim_time": use_sim_time,
             "pointCloudTopic": lio_custom_topic,
             "imuTopic": imu_topic,
-            "lidarFrame": lidar_frame,
+            "lidarFrame": lidar_odom_frame,
             "baselinkFrame": base_frame,
-            "odometryFrame": odom_frame,
+            "odometryFrame": lidar_init_frame,
             "mapFrame": map_frame,
-            "lidarInitFrame": base_lidar_init_frame,
             "imuType": imu_type,
             "imuAccelerationUnit": imu_acceleration_unit,
             "imuAccelerationScale": ParameterValue(imu_acceleration_scale, value_type=float),
@@ -118,7 +105,7 @@ def generate_launch_description():
                 use_imu_translation_initial_guess, value_type=bool
             ),
             "useImuRotationInitialGuess": ParameterValue(use_imu_rotation_initial_guess, value_type=bool),
-            "deskewMode": deskew_mode,
+            "deskewMode": ParameterValue(deskew_mode, value_type=str),
             "maxPointOffsetTimeSec": ParameterValue(max_point_offset_time_sec, value_type=float),
         },
     ]
@@ -135,12 +122,50 @@ def generate_launch_description():
                 "use_sim_time": use_sim_time,
                 "input_points_topic": fused_points_topic,
                 "output_points_topic": lio_points_topic,
-                "output_frame": lidar_frame,
+                "output_frame": lidar_odom_frame,
                 "derived_ring_count": ParameterValue(derived_ring_count, value_type=int),
                 "min_vertical_angle_deg": ParameterValue(min_vertical_angle_deg, value_type=float),
                 "max_vertical_angle_deg": ParameterValue(max_vertical_angle_deg, value_type=float),
             }
         ],
+    )
+
+    # 最終的なworld/map合わせは外部で調整できるよう、SLAM初期LiDAR frameはmap直下の固定中間frameにする。
+    map_to_lidar_init_tf = Node(
+        package="tf2_ros",
+        executable="static_transform_publisher",
+        name="map_to_left_lidar_init_static_transform_publisher",
+        output="screen",
+        arguments=[
+            "--x", "0.0",
+            "--y", "0.0",
+            "--z", "0.0",
+            "--roll", "0.0",
+            "--pitch", "0.0",
+            "--yaw", "0.0",
+            "--frame-id", map_frame,
+            "--child-frame-id", lidar_init_frame,
+        ],
+        parameters=[{"use_sim_time": use_sim_time}],
+    )
+
+    # LIO-SAMが推定したLiDAR poseからbase_footprintへつなぎ、URDFのロボットlink群へ接続する。
+    lidar_odom_to_base_tf = Node(
+        package="tf2_ros",
+        executable="static_transform_publisher",
+        name="left_lidar_odom_to_base_static_transform_publisher",
+        output="screen",
+        arguments=[
+            "--x", "0.41275635094610965",
+            "--y", "-0.3275",
+            "--z", "-0.21491496804892735",
+            "--roll", "0.0",
+            "--pitch", "-2.0943951023931953",
+            "--yaw", "0.0",
+            "--frame-id", lidar_odom_frame,
+            "--child-frame-id", base_frame,
+        ],
+        parameters=[{"use_sim_time": use_sim_time}],
     )
 
     # Mid-360内蔵6軸IMU向けに、静止時加速度から初期roll/pitchだけを推定したIMU topicを作る。
@@ -164,62 +189,6 @@ def generate_launch_description():
                 "min_initial_duration_sec": ParameterValue(min_initial_imu_duration, value_type=float),
             }
         ],
-    )
-
-    # LIO-SAMの推定原点を、初期baseから初期LiDARへ移した中間frameとして明示する。
-    map_to_base_lidar_init_tf = Node(
-        package="tf2_ros",
-        executable="static_transform_publisher",
-        name="map_to_base_lidar_init_static_transform_publisher",
-        output="screen",
-        condition=IfCondition(publish_map_to_odom_tf),
-        arguments=[
-            "--x",
-            base_lidar_init_x,
-            "--y",
-            base_lidar_init_y,
-            "--z",
-            base_lidar_init_z,
-            "--roll",
-            base_lidar_init_roll,
-            "--pitch",
-            base_lidar_init_pitch,
-            "--yaw",
-            base_lidar_init_yaw,
-            "--frame-id",
-            map_frame,
-            "--child-frame-id",
-            base_lidar_init_frame,
-        ],
-        parameters=[{"use_sim_time": use_sim_time}],
-    )
-
-    # LIO-SAMが現在LiDAR位置として動かすodomから、ロボットbaseへの固定外部変換を張る。
-    odom_to_base_tf = Node(
-        package="tf2_ros",
-        executable="static_transform_publisher",
-        name="odom_to_base_static_transform_publisher",
-        output="screen",
-        condition=IfCondition(publish_map_to_odom_tf),
-        arguments=[
-            "--x",
-            odom_to_base_x,
-            "--y",
-            odom_to_base_y,
-            "--z",
-            odom_to_base_z,
-            "--roll",
-            odom_to_base_roll,
-            "--pitch",
-            odom_to_base_pitch,
-            "--yaw",
-            odom_to_base_yaw,
-            "--frame-id",
-            odom_frame,
-            "--child-frame-id",
-            base_frame,
-        ],
-        parameters=[{"use_sim_time": use_sim_time}],
     )
 
     # LIO-SAM本体はthird_party underlayのpackageを直接起動し、設定だけをこのproject packageで管理する。
@@ -277,28 +246,10 @@ def generate_launch_description():
             DeclareLaunchArgument("raw_imu_topic", default_value="/livox/imu"),
             DeclareLaunchArgument("imu_topic", default_value="/livox/imu"),
             DeclareLaunchArgument("lio_points_topic", default_value="/left_lidar/lio_sam_points"),
-            DeclareLaunchArgument("lidar_frame", default_value="left_lidar_link"),
-            DeclareLaunchArgument("base_frame", default_value="base_footprint"),
-            DeclareLaunchArgument("odom_frame", default_value="odom"),
-            DeclareLaunchArgument("map_frame", default_value="map"),
-            DeclareLaunchArgument("base_lidar_init_frame", default_value="base_lidar_init"),
-            DeclareLaunchArgument("base_lidar_init_x", default_value="0.3925"),
-            DeclareLaunchArgument("base_lidar_init_y", default_value="0.3275"),
-            DeclareLaunchArgument("base_lidar_init_z", default_value="0.25"),
-            DeclareLaunchArgument("base_lidar_init_roll", default_value="0.0"),
-            DeclareLaunchArgument("base_lidar_init_pitch", default_value="2.0943951023931953"),
-            DeclareLaunchArgument("base_lidar_init_yaw", default_value="0.0"),
-            DeclareLaunchArgument("odom_to_base_x", default_value="0.41275635094610965"),
-            DeclareLaunchArgument("odom_to_base_y", default_value="-0.3275"),
-            DeclareLaunchArgument("odom_to_base_z", default_value="-0.21491470245117265"),
-            DeclareLaunchArgument("odom_to_base_roll", default_value="0.0"),
-            DeclareLaunchArgument("odom_to_base_pitch", default_value="-2.0943951023931953"),
-            DeclareLaunchArgument("odom_to_base_yaw", default_value="0.0"),
             DeclareLaunchArgument("derived_ring_count", default_value="4"),
             DeclareLaunchArgument("min_vertical_angle_deg", default_value="-7.22"),
             DeclareLaunchArgument("max_vertical_angle_deg", default_value="55.22"),
             DeclareLaunchArgument("fusion_timestamp_unit_scale", default_value="1.0e-9"),
-            DeclareLaunchArgument("publish_map_to_odom_tf", default_value="true"),
             DeclareLaunchArgument("lio_sam_package", default_value="lio_sam"),
             DeclareLaunchArgument("expected_acceleration_norm", default_value="1.0"),
             DeclareLaunchArgument("acceleration_norm_tolerance", default_value="0.35"),
@@ -337,8 +288,8 @@ def generate_launch_description():
             fusion,
             adapter,
             imu_orientation_initializer,
-            map_to_base_lidar_init_tf,
-            odom_to_base_tf,
+            map_to_lidar_init_tf,
+            lidar_odom_to_base_tf,
             imu_preintegration,
             image_projection,
             feature_extraction,

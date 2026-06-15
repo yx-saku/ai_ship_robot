@@ -460,6 +460,28 @@
       </link>
     </model>
 
+    <model name="dock_wall_west">
+      <static>true</static>
+      <pose>-6.0 0 1.0 0 0 0</pose>
+      <link name="link">
+        <!-- 背後側も壁で閉じ、旋回時にLiDARが十分な幾何拘束を持てるようにする。 -->
+        <collision name="collision">
+          <geometry>
+            <box><size>0.25 10.0 2.0</size></box>
+          </geometry>
+        </collision>
+        <visual name="visual">
+          <geometry>
+            <box><size>0.25 10.0 2.0</size></box>
+          </geometry>
+          <material>
+            <ambient>0.45 0.42 0.38 1</ambient>
+            <diffuse>0.45 0.42 0.38 1</diffuse>
+          </material>
+        </visual>
+      </link>
+    </model>
+
     <model name="ceiling">
       <static>true</static>
       <pose>0 0 2.05 0 0 0</pose>

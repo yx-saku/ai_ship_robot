@@ -55,14 +55,42 @@ Visualization Manager:
       Frame Timeout: 15
       Frames:
         All Enabled: false
+        arm_robot_body_link:
+          Value: false
+        arm_robot_forearm_link:
+          Value: false
+        arm_robot_upper_arm_link:
+          Value: false
+        arm_robot_wrist_link:
+          Value: false
         base_footprint:
+          Value: false
+        base_link:
+          Value: false
+        imu_link:
+          Value: false
+        left_front_omni_wheel_link:
+          Value: false
+        left_lidar-init:
           Value: true
-        base_lidar_init:
+        left_lidar_imu_link:
+          Value: false
+        left_lidar_link:
+          Value: false
+        left_lidar_odom:
           Value: true
+        left_rear_omni_wheel_link:
+          Value: false
         map:
           Value: true
-        odom:
-          Value: true
+        right_front_omni_wheel_link:
+          Value: false
+        right_lidar_imu_link:
+          Value: false
+        right_lidar_link:
+          Value: false
+        right_rear_omni_wheel_link:
+          Value: false
       Marker Scale: 1
       Name: TF
       Show Arrows: true
@@ -70,8 +98,31 @@ Visualization Manager:
       Show Names: true
       Tree:
         map:
-          base_lidar_init:
-            {}
+          left_lidar-init:
+            left_lidar_odom:
+              base_footprint:
+                base_link:
+                  arm_robot_body_link:
+                    arm_robot_upper_arm_link:
+                      arm_robot_forearm_link:
+                        arm_robot_wrist_link:
+                          {}
+                  imu_link:
+                    {}
+                  left_front_omni_wheel_link:
+                    {}
+                  left_lidar_link:
+                    left_lidar_imu_link:
+                      {}
+                  left_rear_omni_wheel_link:
+                    {}
+                  right_front_omni_wheel_link:
+                    {}
+                  right_lidar_link:
+                    right_lidar_imu_link:
+                      {}
+                  right_rear_omni_wheel_link:
+                    {}
       Update Interval: 0
       Value: true
     - Alpha: 1
@@ -330,10 +381,10 @@ Visualization Manager:
       Invert Z Axis: false
       Name: Current View
       Near Clip Distance: 0.009999999776482582
-      Pitch: 1.1353975534439087
+      Pitch: 0.3247963786125183
       Target Frame: <Fixed Frame>
       Value: Orbit (rviz)
-      Yaw: 1.978586196899414
+      Yaw: 3.9285888671875
     Saved: ~
 Window Geometry:
   Displays:
@@ -351,5 +402,5 @@ Window Geometry:
   Views:
     collapsed: true
   Width: 1588
-  X: 3000
-  Y: 646
+  X: 2968
+  Y: 614

@@ -30,6 +30,10 @@ Options:
   --imu-acceleration-unit U   Set IMU acceleration unit: g | mps2. Default is g.
   --imu-acceleration-scale S  Additional IMU acceleration scale. Default is 1.0.
   --imu-frequency HZ          Set fallback IMU frequency. Default is 500.0.
+  --expected-acceleration-norm N
+                              Set initial 6-axis IMU acceleration norm.
+  --acceleration-norm-tolerance N
+                              Set initial 6-axis IMU acceleration norm tolerance.
   --imu-debug                 Enable converted IMU diagnostic logs.
   --no-imu-debug              Disable converted IMU diagnostic logs. Default.
   --deskew-mode MODE          Set deskew mode: imu_angular | odom_interpolation | off.
@@ -57,14 +61,6 @@ Options:
   --no-fusion                 Disable optional multi-LiDAR fusion node. Default.
   --adapter                   Enable legacy PointCloud2 adapter for debugging.
   --no-adapter                Disable legacy PointCloud2 adapter. Default.
-  --lidar-frame FRAME         Set LIO-SAM lidar frame.
-  --base-frame FRAME          Set LIO-SAM base frame.
-  --odom-frame FRAME          Set LIO-SAM odom frame.
-  --map-frame FRAME           Set LIO-SAM map frame.
-  --base-lidar-init-frame FRAME
-                              Set initial LiDAR frame. Default is base_lidar_init.
-  --base-lidar-init-pose CSV  Set map -> base_lidar_init pose as x,y,z,roll,pitch,yaw.
-  --odom-to-base-pose CSV     Set odom -> base frame pose as x,y,z,roll,pitch,yaw.
   --derived-ring-count N      Set pseudo ring count when raw cloud has no ring/line field.
   --min-vertical-angle DEG    Set minimum vertical angle for pseudo ring derivation.
   --max-vertical-angle DEG    Set maximum vertical angle for pseudo ring derivation.
@@ -74,8 +70,6 @@ Options:
   --rviz                      Enable RViz2.
   --no-rviz                   Disable RViz2.
   --rviz-config PATH          Use a workspace RViz config file.
-  --publish-map-to-odom-tf    Publish static map/base_lidar_init/odom/base TFs. Default.
-  --no-publish-map-to-odom-tf Disable static SLAM frame TFs.
   --lio-sam-package NAME      Set LIO-SAM ROS package name.
   -h, --help                  Show this help.
 EOF
@@ -179,31 +173,6 @@ parse_csv_topics() {
   for topic in "${topics[@]}"; do
     topic="${topic//[[:space:]]/}"
     [[ -n "${topic}" ]] && printf '%s\n' "${topic}"
-  done
-}
-
-append_pose_launch_args() {
-  local prefix="$1"
-  local option="$2"
-  local csv="$3"
-  local values=()
-  local names=(x y z roll pitch yaw)
-  local index=0
-  local value=""
-
-  # TF外部パラメータは6要素poseとして一括検証し、片側だけの不完全な更新を避ける。
-  IFS=',' read -r -a values <<< "${csv}"
-  if [[ "${#values[@]}" -ne 6 ]]; then
-    echo "${option} requires 6 comma-separated values: x,y,z,roll,pitch,yaw" >&2
-    exit 2
-  fi
-  for index in "${!values[@]}"; do
-    value="${values[index]//[[:space:]]/}"
-    if [[ -z "${value}" ]]; then
-      echo "${option} contains an empty value." >&2
-      exit 2
-    fi
-    LAUNCH_ARGS+=("${prefix}_${names[index]}:=${value}")
   done
 }
 
@@ -337,6 +306,20 @@ while [[ $# -gt 0 ]]; do
       shift
       LAUNCH_ARGS+=("imu_frequency:=$(require_value --imu-frequency "${1:-}")")
       ;;
+    --expected-acceleration-norm=*)
+      LAUNCH_ARGS+=("expected_acceleration_norm:=${1#*=}")
+      ;;
+    --expected-acceleration-norm)
+      shift
+      LAUNCH_ARGS+=("expected_acceleration_norm:=$(require_value --expected-acceleration-norm "${1:-}")")
+      ;;
+    --acceleration-norm-tolerance=*)
+      LAUNCH_ARGS+=("acceleration_norm_tolerance:=${1#*=}")
+      ;;
+    --acceleration-norm-tolerance)
+      shift
+      LAUNCH_ARGS+=("acceleration_norm_tolerance:=$(require_value --acceleration-norm-tolerance "${1:-}")")
+      ;;
     --imu-debug)
       LAUNCH_ARGS+=("imu_debug:=true")
       ;;
@@ -413,57 +396,8 @@ while [[ $# -gt 0 ]]; do
     --no-fusion)
       LAUNCH_ARGS+=("use_fusion:=false")
       ;;
-    --lidar-frame=*)
-      LAUNCH_ARGS+=("lidar_frame:=${1#*=}")
-      ;;
-    --lidar-frame)
-      shift
-      LAUNCH_ARGS+=("lidar_frame:=$(require_value --lidar-frame "${1:-}")")
-      ;;
-    --base-frame=*)
-      LAUNCH_ARGS+=("base_frame:=${1#*=}")
-      ;;
-    --base-frame)
-      shift
-      LAUNCH_ARGS+=("base_frame:=$(require_value --base-frame "${1:-}")")
-      ;;
-    --odom-frame=*)
-      LAUNCH_ARGS+=("odom_frame:=${1#*=}")
-      ;;
-    --odom-frame)
-      shift
-      LAUNCH_ARGS+=("odom_frame:=$(require_value --odom-frame "${1:-}")")
-      ;;
-    --map-frame=*)
-      LAUNCH_ARGS+=("map_frame:=${1#*=}")
-      ;;
-    --map-frame)
-      shift
-      LAUNCH_ARGS+=("map_frame:=$(require_value --map-frame "${1:-}")")
-      ;;
-    --base-lidar-init-frame=*)
-      LAUNCH_ARGS+=("base_lidar_init_frame:=${1#*=}")
-      ;;
-    --base-lidar-init-frame)
-      shift
-      LAUNCH_ARGS+=("base_lidar_init_frame:=$(require_value --base-lidar-init-frame "${1:-}")")
-      ;;
-    --base-lidar-init-pose=*)
-      append_pose_launch_args "base_lidar_init" --base-lidar-init-pose "${1#*=}"
-      ;;
-    --base-lidar-init-pose)
-      shift
-      append_pose_launch_args "base_lidar_init" --base-lidar-init-pose "$(require_value --base-lidar-init-pose "${1:-}")"
-      ;;
-    --odom-to-base-pose=*)
-      append_pose_launch_args "odom_to_base" --odom-to-base-pose "${1#*=}"
-      ;;
-    --odom-to-base-pose)
-      shift
-      append_pose_launch_args "odom_to_base" --odom-to-base-pose "$(require_value --odom-to-base-pose "${1:-}")"
-      ;;
     --map-to-odom-z|--map-to-odom-z=*)
-      echo "--map-to-odom-z was replaced by --base-lidar-init-pose and --odom-to-base-pose." >&2
+      echo "--map-to-odom-z has been removed. Align world/odom later with an external static TF." >&2
       exit 2
       ;;
     --derived-ring-count=*)
@@ -512,12 +446,6 @@ while [[ $# -gt 0 ]]; do
     --rviz-config)
       shift
       LAUNCH_ARGS+=("rviz_config:=$(require_value --rviz-config "${1:-}")")
-      ;;
-    --publish-map-to-odom-tf)
-      LAUNCH_ARGS+=("publish_map_to_odom_tf:=true")
-      ;;
-    --no-publish-map-to-odom-tf)
-      LAUNCH_ARGS+=("publish_map_to_odom_tf:=false")
       ;;
     --lio-sam-package=*)
       LAUNCH_ARGS+=("lio_sam_package:=${1#*=}")

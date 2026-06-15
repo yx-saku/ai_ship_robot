@@ -6,12 +6,11 @@
     odomTopic: odometry/imu
     gpsTopic: odometry/gps
 
-    # 基準LiDARは左LiDARとし、複数LiDAR合成後もLIO-SAMのLiDAR frameは左側を使う。
-    lidarFrame: left_lidar_link
+    # LIO-SAMの動的LiDAR frameをURDFの実LiDAR frameから分離し、base_footprintへ静的TFで接続する。
+    lidarFrame: left_lidar_odom
     baselinkFrame: base_footprint
-    odometryFrame: odom
+    odometryFrame: left_lidar-init
     mapFrame: map
-    lidarInitFrame: base_lidar_init
 
     # GPSは初期検証対象外のため無効寄りにし、IMU/LiDARだけで起動確認できるようにする。
     useImuHeadingInitialization: false
@@ -57,8 +56,8 @@
     useImuTranslationInitialGuess: false
     useImuRotationInitialGuess: true
 
-    # 標準は従来に近いIMU角速度deskewとし、検証時にodom_interpolation/offへ切替可能にする。
-    deskewMode: imu_angular
+    # IMU preintegration odometryで補間し、再生速度差によるIMU角速度deskew待ちを避ける。
+    deskewMode: odom_interpolation
     maxPointOffsetTimeSec: 0.2
 
     # 現状既定の基準系は左LiDARと左IMUの組み合わせで、IMU->LiDAR相対回転はidentityになる。

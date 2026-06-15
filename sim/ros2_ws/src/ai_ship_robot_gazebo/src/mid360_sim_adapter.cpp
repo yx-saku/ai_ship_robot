@@ -121,9 +121,12 @@ public:
     output_imu_frame_ = declare_parameter<std::string>("output_imu_frame", "left_lidar_imu_link");
     gravity_ = declare_parameter<double>("gravity", 9.80511);
     convert_imu_acceleration_to_g_ = declare_parameter<bool>("convert_imu_acceleration_to_g", true);
+    enable_imu_passthrough_ = declare_parameter<bool>("enable_imu_passthrough", true);
     synthesize_line_from_pattern_ = declare_parameter<bool>("synthesize_line_from_pattern", true);
     use_scan_pattern_line_lookup_ = declare_parameter<bool>("use_scan_pattern_line_lookup", false);
     force_zero_offset_time_ = declare_parameter<bool>("force_zero_offset_time", false);
+    input_lidar_reliable_ = declare_parameter<bool>("input_lidar_reliable", true);
+    output_lidar_reliable_ = declare_parameter<bool>("output_lidar_reliable", true);
     scan_pattern_csv_file_ = declare_parameter<std::string>("scan_pattern_csv_file", default_scan_pattern_csv_file());
     scan_pattern_physical_line_count_ = declare_parameter<int>("scan_pattern_physical_line_count", 4);
     synthetic_line_count_ = declare_parameter<int>("synthetic_line_count", 4);
@@ -142,34 +145,39 @@ public:
       RCLCPP_INFO(get_logger(), "Using index-based synthetic Livox line assignment.");
     }
 
-    // Gazebo sensor入力はbest-effortで受け、rosbag対象のLivox互換出力だけreliableにする。
-    const auto input_lidar_qos = rclcpp::QoS(rclcpp::KeepLast(static_cast<std::size_t>(lidar_qos_depth_)))
-      .best_effort()
+    // Gazebo pluginやrosbag再生のQoSに合わせ、LiDAR入力のreliable/best-effortを切り替える。
+    auto input_lidar_qos = rclcpp::QoS(rclcpp::KeepLast(static_cast<std::size_t>(lidar_qos_depth_)))
       .durability_volatile();
+    input_lidar_qos = input_lidar_reliable_ ? input_lidar_qos.reliable() : input_lidar_qos.best_effort();
     const auto input_imu_qos = rclcpp::QoS(rclcpp::KeepLast(static_cast<std::size_t>(imu_qos_depth_)))
       .best_effort()
       .durability_volatile();
-    const auto output_lidar_qos = rclcpp::QoS(rclcpp::KeepLast(static_cast<std::size_t>(lidar_qos_depth_)))
-      .reliable()
+    // rosbag再生時はreliable publishのbackpressureでraw LiDARを落とさないよう、用途に応じて切り替える。
+    auto output_lidar_qos = rclcpp::QoS(rclcpp::KeepLast(static_cast<std::size_t>(lidar_qos_depth_)))
       .durability_volatile();
+    output_lidar_qos = output_lidar_reliable_ ? output_lidar_qos.reliable() : output_lidar_qos.best_effort();
     const auto output_imu_qos = rclcpp::QoS(rclcpp::KeepLast(static_cast<std::size_t>(imu_qos_depth_)))
       .reliable()
       .durability_volatile();
 
     custom_publisher_ = create_publisher<livox_ros_driver2::msg::CustomMsg>(output_custom_topic_, output_lidar_qos);
-    imu_publisher_ = create_publisher<sensor_msgs::msg::Imu>(output_imu_topic_, output_imu_qos);
     custom_subscription_ = create_subscription<livox_ros_driver2::msg::CustomMsg>(
       input_custom_topic_, input_lidar_qos,
       std::bind(&Mid360SimAdapter::custom_callback, this, std::placeholders::_1));
-    imu_subscription_ = create_subscription<sensor_msgs::msg::Imu>(
-      input_imu_topic_, input_imu_qos, std::bind(&Mid360SimAdapter::imu_callback, this, std::placeholders::_1));
+    if (enable_imu_passthrough_) {
+      // 点群line補完だけを使う検証ではIMU経路を止め、LiDAR callbackの処理余力を確保する。
+      imu_publisher_ = create_publisher<sensor_msgs::msg::Imu>(output_imu_topic_, output_imu_qos);
+      imu_subscription_ = create_subscription<sensor_msgs::msg::Imu>(
+        input_imu_topic_, input_imu_qos, std::bind(&Mid360SimAdapter::imu_callback, this, std::placeholders::_1));
+    }
 
     RCLCPP_INFO(
       get_logger(), "Mid-360 sim adapter: %s -> %s, %s -> %s", input_custom_topic_.c_str(),
       output_custom_topic_.c_str(), input_imu_topic_.c_str(), output_imu_topic_.c_str());
     RCLCPP_INFO(
-      get_logger(), "Mid-360 sim adapter QoS: input best_effort, output reliable, lidar_depth=%d, imu_depth=%d", lidar_qos_depth_,
-      imu_qos_depth_);
+      get_logger(), "Mid-360 sim adapter QoS: input_lidar=%s, output_lidar=%s, lidar_depth=%d, imu_depth=%d",
+      input_lidar_reliable_ ? "reliable" : "best_effort", output_lidar_reliable_ ? "reliable" : "best_effort",
+      lidar_qos_depth_, imu_qos_depth_);
   }
 
 private:
@@ -334,9 +342,12 @@ private:
   std::string output_imu_frame_;
   double gravity_{};
   bool convert_imu_acceleration_to_g_{};
+  bool enable_imu_passthrough_{};
   bool synthesize_line_from_pattern_{};
   bool use_scan_pattern_line_lookup_{};
   bool force_zero_offset_time_{};
+  bool input_lidar_reliable_{};
+  bool output_lidar_reliable_{};
   std::string scan_pattern_csv_file_;
   int scan_pattern_physical_line_count_{};
   int synthetic_line_count_{};
