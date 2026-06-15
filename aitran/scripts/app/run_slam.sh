@@ -43,15 +43,12 @@ Options:
   --auto-stop-after-bag-play SEC
                       Seconds to keep SLAM running after playback finishes. Default: 30.
   --no-auto-exit     Keep SLAM and recording running after rosbag playback finishes.
-  --backend NAME     Select SLAM backend: lio-sam | glim
   --rviz-config PATH Use a workspace RViz config file for LIO-SAM.
   --deskew-mode MODE Set LIO-SAM deskew mode: imu_angular | odom_interpolation | off.
   --force-zero-offset-time
                      Force simulated Livox point offset_time to zero. Default for --sim.
   --no-force-zero-offset-time
                      Preserve simulated Livox point offset_time.
-  --lio-sam          Select LIO-SAM backend.
-  --glim             Select GLIM backend.
   -h, --help         Show this help.
 
 Examples:
@@ -59,23 +56,6 @@ Examples:
   bash aitran/scripts/app/run_slam.sh --sim --lite --no-gui
   bash aitran/scripts/app/run_slam.sh --points /livox/lidar --raw-imu /livox/imu --imu /livox/imu_oriented
 EOF
-}
-
-normalize_backend() {
-  local backend_value="$1"
-
-  case "${backend_value}" in
-    lio-sam|lio_sam|liosam)
-      printf '%s' "lio-sam"
-      ;;
-    glim)
-      printf '%s' "glim"
-      ;;
-    *)
-      echo "Unsupported backend: ${backend_value}. Use lio-sam or glim." >&2
-      exit 2
-      ;;
-  esac
 }
 
 require_value() {
@@ -406,16 +386,6 @@ run_recorded_lio_sam() {
   bash "${SCRIPT_DIR}/run_lio_sam.sh" "${slam_args[@]}"
 }
 
-run_recorded_glim() {
-  local bag_output="$1"
-  local slam_args=()
-
-  # 単体SLAM収録では入力推定に依存せず、観測できるtopicを全て保存する。
-  start_rosbag_record "${bag_output}" false
-  mapfile -t slam_args < <(build_passthrough_args)
-  bash "${SCRIPT_DIR}/run_glim_slam.sh" "${slam_args[@]}"
-}
-
 run_bag_play_lio_sam() {
   local bag_path="$1"
   local bag_rate="$2"
@@ -496,99 +466,6 @@ run_bag_play_lio_sam() {
   SLAM_PID=$!
   sleep 2
   ensure_process_started "${SLAM_PID}" "LIO-SAM"
-  # bag再生前にrecordを起動し、再生開始直後のtopicも取りこぼしにくくする。
-  if [[ "${record_bag}" == "true" ]]; then
-    start_rosbag_record "${bag_output}" true "${record_topics[@]}"
-  fi
-  # 起動順序を固定したい検証向けに、bag再生だけを実時間で遅延させる。
-  if [[ "${bag_start_delay}" != "0" && "${bag_start_delay}" != "0.0" ]]; then
-    sleep "${bag_start_delay}"
-  fi
-  "${play_cmd[@]}" &
-  ROSBAG_PLAY_PID=$!
-  set +e
-  wait "${ROSBAG_PLAY_PID}"
-  play_status=$?
-  set -e
-
-  # bag再生完了後は既定で短い猶予を置いて終了し、明示指定時だけSLAM/recordを継続する。
-  if [[ "${play_status}" -eq 0 ]]; then
-    if [[ "${auto_exit}" == "true" ]]; then
-      echo "Rosbag playback finished. Stopping SLAM after ${AUTO_STOP_AFTER_BAG_PLAY_SECONDS}s..." >&2
-      sleep "${AUTO_STOP_AFTER_BAG_PLAY_SECONDS}"
-    else
-      set +e
-      wait "${SLAM_PID}"
-      slam_status=$?
-      set -e
-      return "${slam_status}"
-    fi
-  fi
-
-  return "${play_status}"
-}
-
-run_bag_play_glim() {
-  local bag_path="$1"
-  local bag_rate="$2"
-  local bag_offset="$3"
-  local bag_start_delay="$4"
-  local auto_exit="$5"
-  local record_bag="$6"
-  local bag_output="$7"
-  shift 7
-  local record_topics=("$@")
-  local play_cmd=(ros2 bag play "${bag_path}" --clock --rate "${bag_rate}" --start-offset "${bag_offset}")
-  local slam_args=()
-  local play_topics=()
-  local derived_input_topics=""
-  local derived_imu_topic=""
-
-  for ((i = 0; i < ${#FORWARD_ARGS[@]}; i++)); do
-    case "${FORWARD_ARGS[i]}" in
-      --input-points=*)
-        derived_input_topics="${FORWARD_ARGS[i]#*=}"
-        ;;
-      --input-points)
-        i=$((i + 1))
-        derived_input_topics="${FORWARD_ARGS[i]}"
-        ;;
-      --points=*)
-        derived_input_topics="${FORWARD_ARGS[i]#*=}"
-        ;;
-      --points)
-        i=$((i + 1))
-        derived_input_topics="${FORWARD_ARGS[i]}"
-        ;;
-      --imu=*)
-        derived_imu_topic="${FORWARD_ARGS[i]#*=}"
-        ;;
-      --imu)
-        i=$((i + 1))
-        derived_imu_topic="${FORWARD_ARGS[i]}"
-        ;;
-    esac
-  done
-
-  if [[ -n "${derived_input_topics}" ]]; then
-    mapfile -t play_topics < <(parse_csv_topics "${derived_input_topics}")
-  else
-    play_topics=("${DEFAULT_LIDAR_TOPICS[@]}")
-  fi
-
-  if [[ -n "${derived_imu_topic}" ]]; then
-    append_unique_topics play_topics "${derived_imu_topic}"
-  else
-    append_unique_topics play_topics "${DEFAULT_IMU_TOPICS[@]}"
-  fi
-  append_unique_topics play_topics "/tf_static"
-  play_cmd+=(--topics "${play_topics[@]}")
-
-  mapfile -t slam_args < <(build_passthrough_args)
-  bash "${SCRIPT_DIR}/run_glim_slam.sh" --use-sim-time "${slam_args[@]}" &
-  SLAM_PID=$!
-  sleep 2
-  ensure_process_started "${SLAM_PID}" "GLIM"
   # bag再生前にrecordを起動し、再生開始直後のtopicも取りこぼしにくくする。
   if [[ "${record_bag}" == "true" ]]; then
     start_rosbag_record "${bag_output}" true "${record_topics[@]}"
@@ -1018,260 +895,6 @@ run_sim_lio_sam() {
   ros2 launch ai_ship_robot_gazebo sim_lio_sam.launch.py "${launch_args[@]}"
 }
 
-run_sim_glim() {
-  local build_workspace=false
-  local lite_mode=false
-  local robot_name_set=false
-  local launch_args=()
-  local left_points_topic=""
-  local right_points_topic=""
-  local record_bag=false
-  local bag_output=""
-  local bag_topics=()
-
-  format_topic_list() {
-    local values=("$@")
-    local result="["
-    local index=0
-    local value=""
-
-    for value in "${values[@]}"; do
-      [[ -n "${value}" ]] || continue
-      if [[ "${index}" -gt 0 ]]; then
-        result+=", "
-      fi
-      result+="'${value}'"
-      index=$((index + 1))
-    done
-
-    result+="]"
-    printf '%s' "${result}"
-  }
-
-  while [[ $# -gt 0 ]]; do
-    case "$1" in
-      --build)
-        build_workspace=true
-        ;;
-      --config=*)
-        launch_args+=("glim_config_path:=${1#*=}")
-        ;;
-      --config)
-        shift
-        launch_args+=("glim_config_path:=$(require_value --config "${1:-}")")
-        ;;
-      --fusion-config=*)
-        launch_args+=("fusion_config:=${1#*=}")
-        ;;
-      --fusion-config)
-        shift
-        launch_args+=("fusion_config:=$(require_value --fusion-config "${1:-}")")
-        ;;
-      --input-points=*)
-        mapfile -t input_topics < <(parse_csv_topics "${1#*=}")
-        launch_args+=("input_points_topics:=$(format_topic_list "${input_topics[@]}")")
-        ;;
-      --input-points)
-        shift
-        input_points_value="$(require_value --input-points "${1:-}")"
-        mapfile -t input_topics < <(parse_csv_topics "${input_points_value}")
-        launch_args+=("input_points_topics:=$(format_topic_list "${input_topics[@]}")")
-        ;;
-      --points=*)
-        points_topic="${1#*=}"
-        launch_args+=("input_points_topics:=$(format_topic_list "${points_topic}")")
-        launch_args+=("reference_points_topic:=${points_topic}")
-        ;;
-      --points)
-        shift
-        points_topic="$(require_value --points "${1:-}")"
-        launch_args+=("input_points_topics:=$(format_topic_list "${points_topic}")")
-        launch_args+=("reference_points_topic:=${points_topic}")
-        ;;
-      --left-points=*)
-        left_points_topic="${1#*=}"
-        ;;
-      --left-points)
-        shift
-        left_points_topic="$(require_value --left-points "${1:-}")"
-        ;;
-      --right-points=*)
-        right_points_topic="${1#*=}"
-        ;;
-      --right-points)
-        shift
-        right_points_topic="$(require_value --right-points "${1:-}")"
-        ;;
-      --reference-points=*)
-        launch_args+=("reference_points_topic:=${1#*=}")
-        ;;
-      --reference-points)
-        shift
-        launch_args+=("reference_points_topic:=$(require_value --reference-points "${1:-}")")
-        ;;
-      --reference-lidar-frame=*)
-        launch_args+=("reference_lidar_frame:=${1#*=}")
-        ;;
-      --reference-lidar-frame)
-        shift
-        launch_args+=("reference_lidar_frame:=$(require_value --reference-lidar-frame "${1:-}")")
-        ;;
-      --fused-points=*)
-        launch_args+=("fused_points_topic:=${1#*=}")
-        ;;
-      --fused-points)
-        shift
-        launch_args+=("fused_points_topic:=$(require_value --fused-points "${1:-}")")
-        ;;
-      --record-bag)
-        record_bag=true
-        ;;
-      --bag-output=*)
-        bag_output="${1#*=}"
-        ;;
-      --bag-output)
-        shift
-        bag_output="$(require_value --bag-output "${1:-}")"
-        ;;
-      --bag-topics=*)
-        mapfile -t bag_topics < <(parse_csv_topics "${1#*=}")
-        ;;
-      --bag-topics)
-        shift
-        bag_topics_value="$(require_value --bag-topics "${1:-}")"
-        mapfile -t bag_topics < <(parse_csv_topics "${bag_topics_value}")
-        ;;
-      --imu=*)
-        launch_args+=("livox_imu_topic:=${1#*=}")
-        ;;
-      --imu)
-        shift
-        launch_args+=("livox_imu_topic:=$(require_value --imu "${1:-}")")
-        ;;
-      --rviz)
-        launch_args+=("use_rviz:=true")
-        ;;
-      --no-rviz)
-        launch_args+=("use_rviz:=false")
-        ;;
-      --rviz-config=*)
-        launch_args+=("rviz_config:=${1#*=}")
-        ;;
-      --rviz-config)
-        shift
-        launch_args+=("rviz_config:=$(require_value --rviz-config "${1:-}")")
-        ;;
-      --lite)
-        lite_mode=true
-        ;;
-      --gui)
-        launch_args+=("gui:=true")
-        ;;
-      --no-gui)
-        launch_args+=("gui:=false")
-        ;;
-      --world=*)
-        launch_args+=("world:=${1#*=}")
-        ;;
-      --world)
-        shift
-        launch_args+=("world:=$(require_value --world "${1:-}")")
-        ;;
-      --lidar-pattern=*)
-        launch_args+=("lidar_pattern_file:=$(validate_lidar_pattern_file "${1#*=}")")
-        ;;
-      --lidar-pattern)
-        shift
-        launch_args+=("lidar_pattern_file:=$(validate_lidar_pattern_file "$(require_value --lidar-pattern "${1:-}")")")
-        ;;
-      --robot-name=*)
-        launch_args+=("robot_name:=${1#*=}")
-        robot_name_set=true
-        ;;
-      --robot-name)
-        shift
-        launch_args+=("robot_name:=$(require_value --robot-name "${1:-}")")
-        robot_name_set=true
-        ;;
-      --glim-package=*)
-        launch_args+=("glim_package:=${1#*=}")
-        ;;
-      --glim-package)
-        shift
-        launch_args+=("glim_package:=$(require_value --glim-package "${1:-}")")
-        ;;
-      --glim-executable=*)
-        launch_args+=("glim_executable:=${1#*=}")
-        ;;
-      --glim-executable)
-        shift
-        launch_args+=("glim_executable:=$(require_value --glim-executable "${1:-}")")
-        ;;
-      *:=*)
-        echo "Do not use ROS 2 launch argument syntax here: $1" >&2
-        echo "Use shell options instead. Run with --help to see available options." >&2
-        exit 2
-        ;;
-      *)
-        echo "Unknown option for --sim: $1" >&2
-        echo "Run with --help to see available options." >&2
-        exit 2
-        ;;
-    esac
-    shift
-  done
-
-  if [[ -n "${left_points_topic}" || -n "${right_points_topic}" ]]; then
-    input_topics=()
-    [[ -n "${left_points_topic}" ]] && input_topics+=("${left_points_topic}")
-    [[ -n "${right_points_topic}" ]] && input_topics+=("${right_points_topic}")
-    launch_args+=("input_points_topics:=$(format_topic_list "${input_topics[@]}")")
-    if [[ -n "${left_points_topic}" ]]; then
-      launch_args+=("reference_points_topic:=${left_points_topic}")
-    fi
-  fi
-
-  launch_args+=("lite:=${lite_mode}")
-  if [[ "${lite_mode}" == "true" ]]; then
-    launch_args+=("gui:=false")
-  fi
-
-  if [[ "${robot_name_set}" == "false" ]]; then
-    launch_args+=("robot_name:=ai_ship_robot_glim_$$")
-  fi
-
-  source_sim_slam_environment false
-
-  if [[ "${build_workspace}" == "true" ]]; then
-    bash "${SETUP_RUNTIME_SCRIPT}"
-    bash "${SETUP_SIMULATION_SCRIPT}"
-  fi
-
-  if [[ ! -f "${AITRAN_ROOT}/ros2_ws/install/setup.bash" ]]; then
-    echo "Missing aitran/ros2_ws/install/setup.bash. Run bash aitran/scripts/install/setup.sh first." >&2
-    exit 1
-  fi
-
-  if [[ ! -f "${SIM_ROOT}/ros2_ws/install/setup.bash" ]]; then
-    echo "Missing sim/ros2_ws/install/setup.bash. Run bash sim/scripts/install/setup.sh first." >&2
-    exit 1
-  fi
-
-  source_sim_slam_environment
-  if [[ "${record_bag}" == "true" ]]; then
-    if [[ -z "${bag_output}" ]]; then
-      bag_output="$(default_bag_output)"
-    fi
-    ros2 launch ai_ship_robot_gazebo sim_glim.launch.py "${launch_args[@]}" &
-    # 明示指定があればそのtopicだけを記録し、未指定時は全topicを記録する。
-    start_rosbag_record "${bag_output}" true "${bag_topics[@]}"
-    wait
-    return $?
-  fi
-
-  ros2 launch ai_ship_robot_gazebo sim_glim.launch.py "${launch_args[@]}"
-}
-
 RECORD_BAG=false
 BAG_OUTPUT=""
 BAG_TOPICS=()
@@ -1281,7 +904,6 @@ BAG_PLAY_RATE="1.0"
 BAG_START_DELAY="0"
 BAG_START_OFFSET="0"
 BAG_AUTO_EXIT=true
-BACKEND="lio-sam"
 
 trap cleanup_background_processes EXIT
 
@@ -1365,19 +987,7 @@ while [[ $# -gt 0 ]]; do
       echo "--bag-loop has been removed. Use --no-auto-exit if you need to keep SLAM running after one playback." >&2
       exit 2
       ;;
-    --backend=*)
-      BACKEND="$(normalize_backend "${1#*=}")"
-      ;;
-    --backend)
-      shift
-      backend_value="$(require_value --backend "${1:-}")"
-      BACKEND="$(normalize_backend "${backend_value}")"
-      ;;
     --lio-sam|--lio_sam|--liosam)
-      BACKEND="lio-sam"
-      ;;
-    --glim)
-      BACKEND="glim"
       ;;
     --use-sim-time)
       FORWARD_ARGS+=("$1")
@@ -1412,11 +1022,7 @@ if [[ "${SIM_MODE}" == "true" ]]; then
     esac
   done
 
-  if [[ "${BACKEND}" == "glim" ]]; then
-    run_sim_glim "${SIM_ARGS[@]}"
-  else
-    run_sim_lio_sam "${SIM_ARGS[@]}"
-  fi
+  run_sim_lio_sam "${SIM_ARGS[@]}"
   exit $?
 fi
 
@@ -1439,11 +1045,7 @@ if [[ "${BAG_PLAY_REQUESTED}" == "true" ]]; then
   if [[ "${RECORD_BAG}" == "true" && -z "${BAG_OUTPUT}" ]]; then
     BAG_OUTPUT="$(default_bag_output)"
   fi
-  if [[ "${BACKEND}" == "glim" ]]; then
-    run_bag_play_glim "${BAG_PLAY}" "${BAG_PLAY_RATE}" "${BAG_START_OFFSET}" "${BAG_START_DELAY}" "${BAG_AUTO_EXIT}" "${RECORD_BAG}" "${BAG_OUTPUT}" "${BAG_TOPICS[@]}"
-  else
-    run_bag_play_lio_sam "${BAG_PLAY}" "${BAG_PLAY_RATE}" "${BAG_START_OFFSET}" "${BAG_START_DELAY}" "${BAG_AUTO_EXIT}" "${RECORD_BAG}" "${BAG_OUTPUT}" "${BAG_TOPICS[@]}"
-  fi
+  run_bag_play_lio_sam "${BAG_PLAY}" "${BAG_PLAY_RATE}" "${BAG_START_OFFSET}" "${BAG_START_DELAY}" "${BAG_AUTO_EXIT}" "${RECORD_BAG}" "${BAG_OUTPUT}" "${BAG_TOPICS[@]}"
   exit $?
 fi
 
@@ -1452,25 +1054,14 @@ if [[ "${RECORD_BAG}" == "true" ]]; then
   if [[ -z "${BAG_OUTPUT}" ]]; then
     BAG_OUTPUT="$(default_bag_output)"
   fi
-  if [[ "${BACKEND}" == "glim" ]]; then
-    run_recorded_glim "${BAG_OUTPUT}" "${BAG_TOPICS[@]}"
-  else
-    run_recorded_lio_sam "${BAG_OUTPUT}" "${BAG_TOPICS[@]}"
-  fi
+  run_recorded_lio_sam "${BAG_OUTPUT}" "${BAG_TOPICS[@]}"
   exit $?
 fi
 
 # 通常時の汎用入口はbackend単体起動scriptへの互換ラッパーとして扱う。
 if [[ "${#BAG_TOPICS[@]}" -gt 0 || -n "${BAG_OUTPUT}" ]]; then
   mapfile -t PASSTHROUGH_ARGS < <(build_passthrough_args)
-  if [[ "${BACKEND}" == "glim" ]]; then
-    exec bash "${SCRIPT_DIR}/run_glim_slam.sh" "${PASSTHROUGH_ARGS[@]}"
-  fi
   exec bash "${SCRIPT_DIR}/run_lio_sam.sh" "${PASSTHROUGH_ARGS[@]}"
-fi
-
-if [[ "${BACKEND}" == "glim" ]]; then
-  exec bash "${SCRIPT_DIR}/run_glim_slam.sh" "${FORWARD_ARGS[@]}"
 fi
 
 exec bash "${SCRIPT_DIR}/run_lio_sam.sh" "${FORWARD_ARGS[@]}"
