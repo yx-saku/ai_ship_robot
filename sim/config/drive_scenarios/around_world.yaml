@@ -1,0 +1,25 @@
+steps:
+  - duration_sec: 5.0
+    commands:
+      - type: stop
+
+  - duration_sec: 5.0
+    commands:
+      - type: forward
+        speed: 0.5
+
+  - duration_sec: 3.0
+    commands:
+      - type: yaw_left
+        speed: 0.5
+
+  - duration_sec: 10.0
+    commands:
+      - type: forward
+        speed: 1.0
+      - type: yaw_left
+        speed: 0.5
+        
+  - duration_sec: 5.0
+    commands:
+      - type: stop

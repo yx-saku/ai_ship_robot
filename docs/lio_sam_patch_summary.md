@@ -1,0 +1,466 @@
+# LIO-SAM 改修内容詳細
+
+更新日: 2026-06-16
+
+## 目的
+
+この文書は、`UV-Lab/LIO-SAM_MID360_ROS2` に対して本プロジェクトで加えている改修内容を、現行実装に基づいて洗い出したものである。
+
+主な目的は以下である。
+
+- Mid-360内蔵6軸IMUでLIO-SAMを起動できるようにする。
+- 実機Livox入力とGazebo simulation入力の単位差、時刻差、topic差を吸収する。
+- rosbag再生や高頻度入力でCloudInfoやLiDAR scanが落ちにくい構成にする。
+- LIO-SAMの推定frameとロボットURDFの実frameを分離し、TF競合を避ける。
+- third_party本体への変更をoverrideファイルとして管理し、固定commitから再現可能にする。
+
+## 対象
+
+| 項目 | 内容 |
+|---|---|
+| 対象リポジトリ | `https://github.com/UV-Lab/LIO-SAM_MID360_ROS2.git` |
+| 固定commit | `066a3e44c6a8e3cb1bd1bdd49b2cb2365711a213` |
+| override管理先 | `install/third_party_overrides/lio_sam_mid360_ros2/` |
+| override適用処理 | `install/install_third_party.sh` |
+| 実適用先 | `${AI_SHIP_ROBOT_OPT_ROOT}/ros_underlay/${ROS_DISTRO}/third_party_ws/src/lio_sam_mid360_ros2` |
+| 既定のpackage名 | `lio_sam` |
+
+## 管理方式
+
+以前の文字列置換パッチスクリプト方式ではなく、現在はレビュー済みのoverrideファイルを固定commitのupstream checkoutへコピーする方式で管理している。
+
+`install/install_third_party.sh` の `copy_lio_sam_mid360_overrides()` は、LIO-SAMのHEADが固定commitと一致することを確認してからoverrideをコピーする。commitが違う場合はコピーを拒否するため、upstream更新時に意図せず古いoverrideを上書きすることを防ぐ。
+
+コピー対象は以下である。
+
+| 種別 | ファイル |
+|---|---|
+| upstream同梱ファイル | `README.md` |
+| upstream同梱ファイル | `LICENSE` |
+| 改修対象 | `include/lio_sam/utility.hpp` |
+| 改修対象 | `src/imageProjection.cpp` |
+| 改修対象 | `src/featureExtraction.cpp` |
+| 改修対象 | `src/mapOptmization.cpp` |
+| 改修対象 | `src/imuPreintegration.cpp` |
+
+## 改修全体像
+
+| 分類 | 主な改修 | 主な対象 |
+|---|---|---|
+| 6軸IMU対応 | 静止区間の加速度からroll/pitch、gyro平均から初期biasを推定 | `utility.hpp`, `imageProjection.cpp`, `imuPreintegration.cpp` |
+| IMU単位変換 | `g` と `m/s^2` をparameterで切替 | `utility.hpp`, launch/config |
+| IMU preintegration安定化 | 初期化中IMU保持、fallback dt、ゼロ積分skip、GTSAM例外継続 | `imuPreintegration.cpp`, `utility.hpp` |
+| scan matching初期値 | IMU preintegration odometryを初期値に使用し、並進/回転を個別制御 | `imageProjection.cpp`, `mapOptmization.cpp` |
+| Livox CustomMsg処理 | 全点変換、空scan guard、`offset_time` 診断、scan終了時刻補正 | `imageProjection.cpp` |
+| LiDAR queue化 | callbackはenqueueのみ、5ms timerで1scanずつ処理 | `imageProjection.cpp` |
+| deskew切替 | `imu_angular`, `odom_interpolation`, `off` を選択可能化 | `utility.hpp`, `imageProjection.cpp`, launch/config |
+| QoS強化 | LiDARとCloudInfoのqueue depthを増やし、CloudInfoをreliable化 | `utility.hpp`, `imageProjection.cpp`, `featureExtraction.cpp`, `mapOptmization.cpp` |
+| TF/frame整理 | `odometryFrame -> lidarFrame` をLIO-SAM推定TFにし、base接続はproject側static TFに分離 | `mapOptmization.cpp`, `imuPreintegration.cpp`, launch/config |
+
+## 追加パラメータ
+
+| パラメータ | 意味 | LIO-SAM本体既定 | 実機launch既定 | simulation launch既定 |
+|---|---|---|---|---|
+| `imuType` | `six_axis` / `nine_axis` の切替 | `six_axis` | `six_axis` | `six_axis` |
+| `imuAccelerationUnit` | 入力IMU加速度の単位 | `g` | `g` | `mps2` |
+| `imuAccelerationScale` | 加速度へ追加で掛けるscale | `1.0` | `1.0` | `1.0` |
+| `imuFrequency` | IMU時刻差が取れない場合のfallback周波数 | `500.0` | `500.0` | `200.0` |
+| `imuDebug` | 変換後IMUのthrottleログ出力 | `false` | `false` | `false` |
+| `waitForImuInitialization` | 6軸IMU初期姿勢推定完了までscan処理を待つ | `true` | `true` | `true` |
+| `initialImuExpectedAccelerationNorm` | 初期静止判定で期待する加速度norm | `1.0` | `1.0` | `9.80511` |
+| `initialImuAccelerationNormTolerance` | 初期静止判定の加速度norm許容差 | `0.35` | `0.35` | `3.5` |
+| `initialImuMaxAngularVelocity` | 初期静止判定の角速度上限 | `0.2` | `0.2` | `0.2` |
+| `initialImuMinSamples` | 初期推定に必要な最小IMU sample数 | `50` | `50` | `50` |
+| `initialImuMinDuration` | 初期推定に必要な最小時間 | `0.5` | `0.5` | `0.5` |
+| `useImuPreintegrationInitialGuess` | IMU preintegration odometryをscan matching初期値へ使う | `true` | `true` | `true` |
+| `useImuTranslationInitialGuess` | preintegration並進成分を初期値へ使う | `false` | `false` | `false` |
+| `useImuRotationInitialGuess` | preintegration回転成分を初期値へ使う | `true` | `true` | `true` |
+| `deskewMode` | scan内deskew方式 | `imu_angular` | `odom_interpolation` | `off` |
+| `maxPointOffsetTimeSec` | Livox `offset_time` 異常診断の上限秒 | `0.2` | `0.2` | `0.2` |
+
+`initialImuExpectedAccelerationNorm` と `initialImuAccelerationNormTolerance` は、`imuConverter()` で単位変換する前のraw IMU値に対して使う。実機Livoxは `g` 前提、Gazeboは `m/s^2` 前提なので既定値が異なる。
+
+## `utility.hpp`
+
+### 6軸IMU初期姿勢推定
+
+`imuType` を追加し、`six_axis` と `nine_axis` を切り替えられるようにした。
+
+6軸IMUではorientation quaternionを絶対姿勢として信用できないため、起動直後の静止区間からroll/pitchだけを推定する。yawは6軸IMU単体では観測できないため0基準の相対値として扱う。
+
+推定処理は以下の条件を満たすIMU sampleだけを使う。
+
+| 条件 | 目的 |
+|---|---|
+| 加速度と角速度が有限値 | NaN/inf混入を避ける |
+| 加速度normが期待値付近 | 重力のみを観測している静止状態に近いことを確認する |
+| 角速度normが上限以下 | 回転中のsampleを初期姿勢に使わない |
+| sample数と継続時間が閾値以上 | 瞬間的な揺れで初期姿勢が決まることを避ける |
+
+条件を外れた場合はaccumulatorをresetし、静止sampleの収集をやり直す。必要sampleが揃うと、加速度平均からroll/pitch、gyro平均から初期gyro biasを計算して保持する。
+
+### IMU単位変換
+
+`imuAccelerationUnit` と `imuAccelerationScale` を追加し、入力加速度をpreintegrationが期待する `m/s^2` へ正規化する。
+
+| 入力 | 変換 |
+|---|---|
+| `imuAccelerationUnit: g` | `imuAccelerationScale * imuGravity` を掛ける |
+| `imuAccelerationUnit: mps2` | `imuAccelerationScale` のみ掛ける |
+
+その後、既存の `extrinsicRot` を使ってIMU座標からLiDAR座標へ回転する。
+
+### gyro bias補正
+
+6軸IMUの初期化が完了している場合、静止区間から推定した `sixAxisInitialGyroBias` をraw角速度から差し引く。その後、`extrinsicRot` でLiDAR座標へ回転する。
+
+この補正は、静止時の微小biasがpreintegrationの姿勢driftとして蓄積することを抑えるためのものである。
+
+### orientation生成
+
+`imuConverter()` のorientation処理はIMU種別で分岐する。
+
+| IMU種別 | orientation処理 |
+|---|---|
+| `six_axis` | 初期推定roll/pitchとyaw=0からquaternionを作る |
+| `nine_axis` | 入力orientationを使う |
+
+どちらの場合も最後に `extQRPY` を掛け、LiDAR/IMU外部姿勢を反映する。9軸IMUではquaternion normが極端に小さい場合にエラーとしてshutdownする。
+
+### 共通helper
+
+以下のhelperを追加して、LIO-SAM各nodeから同じ判断を使えるようにした。
+
+| helper | 役割 |
+|---|---|
+| `usingSixAxisImu()` | 6軸IMUモードかを返す |
+| `sixAxisImuReady()` | 6軸IMU初期姿勢が利用可能かを返す |
+| `shouldWaitForSixAxisImuInitialization()` | scan処理やIMU odometry publishを待つべきかを返す |
+| `fallbackImuDeltaTime()` | `imuFrequency` 由来のfallback dtを返す |
+| `accelerationScaleToMps2()` | 加速度単位変換scaleを返す |
+
+### QoS変更
+
+LiDAR入力QoSのdepthを `200` に増やした。rosbag再生やsimulationで短時間にscanが集中した場合でも、callback処理の遅れで即座にdropしにくくするためである。
+
+## `imageProjection.cpp`
+
+### LiDAR callbackのqueue化
+
+従来はLiDAR callback内で点群変換、deskew、range image投影、CloudInfo publishまで実行していた。これを、callbackでは `CustomMsg` をqueueへ積むだけに変更した。
+
+重い処理は5ms周期のtimer `processCloudQueue()` が担当する。1回のtimerで1scanだけ処理し、featureExtractionやmapOptimizationへburst的にCloudInfoを流さない。
+
+queue操作は以下の責務に分けている。
+
+| 処理 | 責務 |
+|---|---|
+| `cloudHandler()` | LiDAR callbackで受けたscanをenqueueする |
+| `processCloudQueue()` | queue先頭を処理し、成功または破棄時だけpopする |
+| `cachePointCloud()` | queue先頭scanを変換し、変換不能ならfalseを返す |
+
+点群変換中は `cloudLock` を保持しない。rosbag再生中やsimulationでLiDAR callbackが連続しても、重い変換処理がcallback enqueueを長時間塞がないようにしている。
+
+### `DeskewStatus`
+
+`deskewInfo()` の戻り値を `bool` ではなく `DeskewStatus` にした。
+
+| 状態 | 意味 | queue操作 |
+|---|---|---|
+| `Ready` | 必要情報が揃いscan処理可能 | 処理後にpop |
+| `Wait` | IMUやodomがまだ到着していない | popせず次timerで再試行 |
+| `Drop` | 必要時刻のIMUやodomが既に失われ、復旧不能 | popして次scanへ進む |
+
+この分離により、単なる到着待ちのscanを誤って破棄することと、復旧不能な古いscanがqueue先頭で詰まり続けることの両方を避ける。
+
+### Livox `CustomMsg` 変換
+
+Livox `CustomMsg` からLIO-SAM内部点型へ変換する処理を修正した。
+
+| 改修 | 理由 |
+|---|---|
+| `point_num` の全点を変換 | 末尾点を落とさずscan全体を使う |
+| 空scanをguard | 空点群で時刻計算や投影に進まない |
+| `offset_time` のmin/maxを監視 | 単位違いや異常なscan durationを検出する |
+| `offset_time` の単調性を監視 | scan内時刻が逆転する入力を診断する |
+| scan終了時刻を最大point timeから算出 | 最後の配列要素が最大時刻とは限らない入力に対応する |
+
+`maxPointOffsetTimeSec` を超えるpoint timeが入った場合はthrottle付きwarningを出す。これはdeskew品質に直結するため、simulation adapterやrosbag変換の不備を検出する目的である。
+
+### 6軸IMU初期化待ち
+
+`waitForImuInitialization` が有効で、6軸IMUの初期roll/pitch推定が未完了の場合、scanを `Drop` する。
+
+古いscanを初期化完了後に処理すると、そのscan取得時点とは異なる初期姿勢が適用され、初期mapが歪む可能性がある。そのため、この期間のscanは保持せず捨てる設計にしている。
+
+### deskew方式切替
+
+`deskewMode` によりscan内deskew方式を切り替える。
+
+| mode | 動作 | 主な用途 |
+|---|---|---|
+| `imu_angular` | IMU角速度をscan内で積分し、各点をscan開始姿勢へ戻す | 従来LIO-SAMに近い動作 |
+| `odom_interpolation` | IMU preintegration odometryを各点時刻へ補間してdeskewする | 実機とbag再生の既定 |
+| `off` | 点群を補正せずそのまま投影する | Gazebo理想入力や低速検証 |
+
+`imu_angular` ではscan終了時刻までのIMUが必要になる。足りない場合は `Wait`、scan開始より前のIMUが既にない場合は `Drop` とする。
+
+`odom_interpolation` ではIMU角速度積分への依存を下げ、IMU preintegration odometryをscan内時刻へ補間する。位置は線形補間、姿勢はslerpで補間する。
+
+### IMU preintegration odometry補間
+
+`odomTopic + "_incremental"` を購読し、IMU preintegrationの高頻度odometryをscan開始、scan終了、各点時刻へ補間する。
+
+scan開始時刻の補間poseは、`CloudInfo.initial_guess_*` に格納してmapOptimizationへ渡す。これにより、mapOptimizationはscan時刻に近いIMU preintegration結果をscan matching初期値として使える。
+
+初回scanでは、まだIMU preintegration odometryが存在しないため、1回だけodomなしでpublishを許可する。これによりmapping側の初回補正が生成され、その後のIMU preintegration odometryが開始できる。
+
+### CloudInfo QoS
+
+`lio_sam/deskew/cloud_info` のpublish QoSを `reliable + KeepLast(200)` に変更した。
+
+点群本体のsensor入力はbest effortのまま維持しつつ、LIO-SAM内部pipelineの制御情報であるCloudInfoは欠落しにくくする方針である。
+
+## `featureExtraction.cpp`
+
+`imageProjection -> featureExtraction -> mapOptimization` 間のCloudInfoを落としにくくするため、CloudInfoのsubscribe/publish QoSを `reliable + KeepLast(200)` に変更した。
+
+特徴抽出アルゴリズム自体は大きく変更していない。主な目的は、rosbag再生や高頻度入力時にCloudInfoだけが欠落し、後段のmapOptimizationがscanを受け取れなくなる状態を避けることである。
+
+## `mapOptmization.cpp`
+
+### CloudInfo QoS
+
+`lio_sam/feature/cloud_info` のsubscribe QoSを `reliable + KeepLast(200)` に変更した。
+
+featureExtraction側と同じQoSに揃えることで、LIO-SAM内部pipelineでCloudInfoが落ちる可能性を下げる。
+
+### IMU preintegration初期値
+
+`updateInitialGuess()` を拡張し、`CloudInfo.initial_guess_*` に格納されたIMU preintegration odometryをscan matching初期値へ使えるようにした。
+
+初期値として使うのは、前回scan開始時刻のpreintegration poseから今回scan開始時刻のpreintegration poseまでの相対変化である。これを現在の `transformTobeMapped` に掛け、scan matching開始前の予測poseにする。
+
+6軸IMUでは重力方向のroll/pitchは得られる一方、yawや並進はdriftしやすい。そのため、以下のparameterで並進と回転を個別に採用できる。
+
+| パラメータ | 既定 | 意図 |
+|---|---|---|
+| `useImuPreintegrationInitialGuess` | `true` | preintegration初期値を使うか |
+| `useImuTranslationInitialGuess` | `false` | 並進driftをscan matching初期値へ入れない |
+| `useImuRotationInitialGuess` | `true` | 回転変化だけは初期値へ使う |
+
+preintegration初期値を使わない場合でも、従来のIMU roll/pitch/yaw初期値から得た相対回転はfallbackとして使う。
+
+### roll/pitch融合の共通化
+
+`blendRollPitchWithImu()` を追加し、`transformUpdate()` とincremental odometry publishの両方で同じroll/pitch融合を使うようにした。
+
+これにより、global odometryとincremental odometryでIMU roll/pitch補正の重みがずれることを避ける。重みは既存parameterの `imuRPYWeight` を使う。
+
+現在の `lio_sam_mid360.yaml` では `imuRPYWeight: 0.0` としている。これは6軸IMUの初期roll/pitchは初期化や初期値には使うが、scan matching後の姿勢へ継続的には混ぜない安全側設定である。
+
+### odometry/TF frame整理
+
+公開odometryとTFを `odometryFrame -> lidarFrame` に統一した。
+
+| 出力 | frame |
+|---|---|
+| `lio_sam/mapping/odometry` | `header.frame_id = odometryFrame`, `child_frame_id = lidarFrame` |
+| `lio_sam/mapping/odometry_incremental` | `header.frame_id = odometryFrame`, `child_frame_id = lidarFrame` |
+| TF | `odometryFrame -> lidarFrame` |
+| path | `odometryFrame` |
+| key pose cloud | `odometryFrame` |
+| registered cloud | `odometryFrame` |
+
+本プロジェクトでは `odometryFrame = left_lidar_init`、`lidarFrame = left_lidar_odom` としている。LIO-SAMが推定する動的frameをURDF上の実LiDAR frameから分離し、base接続はlaunch側のstatic TFで行う。
+
+## `imuPreintegration.cpp`
+
+### mapping odometry購読topic
+
+IMU preintegrationの補正入力は `lio_sam/mapping/odometry_incremental` を購読する。
+
+mapOptimizationがpublishしたincremental odometryを使って、IMU preintegrationのfactor graphを定期補正する。`odometry_incremental_internal` のような内部専用topicは使わず、topicを単純化している。
+
+### 初期化中IMUの保持
+
+6軸IMUの初期roll/pitch推定が完了していない間も、IMU sampleを `imuQueOpt` と `imuQueImu` へ積むようにした。
+
+初期化完了前にmapping補正が先に到着した場合でも、補正時刻以前のIMUがqueueに残っていれば初回preintegrationを開始できる。これにより、初回mapping補正を捨て続けてIMU odometryが立ち上がらない状態を避ける。
+
+### fallback dt
+
+IMU時刻差がまだ計算できない初回sampleでは、固定値ではなく `fallbackImuDeltaTime()` を使う。これは `1.0 / imuFrequency` で計算される。
+
+実機Mid-360は500Hz、Gazebo simulationは200Hzの既定値を使うため、入力に合ったdtでpreintegrationを開始できる。
+
+### ゼロ積分時間のskip
+
+LiDAR補正時刻までに積分できたIMU durationがほぼ0の場合、GTSAM graphへIMU factorを追加せず補正をskipする。
+
+IMU factorに有効な時間幅がない状態でoptimizerへ渡すと、数値的に不安定になりやすい。warningを出して次の補正を待つことで、processを落とさず継続する。
+
+### GTSAM optimizer例外処理
+
+初回optimizer updateと通常optimizer updateの両方で例外を捕捉するようにした。
+
+例外が発生した場合はwarningを出し、graphや状態をresetして次の補正を待つ。rosbagやsimulationで一時的に不整合な時刻や姿勢が入っても、node全体が終了しないようにするためである。
+
+### failureDetectionログ強化
+
+速度異常とbias異常のログにnormと各成分を出すようにした。
+
+| 異常 | 追加情報 |
+|---|---|
+| velocity | norm, x, y, z |
+| accelerometer bias | norm, x, y, z |
+| gyroscope bias | norm, x, y, z |
+
+実機調整時に、単にresetした事実だけでなく、どの成分がどの程度破綻したかを確認できる。
+
+### TransformFusionのTF抑制
+
+`TransformFusion` はIMU odometryとLiDAR odometryの融合結果をpublishするが、base系TFはproject側static TFへ集約した。
+
+そのため、`TransformFusion` から `base_footprint` などへのTFを送らないようにしている。TF tree上でLIO-SAM由来の動的base TFとURDF/static TFが競合することを避けるためである。
+
+### IMU odometry queue安全化
+
+LiDAR補正時刻より古いIMU odometryを捨てる処理で、queueに1要素しか残らない状態でもfront/back参照が壊れないようにした。
+
+補正時刻と同時刻のsampleだけが残るケースはrosbag再生や低速simulationで起こりやすいため、防御的に `size() > 1` を条件にしている。
+
+## 実機向けlaunch/config
+
+主な実機向け設定は `ros2_ws/src/ai_ship_robot_slam/config/lio_sam_mid360.yaml` と `ros2_ws/src/ai_ship_robot_slam/launch/lio_sam.launch.py` で管理している。
+
+### 実機既定値
+
+| 項目 | 既定値 |
+|---|---|
+| `pointCloudTopic` | `/livox/lidar` |
+| `imuTopic` | launch既定は `/livox/imu` |
+| `imuTopic` のYAML値 | `/livox/imu_oriented` |
+| `sensor` | `livox` |
+| `N_SCAN` | `4` |
+| `Horizon_SCAN` | `10000` |
+| `imuAccelerationUnit` | `g` |
+| `imuFrequency` | `500.0` |
+| `deskewMode` | `odom_interpolation` |
+| `useImuTranslationInitialGuess` | `false` |
+| `useImuRotationInitialGuess` | `true` |
+| `mappingProcessInterval` | `0.0` |
+| `loopClosureEnableFlag` | `false` |
+
+YAML上の `imuTopic: /livox/imu_oriented` は、外部の `six_axis_imu_initial_orientation_node` を使う検証向けの値である。通常launchでは `imu_topic` argumentの既定値 `/livox/imu` で上書きされる。
+
+### TF構成
+
+LIO-SAM本体には、以下のframeを渡す。
+
+| LIO-SAM parameter | 本プロジェクトでの値 | 役割 |
+|---|---|---|
+| `mapFrame` | `map` | 全体map frame |
+| `odometryFrame` | `left_lidar_init` | LIO-SAM推定の親frame |
+| `lidarFrame` | `left_lidar_odom` | LIO-SAM推定の子frame |
+| `baselinkFrame` | `base_footprint` | ロボット基準frame |
+
+`lio_sam.launch.py` は以下のstatic TFをpublishする。
+
+| static TF | 目的 |
+|---|---|
+| `map -> left_lidar_init` | URDF上の左LiDAR配置から、SLAM初期frameの位置とyawを与える |
+| `left_lidar_odom -> base_footprint` | LIO-SAM推定LiDAR poseをロボットbaseへ接続する |
+
+LIO-SAMの動的TFは `left_lidar_init -> left_lidar_odom` に限定する。これにより、URDFの実LiDAR linkやbase linkとの責務が分離される。
+
+### 任意node
+
+`lio_sam.launch.py` には、LIO-SAM本体以外に以下の任意nodeがある。
+
+| node | 既定 | 目的 |
+|---|---|---|
+| `multi_lidar_pointcloud_fusion_node` | 無効 | 複数LiDARのCustomMsg fusion検証用 |
+| `mid360_lio_sam_pointcloud_adapter_node` | 無効 | PointCloud2差分をLIO-SAM入力へ合わせる検証用 |
+| `six_axis_imu_initial_orientation_node` | 無効 | LIO-SAM本体外でIMU orientationを付与する検証用 |
+| `pcd_map_saver_node` | 無効 | 登録済み点群をmap frameへ変換してPCD保存する |
+
+## simulation向けlaunch
+
+`sim/ros2_ws/src/ai_ship_robot_gazebo/launch/sim_lio_sam.launch.py` は、本番用 `lio_sam.launch.py` をincludeし、simulation固有の差分だけをlaunch argumentで上書きする。
+
+### simulation既定値
+
+| 項目 | 既定値 |
+|---|---|
+| `use_sim_time` | `true` |
+| Gazebo LiDAR raw topic | `/left_lidar/custom` |
+| Gazebo IMU raw topic | `/left_lidar/imu` |
+| LIO-SAM LiDAR topic | `/livox/lidar` |
+| LIO-SAM IMU topic | `/left_lidar/imu` |
+| `use_mid360_sim_adapter` | `true` |
+| `imuAccelerationUnit` | `mps2` |
+| `imuFrequency` | `200.0` |
+| `initialImuExpectedAccelerationNorm` | `9.80511` |
+| `initialImuAccelerationNormTolerance` | `3.5` |
+| `deskewMode` | `off` |
+| Gazebo odom TF | `publish_odom_tf=false` |
+
+Gazebo IMUはROS標準の `m/s^2` 単位で出るため、実機Livoxの `g` 入力とは初期静止判定値と加速度変換設定が異なる。
+
+simulationでは理想LiDAR点群や低速検証を前提に、既定の `deskewMode` を `off` にしている。IMU/odom時刻待ちが原因で初期検証が進まないことを避けるためである。
+
+## topic関係
+
+主要topicの流れは以下である。
+
+| producer | topic | consumer | 用途 |
+|---|---|---|---|
+| Livox driver / sim adapter | `/livox/lidar` | `lio_sam_imageProjection` | Livox `CustomMsg` LiDAR scan |
+| Livox driver / Gazebo | `/livox/imu` または `/left_lidar/imu` | `lio_sam_imageProjection`, `lio_sam_imuPreintegration` | IMU入力 |
+| `lio_sam_imageProjection` | `lio_sam/deskew/cloud_info` | `lio_sam_featureExtraction` | deskew済み点群と初期値情報 |
+| `lio_sam_featureExtraction` | `lio_sam/feature/cloud_info` | `lio_sam_mapOptimization` | 特徴点抽出後のscan情報 |
+| `lio_sam_mapOptimization` | `lio_sam/mapping/odometry_incremental` | `lio_sam_imuPreintegration` | LiDAR補正によるIMU preintegration補正入力 |
+| `lio_sam_imuPreintegration` | `odometry/imu_incremental` | `lio_sam_imageProjection`, `lio_sam_transformFusion` | 高頻度IMU preintegration odometry |
+| `lio_sam_transformFusion` | `odometry/imu` | 外部可視化/利用先 | LiDAR補正を反映したIMU odometry |
+| `lio_sam_mapOptimization` | `lio_sam/mapping/odometry` | 外部可視化/利用先 | scan matching後のglobal odometry |
+
+`odometry/imu_incremental` は `odomTopic + "_incremental"` で決まる。現在のYAMLでは `odomTopic: odometry/imu` である。
+
+## 運用上の注意
+
+LIO-SAM本体の改修正本は `install/third_party_overrides/lio_sam_mid360_ros2/` のoverrideファイルである。`/opt/ai_ship_robot/.../third_party_ws/src/lio_sam_mid360_ros2` 側のファイルは、install時にコピーされた生成物として扱う。
+
+upstream commitを変更する場合は、`install/install_third_party.sh` の固定commit確認でoverrideコピーが拒否される。新しいupstreamに対して5つのoverrideファイルを再移植し、ビルドと実行確認をやり直す必要がある。
+
+6軸IMU初期化には静止区間が必要である。起動直後にロボットが動いているとaccumulatorがresetされ続け、scanがdropされる。
+
+`useImuTranslationInitialGuess` は既定で `false` にしている。6軸IMUと低速台車ではpreintegration並進がdriftしやすく、scan matching初期値へ入れると悪化する可能性がある。
+
+`deskewMode: off` はsimulation初期検証向けである。実機やrosbagで走行中のscan歪みが問題になる場合は `odom_interpolation` を使う。
+
+TF構成は `lio_sam.launch.py` のstatic TFとセットで成立する。LIO-SAM nodeだけを直接起動する場合、`map -> left_lidar_init` と `left_lidar_odom -> base_footprint` の接続が不足する可能性がある。
+
+CloudInfoはreliable QoSにしているため、subscriberが処理できないほど詰まると遅延が増える可能性がある。rosbag記録や再生で追いつかない場合は、再生速度や記録topicを絞る方が根本対策になる。
+
+## 確認コマンド
+
+third_partyの取得、override適用、ビルドは以下で行う。
+
+```bash
+bash install/install_third_party.sh
+```
+
+実機向けLIO-SAM launchの主な起動対象は以下である。
+
+```bash
+ros2 launch ai_ship_robot_slam lio_sam.launch.py
+```
+
+simulation込みのLIO-SAM launchの主な起動対象は以下である。
+
+```bash
+ros2 launch ai_ship_robot_gazebo sim_lio_sam.launch.py
+```
+
+実際の起動はプロジェクトのrun scriptから行う場合があるため、運用時は `scripts/run_slam.sh` や `sim/scripts/run_simulation.sh` の引数も確認する。
