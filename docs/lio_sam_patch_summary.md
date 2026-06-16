@@ -14,6 +14,23 @@
 - LIO-SAMの推定frameとロボットURDFの実frameを分離し、TF競合を避ける。
 - third_party本体への変更をoverrideファイルとして管理し、固定commitから再現可能にする。
 
+## 改修点の簡易一覧
+
+詳細に入る前に、LIO-SAM本体へ加えている主な改修を簡単に整理する。
+
+| 改修点 | 概要 |
+|---|---|
+| 6軸IMU対応 | 起動直後の静止IMUからroll/pitchとgyro biasを推定し、orientationを持たないMid-360内蔵IMUでも初期化できるようにした。 |
+| IMU単位変換 | 実機Livoxの `g` 入力とGazeboの `m/s^2` 入力をparameterで切り替え、preintegrationへ同じ単位で渡すようにした。 |
+| IMU preintegration安定化 | 初期化中IMUの保持、fallback dt、ゼロ積分skip、GTSAM例外時のreset継続を追加した。 |
+| scan matching初期値 | IMU preintegration odometryをscan matching初期値へ渡し、6軸IMUで壊れやすい並進成分は既定で使わないようにした。 |
+| LiDAR処理queue化 | LiDAR callbackではenqueueだけを行い、timerで1scanずつ処理してrosbag再生時の取りこぼしを抑えるようにした。 |
+| Livox CustomMsg補正 | 全点変換、空scan破棄、`offset_time` 診断、最大point timeによるscan終了時刻計算を追加した。 |
+| deskew方式切替 | `imu_angular`、`odom_interpolation`、`off` を選択できるようにし、実機とsimulationで使い分けられるようにした。 |
+| QoS強化 | LiDAR入力とCloudInfoのqueue depthを増やし、LIO-SAM内部pipelineのmessage dropを抑えるようにした。 |
+| TF/frame整理 | LIO-SAMの動的TFを `odometryFrame -> lidarFrame` に統一し、base接続はproject側static TFへ分離した。 |
+| override管理 | 固定commitのupstream checkoutへレビュー済みoverrideをコピーする方式にして、third_party改修を再現可能にした。 |
+
 ## 対象
 
 | 項目 | 内容 |
@@ -125,7 +142,7 @@
 | `six_axis` | 初期推定roll/pitchとyaw=0からquaternionを作る |
 | `nine_axis` | 入力orientationを使う |
 
-どちらの場合も最後に `extQRPY` を掛け、LiDAR/IMU外部姿勢を反映する。9軸IMUではquaternion normが極端に小さい場合にエラーとしてshutdownする。
+どちらの場合も最後に `extQRPY` を掛け、LiDAR/IMU外部姿勢を反映してから正規化する。9軸IMUでは入力orientationを使うため、無効quaternionの検出は正規化後の限定的なguardに留まる。
 
 ### 共通helper
 
