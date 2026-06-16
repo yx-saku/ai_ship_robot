@@ -20,14 +20,13 @@
 .
 ├── .devcontainer/                 # VS Code Dev Container設定
 ├── docker-compose.yml             # Dockerfile build検証用の最小Compose設定
-├── dev/                           # 開発用補助スクリプト
+├── dev/                           # 開発用補助スクリプト、AgentCoding補助ツール
 ├── install/                       # Aitran側依存導入、third_party override、workspace build
 │   └── third_party_overrides/
 ├── ros2_ws/
 │   └── src/
 │       └── ai_ship_robot_slam/        # LIO-SAM連携、Mid-360点群adapter、launch/config
 ├── scripts/                       # Aitran側appスクリプト
-│   ├── run_lio_sam.sh
 │   └── run_slam.sh
 ├── sim/
 │   ├── ros2_ws/
@@ -222,7 +221,7 @@ bash sim/scripts/run_simulation.sh --record-bag
 ```
 
 - `--record-bag` 指定時は、`--bag-topics` 未指定なら見えている全トピックを記録します
-- `--bag-output` 未指定時は `rosbag2/sim_<timestamp>` に保存します
+- `--bag-output` 未指定時は `outputs/rosbag2/sim_<timestamp>` に保存します
 - 記録時刻は `ros2 bag record --use-sim-time` で `/clock` を基準にします
 - `--bag-topics /cmd_vel,/scan_debug` のように指定すると、そのトピックだけを記録します
 
@@ -269,22 +268,9 @@ ros2 topic pub /cmd_vel geometry_msgs/msg/Twist \
   -r 10
 ```
 
-## SLAM backendを切り替える
-
-`scripts/run_slam.sh` では `LIO-SAM` と `glim` を切り替えられます。
-
-```bash
-bash scripts/run_slam.sh --backend lio-sam --sim --lite
-bash scripts/run_slam.sh --backend glim --sim --lite
-```
-
-- `--backend` 省略時の既定値は `lio-sam` です
-- 互換 alias として `--lio-sam` と `--glim` も使えます
-- backend 固有の単体起動script は `run_lio_sam.sh` と `run_glim_slam.sh` です
-
 ## LIO-SAMでSLAMする
 
-左Mid-360の点群と内蔵IMUを使ってLIO-SAMを起動します。本番用入口の `scripts/run_lio_sam.sh` はシミュレーションを意識せず、LIO-SAMだけを起動します。Gazeboと同時に起動する場合は `scripts/run_slam.sh --sim` を使います。
+左Mid-360の点群と内蔵IMUを使ってLIO-SAMを起動します。入口は `scripts/run_slam.sh` に統一しており、Gazeboと同時に起動する場合は `--sim` を使います。
 
 LIO-SAM本体はthird_party underlayの公式repo実装を使います。本プロジェクトでは、Livox `CustomMsg` を複数台分融合したうえで、Mid-360の点群をLIO-SAMが期待する `x,y,z,intensity,ring,time` フィールドへ正規化するROS 2導線を追加しています。rosbag の既定記録対象も `CustomMsg` を使います。
 
@@ -319,7 +305,7 @@ bash scripts/run_slam.sh --sim --lite --no-rviz --no-gui
 bash scripts/run_slam.sh --sim --lite --record-bag
 ```
 
-- `--bag-output` 未指定時は `rosbag2/sim_slam_<timestamp>` に保存します
+- `--bag-output` 未指定時は `outputs/rosbag2/sim_slam_<timestamp>` に保存します
 - 記録時刻は `/clock` を基準にします
 - `--record-bag` 指定時は、`--bag-topics` 未指定なら Gazebo / SLAM を含む見えている全トピックを記録します
 - `--bag-topics /livox/lidar,/livox/imu` のように指定すると、そのトピックだけを記録します
@@ -376,14 +362,14 @@ bash scripts/run_slam.sh \
   --record-bag
 ```
 
-- 実機相当入力の記録先既定値は `rosbag2/lio_sam_<timestamp>` です
+- 実機相当入力の記録先既定値は `outputs/rosbag2/lio_sam_<timestamp>` です
 - 記録時は `/tf` と `/tf_static` も含めます
 
 記録済みbagを再生してGazeboなしでLIO-SAMを起動する例です。
 
 ```bash
 bash scripts/run_slam.sh \
-  --bag-play rosbag2/sim_20260611_120000 \
+  --bag-play outputs/rosbag2/sim_20260611_120000 \
   --bag-start-delay 10 \
   --raw-imu /livox/imu \
   --imu /livox/imu_oriented \
@@ -400,8 +386,8 @@ bash scripts/run_slam.sh \
 開発用ツールとして、rosbag と RViz2 をまとめて起動するスクリプトを追加しています。
 
 ```bash
-bash dev/replay_rosbag.sh --mode simulation rosbag2/sim_20260611_120000
-bash dev/replay_rosbag.sh --mode slam rosbag2/lio_sam_20260611_120000
+bash dev/replay_rosbag.sh --mode simulation outputs/rosbag2/sim_20260611_120000
+bash dev/replay_rosbag.sh --mode slam outputs/rosbag2/lio_sam_20260611_120000
 ```
 
 - `run_simulation.sh` で記録したbagは `--mode simulation`、`run_slam.sh` で記録したbagは `--mode slam` を必ず指定します
@@ -414,70 +400,7 @@ bash dev/replay_rosbag.sh --mode slam rosbag2/lio_sam_20260611_120000
 third_party側のLIO-SAM ROS 2パッケージ名が導入版と異なる場合は、起動時に差し替えます。
 
 ```bash
-bash scripts/run_lio_sam.sh --lio-sam-package lio_sam
-```
-
-## GLIMでSLAMする
-
-GLIM本体と ROS 2 ノードは third_party underlay の公式実装を使います。本プロジェクトでは、既存の `multi_lidar_pointcloud_fusion_node` で Livox `CustomMsg` を単一の `PointCloud2` にまとめ、`/livox/fused_points` を `glim_rosnode` に渡します。
-
-`install/install_third_party.sh` は `gtsam_points`、`glim`、`glim_ros2` を含む GLIM stack も underlay へ導入します。CPU-only 方針に合わせて、既定では CUDA / viewer / OpenCV なしで build します。
-
-```bash
-bash install/install.sh
-bash install/install_third_party.sh
-bash sim/install/install.sh
-bash sim/install/install_third_party.sh
-bash install/setup.sh
-bash sim/install/setup.sh
-bash scripts/run_slam.sh --backend glim --sim --lite
-```
-
-RVizなし、Gazebo GUIなしで起動する例です。
-
-```bash
-bash scripts/run_slam.sh --backend glim --sim --lite --no-rviz --no-gui
-```
-
-実機相当入力で GLIM だけを起動する例です。
-
-```bash
-bash scripts/run_slam.sh \
-  --backend glim \
-  --points /livox/lidar \
-  --imu /livox/imu \
-  --config ros2_ws/src/ai_ship_robot_slam/config/glim_real
-```
-
-記録済みbagを再生して Gazebo なしで GLIM を起動する例です。
-
-```bash
-bash scripts/run_slam.sh \
-  --backend glim \
-  --bag-play rosbag2/sim_20260611_120000 \
-  --imu /livox/imu \
-  --input-points /livox/lidar
-```
-
-主な GLIM 関連 topic / frame です。
-
-- GLIM 入力点群: `/livox/fused_points`
-- GLIM 入力 IMU: `/livox/imu`
-- GLIM odom frame: `glim_odom`
-- GLIM LiDAR frame: `left_lidar_link`
-
-確認コマンドです。
-
-```bash
-ros2 topic hz /livox/fused_points
-ros2 topic hz /livox/imu
-ros2 run tf2_ros tf2_echo glim_odom base_footprint
-```
-
-third_party側の GLIM ROS 2 パッケージ名や実行ファイル名が導入版と異なる場合は、起動時に差し替えます。
-
-```bash
-bash scripts/run_glim_slam.sh --glim-package glim_ros --glim-executable glim_rosnode
+bash scripts/run_slam.sh --lio-sam-package lio_sam
 ```
 
 ## LiDAR配置を変更する

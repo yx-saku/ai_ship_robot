@@ -12,7 +12,7 @@ SIMULATION_RVIZ_CONFIG="${SIM_ROOT}/ros2_ws/src/ai_ship_robot_gazebo/config/mid3
 ROSBAG_PID=""
 RVIZ_PID=""
 MAP_SAVER_PID=""
-ROSBAG_ROOT="${WORKSPACE_ROOT}/rosbag2"
+ROSBAG_ROOT="${WORKSPACE_ROOT}/outputs/rosbag2"
 
 usage() {
   cat <<'EOF'
@@ -20,7 +20,7 @@ Usage: bash dev/replay_rosbag.sh MODE [BAG_PATH] [OPTIONS]
 
 Arguments:
   MODE                 Required replay mode: sim or slam.
-  BAG_PATH             Optional rosbag path. If omitted, the latest rosbag2/MODE_* bag is used.
+  BAG_PATH             Optional rosbag path. If omitted, the latest outputs/rosbag2/MODE_* bag is used.
 
 Options:
   --rviz-config PATH   Use a custom RViz config.

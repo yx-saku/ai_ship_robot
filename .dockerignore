@@ -7,3 +7,4 @@ ros2_ws/log
 sim/ros2_ws/build
 sim/ros2_ws/install
 sim/ros2_ws/log
+outputs

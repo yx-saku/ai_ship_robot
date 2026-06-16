@@ -81,9 +81,9 @@ float read_numeric_field(
 std::filesystem::path default_output_directory()
 {
   if (const auto * workspace_root = std::getenv("AI_SHIP_ROBOT_WORKSPACE_ROOT")) {
-    return std::filesystem::path(workspace_root) / "cloud_map";
+    return std::filesystem::path(workspace_root) / "outputs" / "cloud_map";
   }
-  return std::filesystem::current_path() / "cloud_map";
+  return std::filesystem::current_path() / "outputs" / "cloud_map";
 }
 
 std::string timestamp_string()

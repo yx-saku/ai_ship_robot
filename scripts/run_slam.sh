@@ -17,7 +17,7 @@ DEFAULT_IMU_TOPICS=("/left_lidar/imu")
 ROSBAG_PID=""
 ROSBAG_PLAY_PID=""
 SLAM_PID=""
-ROSBAG_ROOT="${WORKSPACE_ROOT}/rosbag2"
+ROSBAG_ROOT="${WORKSPACE_ROOT}/outputs/rosbag2"
 AUTO_STOP_AFTER_BAG_PLAY_SECONDS="${AUTO_STOP_AFTER_BAG_PLAY_SECONDS:-30}"
 PROCESS_STOP_GRACE_SECONDS="15"
 PROCESS_STOP_TERM_SECONDS="5"
@@ -33,7 +33,7 @@ Options:
   --bag-output PATH  Set rosbag output directory or prefix.
   --bag-topics CSV   Record only the given comma-separated topics. Default records all topics.
   --bag-play [PATH]  Play a recorded rosbag and run LIO-SAM without Gazebo.
-                     If PATH is omitted, the latest rosbag2/sim_* bag is used.
+                     If PATH is omitted, the latest outputs/rosbag2/sim_* bag is used.
   --bag-play-rate N  Set rosbag playback rate. Default: 1.0
   --bag-start-delay SEC
                      Delay rosbag playback start by the given seconds.
@@ -200,7 +200,7 @@ build_passthrough_args() {
   local arg=""
   local skip_next=0
 
-  # wrapper専用引数はここで除去し、run_lio_sam.shにはLIO-SAM固有オプションだけを渡す。
+  # wrapper専用引数はここで除去し、LIO-SAM launchに関係するオプションだけを残す。
   for arg in "${FORWARD_ARGS[@]}"; do
     if [[ "${skip_next}" -eq 1 ]]; then
       skip_next=0
@@ -255,7 +255,7 @@ start_rosbag_record() {
 }
 
 default_bag_output() {
-  # run_slam経由の収録はbackendや入力形態に関係なくslam prefixへ統一する。
+  # run_slam経由の収録は入力形態に関係なくslam prefixへ統一する。
   printf '%s/slam_%(%Y%m%d_%H%M%S)T' "${ROSBAG_ROOT}" -1
 }
 
@@ -376,6 +376,352 @@ ensure_process_started() {
   exit "${process_status}"
 }
 
+run_slam_launch() {
+  local build_workspace=false
+  local launch_args=()
+  local left_points_topic=""
+  local right_points_topic=""
+
+  format_topic_list() {
+    local values=("$@")
+    local result="["
+    local index=0
+
+    for value in "${values[@]}"; do
+      [[ -n "${value}" ]] || continue
+      if [[ "${index}" -gt 0 ]]; then
+        result+=", "
+      fi
+      result+="'${value}'"
+      index=$((index + 1))
+    done
+
+    result+="]"
+    printf '%s' "${result}"
+  }
+
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --build)
+        build_workspace=true
+        ;;
+      --config=*)
+        launch_args+=("params_file:=${1#*=}")
+        ;;
+      --config)
+        shift
+        launch_args+=("params_file:=$(require_value --config "${1:-}")")
+        ;;
+      --fusion-config=*)
+        launch_args+=("fusion_config:=${1#*=}")
+        ;;
+      --fusion-config)
+        shift
+        launch_args+=("fusion_config:=$(require_value --fusion-config "${1:-}")")
+        ;;
+      --input-points=*)
+        mapfile -t input_topics < <(parse_csv_topics "${1#*=}")
+        if [[ "${#input_topics[@]}" -eq 0 ]]; then
+          echo "--input-points requires at least one topic." >&2
+          exit 2
+        fi
+        launch_args+=("use_fusion:=true")
+        launch_args+=("input_points_topics:=$(format_topic_list "${input_topics[@]}")")
+        ;;
+      --input-points)
+        shift
+        input_points_value="$(require_value --input-points "${1:-}")"
+        mapfile -t input_topics < <(parse_csv_topics "${input_points_value}")
+        if [[ "${#input_topics[@]}" -eq 0 ]]; then
+          echo "--input-points requires at least one topic." >&2
+          exit 2
+        fi
+        launch_args+=("use_fusion:=true")
+        launch_args+=("input_points_topics:=$(format_topic_list "${input_topics[@]}")")
+        ;;
+      --points=*)
+        points_topic="${1#*=}"
+        launch_args+=("input_points_topics:=$(format_topic_list "${points_topic}")")
+        launch_args+=("reference_points_topic:=${points_topic}")
+        launch_args+=("lio_custom_topic:=${points_topic}")
+        ;;
+      --points)
+        shift
+        points_topic="$(require_value --points "${1:-}")"
+        launch_args+=("input_points_topics:=$(format_topic_list "${points_topic}")")
+        launch_args+=("reference_points_topic:=${points_topic}")
+        launch_args+=("lio_custom_topic:=${points_topic}")
+        ;;
+      --left-points=*)
+        left_points_topic="${1#*=}"
+        ;;
+      --left-points)
+        shift
+        left_points_topic="$(require_value --left-points "${1:-}")"
+        ;;
+      --right-points=*)
+        right_points_topic="${1#*=}"
+        ;;
+      --right-points)
+        shift
+        right_points_topic="$(require_value --right-points "${1:-}")"
+        ;;
+      --reference-points=*)
+        launch_args+=("use_fusion:=true")
+        launch_args+=("reference_points_topic:=${1#*=}")
+        ;;
+      --reference-points)
+        shift
+        launch_args+=("use_fusion:=true")
+        launch_args+=("reference_points_topic:=$(require_value --reference-points "${1:-}")")
+        ;;
+      --reference-lidar-frame=*)
+        launch_args+=("reference_lidar_frame:=${1#*=}")
+        ;;
+      --reference-lidar-frame)
+        shift
+        launch_args+=("reference_lidar_frame:=$(require_value --reference-lidar-frame "${1:-}")")
+        ;;
+      --fused-points=*)
+        launch_args+=("use_fusion:=true")
+        launch_args+=("fused_points_topic:=${1#*=}")
+        ;;
+      --fused-points)
+        shift
+        launch_args+=("use_fusion:=true")
+        launch_args+=("fused_points_topic:=$(require_value --fused-points "${1:-}")")
+        ;;
+      --imu=*)
+        launch_args+=("imu_topic:=${1#*=}")
+        ;;
+      --imu)
+        shift
+        launch_args+=("imu_topic:=$(require_value --imu "${1:-}")")
+        ;;
+      --imu-type=*)
+        launch_args+=("imu_type:=${1#*=}")
+        ;;
+      --imu-type)
+        shift
+        launch_args+=("imu_type:=$(require_value --imu-type "${1:-}")")
+        ;;
+      --imu-acceleration-unit=*)
+        launch_args+=("imu_acceleration_unit:=${1#*=}")
+        ;;
+      --imu-acceleration-unit)
+        shift
+        launch_args+=("imu_acceleration_unit:=$(require_value --imu-acceleration-unit "${1:-}")")
+        ;;
+      --imu-acceleration-scale=*)
+        launch_args+=("imu_acceleration_scale:=${1#*=}")
+        ;;
+      --imu-acceleration-scale)
+        shift
+        launch_args+=("imu_acceleration_scale:=$(require_value --imu-acceleration-scale "${1:-}")")
+        ;;
+      --imu-frequency=*)
+        launch_args+=("imu_frequency:=${1#*=}")
+        ;;
+      --imu-frequency)
+        shift
+        launch_args+=("imu_frequency:=$(require_value --imu-frequency "${1:-}")")
+        ;;
+      --expected-acceleration-norm=*)
+        launch_args+=("expected_acceleration_norm:=${1#*=}")
+        ;;
+      --expected-acceleration-norm)
+        shift
+        launch_args+=("expected_acceleration_norm:=$(require_value --expected-acceleration-norm "${1:-}")")
+        ;;
+      --acceleration-norm-tolerance=*)
+        launch_args+=("acceleration_norm_tolerance:=${1#*=}")
+        ;;
+      --acceleration-norm-tolerance)
+        shift
+        launch_args+=("acceleration_norm_tolerance:=$(require_value --acceleration-norm-tolerance "${1:-}")")
+        ;;
+      --imu-debug)
+        launch_args+=("imu_debug:=true")
+        ;;
+      --no-imu-debug)
+        launch_args+=("imu_debug:=false")
+        ;;
+      --deskew-mode=*)
+        launch_args+=("deskew_mode:=${1#*=}")
+        ;;
+      --deskew-mode)
+        shift
+        launch_args+=("deskew_mode:=$(require_value --deskew-mode "${1:-}")")
+        ;;
+      --wait-for-imu-initialization)
+        launch_args+=("wait_for_imu_initialization:=true")
+        ;;
+      --no-wait-for-imu-initialization)
+        launch_args+=("wait_for_imu_initialization:=false")
+        ;;
+      --use-imu-preintegration-initial-guess)
+        launch_args+=("use_imu_preintegration_initial_guess:=true")
+        ;;
+      --no-use-imu-preintegration-initial-guess)
+        launch_args+=("use_imu_preintegration_initial_guess:=false")
+        ;;
+      --use-imu-translation-initial-guess)
+        launch_args+=("use_imu_translation_initial_guess:=true")
+        ;;
+      --no-use-imu-translation-initial-guess)
+        launch_args+=("use_imu_translation_initial_guess:=false")
+        ;;
+      --use-imu-rotation-initial-guess)
+        launch_args+=("use_imu_rotation_initial_guess:=true")
+        ;;
+      --no-use-imu-rotation-initial-guess)
+        launch_args+=("use_imu_rotation_initial_guess:=false")
+        ;;
+      --raw-imu=*)
+        launch_args+=("raw_imu_topic:=${1#*=}")
+        ;;
+      --raw-imu)
+        shift
+        launch_args+=("raw_imu_topic:=$(require_value --raw-imu "${1:-}")")
+        ;;
+      --imu-initializer)
+        launch_args+=("use_imu_orientation_initializer:=true")
+        ;;
+      --no-imu-initializer)
+        launch_args+=("use_imu_orientation_initializer:=false")
+        ;;
+      --lio-points=*)
+        launch_args+=("lio_custom_topic:=${1#*=}")
+        ;;
+      --lio-points)
+        shift
+        launch_args+=("lio_custom_topic:=$(require_value --lio-points "${1:-}")")
+        ;;
+      --lio-custom=*)
+        launch_args+=("lio_custom_topic:=${1#*=}")
+        ;;
+      --lio-custom)
+        shift
+        launch_args+=("lio_custom_topic:=$(require_value --lio-custom "${1:-}")")
+        ;;
+      --adapter)
+        launch_args+=("use_adapter:=true")
+        ;;
+      --no-adapter)
+        launch_args+=("use_adapter:=false")
+        ;;
+      --fusion)
+        launch_args+=("use_fusion:=true")
+        ;;
+      --no-fusion)
+        launch_args+=("use_fusion:=false")
+        ;;
+      --map-to-odom-z|--map-to-odom-z=*)
+        echo "--map-to-odom-z has been removed. Align world/odom later with an external static TF." >&2
+        exit 2
+        ;;
+      --derived-ring-count=*)
+        launch_args+=("derived_ring_count:=${1#*=}")
+        ;;
+      --derived-ring-count)
+        shift
+        launch_args+=("derived_ring_count:=$(require_value --derived-ring-count "${1:-}")")
+        ;;
+      --min-vertical-angle=*)
+        launch_args+=("min_vertical_angle_deg:=${1#*=}")
+        ;;
+      --min-vertical-angle)
+        shift
+        launch_args+=("min_vertical_angle_deg:=$(require_value --min-vertical-angle "${1:-}")")
+        ;;
+      --max-vertical-angle=*)
+        launch_args+=("max_vertical_angle_deg:=${1#*=}")
+        ;;
+      --max-vertical-angle)
+        shift
+        launch_args+=("max_vertical_angle_deg:=$(require_value --max-vertical-angle "${1:-}")")
+        ;;
+      --fusion-timestamp-scale=*)
+        launch_args+=("fusion_timestamp_unit_scale:=${1#*=}")
+        ;;
+      --fusion-timestamp-scale)
+        shift
+        launch_args+=("fusion_timestamp_unit_scale:=$(require_value --fusion-timestamp-scale "${1:-}")")
+        ;;
+      --use-sim-time)
+        launch_args+=("use_sim_time:=true")
+        ;;
+      --no-use-sim-time)
+        launch_args+=("use_sim_time:=false")
+        ;;
+      --rviz)
+        launch_args+=("use_rviz:=true")
+        ;;
+      --no-rviz)
+        launch_args+=("use_rviz:=false")
+        ;;
+      --rviz-config=*)
+        launch_args+=("rviz_config:=${1#*=}")
+        ;;
+      --rviz-config)
+        shift
+        launch_args+=("rviz_config:=$(require_value --rviz-config "${1:-}")")
+        ;;
+      --map)
+        launch_args+=("use_map_saver:=true")
+        ;;
+      --lio-sam-package=*)
+        launch_args+=("lio_sam_package:=${1#*=}")
+        ;;
+      --lio-sam-package)
+        shift
+        launch_args+=("lio_sam_package:=$(require_value --lio-sam-package "${1:-}")")
+        ;;
+      --lio-sam|--lio_sam|--liosam)
+        ;;
+      *:=*)
+        echo "Do not use ROS 2 launch argument syntax here: $1" >&2
+        echo "Use shell options instead. Run with --help to see available options." >&2
+        exit 2
+        ;;
+      *)
+        echo "Unknown option: $1" >&2
+        echo "Run with --help to see available options." >&2
+        exit 2
+        ;;
+    esac
+    shift
+  done
+
+  if [[ -n "${left_points_topic}" || -n "${right_points_topic}" ]]; then
+    input_topics=()
+    [[ -n "${left_points_topic}" ]] && input_topics+=("${left_points_topic}")
+    [[ -n "${right_points_topic}" ]] && input_topics+=("${right_points_topic}")
+    launch_args+=("input_points_topics:=$(format_topic_list "${input_topics[@]}")")
+    launch_args+=("use_fusion:=true")
+    if [[ -n "${left_points_topic}" ]]; then
+      launch_args+=("reference_points_topic:=${left_points_topic}")
+    fi
+  fi
+
+  source_sim_slam_environment false
+
+  if [[ "${build_workspace}" == "true" ]]; then
+    # --build指定時だけworkspace setupを実行し、通常起動では再buildを避ける。
+    bash "${SETUP_RUNTIME_SCRIPT}"
+  fi
+
+  if [[ ! -f "${WORKSPACE_ROOT}/ros2_ws/install/setup.bash" ]]; then
+    echo "Missing ros2_ws/install/setup.bash. Run bash install/setup.sh first." >&2
+    exit 1
+  fi
+
+  source_sim_slam_environment
+  export AI_SHIP_ROBOT_WORKSPACE_ROOT="${WORKSPACE_ROOT}"
+
+  ros2 launch ai_ship_robot_slam lio_sam.launch.py "${launch_args[@]}"
+}
+
 run_recorded_lio_sam() {
   local bag_output="$1"
   local slam_args=()
@@ -383,7 +729,7 @@ run_recorded_lio_sam() {
   # 単体SLAM収録では入力推定に依存せず、観測できるtopicを全て保存する。
   start_rosbag_record "${bag_output}" false
   mapfile -t slam_args < <(build_passthrough_args)
-  bash "${SCRIPT_DIR}/run_lio_sam.sh" "${slam_args[@]}"
+  run_slam_launch "${slam_args[@]}"
 }
 
 run_bag_play_lio_sam() {
@@ -451,7 +797,7 @@ run_bag_play_lio_sam() {
   play_cmd+=(--topics "${play_topics[@]}")
 
   mapfile -t slam_args < <(build_passthrough_args)
-  bash "${SCRIPT_DIR}/run_lio_sam.sh" \
+  run_slam_launch \
     --use-sim-time \
     --points /livox/lidar \
     --raw-imu /left_lidar/imu \
@@ -1064,10 +1410,11 @@ if [[ "${RECORD_BAG}" == "true" ]]; then
   exit $?
 fi
 
-# 通常時の汎用入口はbackend単体起動scriptへの互換ラッパーとして扱う。
+# 通常時はこのscript内のLIO-SAM単体起動処理を直接呼び出す。
 if [[ "${#BAG_TOPICS[@]}" -gt 0 || -n "${BAG_OUTPUT}" ]]; then
   mapfile -t PASSTHROUGH_ARGS < <(build_passthrough_args)
-  exec bash "${SCRIPT_DIR}/run_lio_sam.sh" "${PASSTHROUGH_ARGS[@]}"
+  run_slam_launch "${PASSTHROUGH_ARGS[@]}"
+  exit $?
 fi
 
-exec bash "${SCRIPT_DIR}/run_lio_sam.sh" "${FORWARD_ARGS[@]}"
+run_slam_launch "${FORWARD_ARGS[@]}"

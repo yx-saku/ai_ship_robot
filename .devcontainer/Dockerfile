@@ -45,7 +45,6 @@ RUN --mount=type=cache,id=ai-ship-robot-apt-cache,target=/var/cache/apt,sharing=
         ca-certificates \
         git \
         pcl-tools \
-        python3 \
         sudo
 
 # # プロキシ環境の独自CA証明書を信頼済みにする。不要な環境ではこのブロック全体をコメントアウトする。

@@ -19,5 +19,4 @@ __pycache__/
 .devcontainer/.config
 .kilo
 
-rosbag2/
-cloud_map/
+outputs/

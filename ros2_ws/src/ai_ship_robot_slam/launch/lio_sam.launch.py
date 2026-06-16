@@ -342,7 +342,7 @@ def generate_launch_description():
             DeclareLaunchArgument(
                 "cloud_map_directory",
                 default_value=os.path.join(
-                    os.environ.get("AI_SHIP_ROBOT_WORKSPACE_ROOT", os.getcwd()), "cloud_map"
+                    os.environ.get("AI_SHIP_ROBOT_WORKSPACE_ROOT", os.getcwd()), "outputs", "cloud_map"
                 ),
             ),
             DeclareLaunchArgument(
