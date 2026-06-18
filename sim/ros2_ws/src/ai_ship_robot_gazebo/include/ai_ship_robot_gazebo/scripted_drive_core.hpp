@@ -14,7 +14,12 @@ struct ScenarioStep
   double angular_z{};
 };
 
-std::vector<ScenarioStep> load_scenario_file(const std::string & scenario_file);
+struct ScenarioDefinition
+{
+  std::vector<ScenarioStep> steps;
+};
+
+ScenarioDefinition load_scenario_file(const std::string & scenario_file);
 
 std::string format_step_command(const ScenarioStep & step);
 

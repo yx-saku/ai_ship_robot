@@ -261,8 +261,20 @@ public:
         // free cloud info memory
         freeCloudInfoMemory();
         // save newly extracted features
-        cloudInfo.cloud_corner = publishCloud(pubCornerPoints,  cornerCloud,  cloudHeader.stamp, lidarFrame);
-        cloudInfo.cloud_surface = publishCloud(pubSurfacePoints, surfaceCloud, cloudHeader.stamp, lidarFrame);
+        // mapOptimizationへ渡すCloudInfo点群は常に作り、外部feature topicは診断時だけpublishする。
+        pcl::toROSMsg(*cornerCloud, cloudInfo.cloud_corner);
+        cloudInfo.cloud_corner.header.stamp = cloudHeader.stamp;
+        cloudInfo.cloud_corner.header.frame_id = lidarFrame;
+        pcl::toROSMsg(*surfaceCloud, cloudInfo.cloud_surface);
+        cloudInfo.cloud_surface.header.stamp = cloudHeader.stamp;
+        cloudInfo.cloud_surface.header.frame_id = lidarFrame;
+        if (publishFeatureClouds)
+        {
+            if (pubCornerPoints->get_subscription_count() != 0)
+                pubCornerPoints->publish(cloudInfo.cloud_corner);
+            if (pubSurfacePoints->get_subscription_count() != 0)
+                pubSurfacePoints->publish(cloudInfo.cloud_surface);
+        }
         // publish to mapOptimization
         pubLaserCloudInfo->publish(cloudInfo);
     }

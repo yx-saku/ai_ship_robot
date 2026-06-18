@@ -1,10 +1,29 @@
-#include <algorithm>
+// Copyright 2026 AI Ship Robot Developers
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
+#include <tf2/LinearMath/Matrix3x3.h>
+#include <tf2/LinearMath/Quaternion.h>
+#include <tf2/exceptions.h>
+#include <tf2_ros/buffer.h>
+#include <tf2_ros/transform_listener.h>
+
 #include <cmath>
 #include <cstdint>
-#include <cstring>
+
+#include <algorithm>
 #include <deque>
 #include <fstream>
-#include <functional>
 #include <limits>
 #include <memory>
 #include <mutex>
@@ -17,17 +36,10 @@
 #include <vector>
 
 #include <ament_index_cpp/get_package_share_directory.hpp>
+#include <builtin_interfaces/msg/time.hpp>
 #include <livox_ros_driver2/msg/custom_msg.hpp>
 #include <livox_ros_driver2/msg/custom_point.hpp>
 #include <rclcpp/rclcpp.hpp>
-#include <sensor_msgs/msg/point_cloud2.hpp>
-#include <sensor_msgs/msg/point_field.hpp>
-#include <tf2/LinearMath/Matrix3x3.h>
-#include <tf2/LinearMath/Quaternion.h>
-#include <tf2/LinearMath/Transform.h>
-#include <tf2/LinearMath/Vector3.h>
-#include <tf2_ros/buffer.h>
-#include <tf2_ros/transform_listener.h>
 
 namespace ai_ship_robot_slam
 {
@@ -35,16 +47,7 @@ namespace
 {
 using CustomMsg = livox_ros_driver2::msg::CustomMsg;
 using CustomPoint = livox_ros_driver2::msg::CustomPoint;
-using PointCloud2 = sensor_msgs::msg::PointCloud2;
-using PointField = sensor_msgs::msg::PointField;
 
-constexpr auto kOutputPointStep = 32U;
-constexpr auto kXOffset = 0U;
-constexpr auto kYOffset = 4U;
-constexpr auto kZOffset = 8U;
-constexpr auto kIntensityOffset = 16U;
-constexpr auto kRingOffset = 20U;
-constexpr auto kTimeOffset = 24U;
 constexpr auto kPi = 3.14159265358979323846;
 constexpr auto kRadToDeg = 180.0 / kPi;
 constexpr int kScanPatternAngleScale = 1000;
@@ -71,16 +74,10 @@ struct ScanPatternDirectionKeyHash
   }
 };
 
-struct CachedCustomMessage
+struct MatchedCustomMessage
 {
+  std::string topic;
   CustomMsg::SharedPtr message;
-};
-
-struct TransformedCloud
-{
-  PointCloud2 point_cloud;
-  std::vector<CustomPoint> custom_points;
-  bool is_dense{true};
 };
 
 struct SyntheticPointInfo
@@ -88,22 +85,22 @@ struct SyntheticPointInfo
   std::uint16_t ring;
 };
 
-template<typename T>
-void write_unaligned(std::vector<std::uint8_t> & data, const std::size_t offset, const T value)
+struct CachedRigidTransform
 {
-  std::memcpy(data.data() + offset, &value, sizeof(T));
-}
-
-PointField make_field(
-  const std::string & name, const std::uint32_t offset, const std::uint8_t datatype)
-{
-  PointField field;
-  field.name = name;
-  field.offset = offset;
-  field.datatype = datatype;
-  field.count = 1;
-  return field;
-}
+  bool identity{false};
+  float r00{1.0F};
+  float r01{0.0F};
+  float r02{0.0F};
+  float r10{0.0F};
+  float r11{1.0F};
+  float r12{0.0F};
+  float r20{0.0F};
+  float r21{0.0F};
+  float r22{1.0F};
+  float tx{0.0F};
+  float ty{0.0F};
+  float tz{0.0F};
+};
 
 double seconds_between(const rclcpp::Time & lhs, const rclcpp::Time & rhs)
 {
@@ -137,19 +134,39 @@ ScanPatternDirectionKey make_scan_pattern_key(
     static_cast<int>(std::lround(zenith_deg * kScanPatternAngleScale))};
 }
 
-tf2::Transform to_tf2_transform(const geometry_msgs::msg::Transform & transform)
-{
-  tf2::Quaternion rotation(
-    transform.rotation.x, transform.rotation.y, transform.rotation.z, transform.rotation.w);
-  tf2::Vector3 translation(
-    transform.translation.x, transform.translation.y, transform.translation.z);
-  return tf2::Transform(tf2::Matrix3x3(rotation), translation);
-}
-
 std::string default_scan_pattern_csv_file()
 {
   return ament_index_cpp::get_package_share_directory("ros2_livox_simulation") +
          "/scan_mode/mid360.csv";
+}
+
+double point_offset_seconds(const CustomPoint & point, const double timestamp_unit_scale)
+{
+  // Livox CustomMsgのoffset_time単位を秒へそろえ、無効なscaleではdeskew用時刻を落とす。
+  if (timestamp_unit_scale <= 0.0) {
+    return 0.0;
+  }
+  return static_cast<double>(point.offset_time) * timestamp_unit_scale;
+}
+
+std::uint32_t seconds_to_offset_time(
+  const double seconds, const double timestamp_unit_scale, const double max_relative_time_sec)
+{
+  // 秒へ補正済みの相対時刻をCustomMsgの整数offset_timeへ戻し、範囲外は安全側に丸める。
+  if (timestamp_unit_scale <= 0.0) {
+    return 0U;
+  }
+
+  const auto max_relative_time = std::max(0.0, max_relative_time_sec);
+  const auto bounded_seconds = std::clamp(seconds, 0.0, max_relative_time);
+  const auto raw_offset = bounded_seconds / timestamp_unit_scale;
+  if (raw_offset <= 0.0) {
+    return 0U;
+  }
+  if (raw_offset >= static_cast<double>(std::numeric_limits<std::uint32_t>::max())) {
+    return std::numeric_limits<std::uint32_t>::max();
+  }
+  return static_cast<std::uint32_t>(std::llround(raw_offset));
 }
 }  // namespace
 
@@ -161,18 +178,16 @@ public:
     tf_buffer_(this->get_clock()),
     tf_listener_(tf_buffer_)
   {
-    // 融合入力はCustomMsgを正とし、基準LiDARと出力topicはYAMLから受ける。
+    // 融合入力はCustomMsgに限定し、PointCloud2出力は作らずLIO-SAM入力topicだけへpublishする。
     input_custom_topics_ = declare_parameter<std::vector<std::string>>(
-      "input_custom_topics", std::vector<std::string>{"/livox/lidar"});
-    output_points_topic_ = declare_parameter<std::string>(
-      "output_points_topic", "/livox/fused_points");
+      "input_custom_topics", std::vector<std::string>{"/lidar1/livox/lidar"});
     output_custom_topic_ = declare_parameter<std::string>(
-      "output_custom_topic", "/livox/lidar_fused");
+      "output_custom_topic", "/fused/livox/lidar");
     reference_custom_topic_ = declare_parameter<std::string>(
-      "reference_custom_topic", "/livox/lidar");
-    reference_lidar_frame_ = declare_parameter<std::string>(
-      "reference_lidar_frame", "left_lidar_link");
-    sync_queue_size_ = declare_parameter<int>("sync_queue_size", 10);
+      "reference_custom_topic", "/lidar1/livox/lidar");
+    input_ring_offsets_ = declare_parameter<std::vector<int64_t>>(
+      "input_ring_offsets", std::vector<int64_t>{});
+    cache_size_limit_ = declare_parameter<int>("cache_size_limit", 0);
     max_stamp_delta_sec_ = declare_parameter<double>("max_stamp_delta_sec", 0.05);
     tf_timeout_sec_ = declare_parameter<double>("tf_timeout_sec", 0.1);
     timestamp_unit_scale_ = declare_parameter<double>("timestamp_unit_scale", 1.0e-9);
@@ -180,81 +195,125 @@ public:
     scan_pattern_csv_file_ = declare_parameter<std::string>(
       "scan_pattern_csv_file", default_scan_pattern_csv_file());
     synthesize_ring_from_pattern_ = declare_parameter<bool>("synthesize_ring_from_pattern", false);
-    scan_pattern_physical_line_count_ = declare_parameter<int>("scan_pattern_physical_line_count", 4);
+    scan_pattern_physical_line_count_ = declare_parameter<int>(
+      "scan_pattern_physical_line_count", 4);
     synthetic_ring_count_ = declare_parameter<int>("synthetic_ring_count", 4);
 
     load_scan_pattern(scan_pattern_csv_file_);
 
-    // LIO-SAM 前段の欠落を避けるため、CustomMsg入力とPointCloud2出力ともSensorDataQoSを使う。
+    // LIO-SAM前段の欠落を避けるため、CustomMsg入出力はSensorDataQoSでそろえる。
     const auto qos = rclcpp::SensorDataQoS();
-    fused_points_pub_ = create_publisher<PointCloud2>(output_points_topic_, qos);
     fused_custom_pub_ = create_publisher<CustomMsg>(output_custom_topic_, qos);
 
     if (input_custom_topics_.empty()) {
       throw std::runtime_error("input_custom_topics must not be empty.");
     }
     if (
-      std::find(input_custom_topics_.begin(), input_custom_topics_.end(), reference_custom_topic_) ==
+      std::find(
+        input_custom_topics_.begin(), input_custom_topics_.end(),
+        reference_custom_topic_) ==
       input_custom_topics_.end())
     {
       throw std::runtime_error("reference_custom_topic must be included in input_custom_topics.");
     }
+    if (
+      std::find(input_custom_topics_.begin(), input_custom_topics_.end(), output_custom_topic_) !=
+      input_custom_topics_.end())
+    {
+      throw std::runtime_error("output_custom_topic must not overlap with input_custom_topics.");
+    }
+    if (!input_ring_offsets_.empty() && input_ring_offsets_.size() != input_custom_topics_.size()) {
+      throw std::runtime_error(
+              "input_ring_offsets must be empty or have the same size as input_custom_topics.");
+    }
 
-    // 各LiDARの最新履歴を保持し、基準LiDAR到着時に近傍時刻のCustomMsgだけを融合する。
+    // 各LiDARの未処理履歴を保持し、基準scanが2件そろった時点で最古の基準scanを確定させる。
     subscriptions_.reserve(input_custom_topics_.size());
     for (const auto & topic : input_custom_topics_) {
       auto callback = [this, topic](const CustomMsg::SharedPtr message) {
-          handle_custom(topic, std::move(message));
+          handle_custom(topic, message);
         };
       subscriptions_.push_back(create_subscription<CustomMsg>(topic, qos, callback));
     }
 
     RCLCPP_INFO(
       get_logger(),
-      "Fuse CustomMsg for LIO-SAM: inputs=%zu reference_topic=%s reference_frame=%s pointcloud2_output=%s custom_output=%s pattern=%s",
-      input_custom_topics_.size(), reference_custom_topic_.c_str(), reference_lidar_frame_.c_str(),
-      output_points_topic_.c_str(), output_custom_topic_.c_str(), scan_pattern_csv_file_.c_str());
+      "Fuse CustomMsg for LIO-SAM: inputs=%zu reference_topic=%s custom_output=%s pattern=%s",
+      input_custom_topics_.size(), reference_custom_topic_.c_str(), output_custom_topic_.c_str(),
+      scan_pattern_csv_file_.c_str());
   }
 
 private:
-  void handle_custom(const std::string & topic, const CustomMsg::SharedPtr message)
+  void handle_custom(const std::string & topic, const CustomMsg::SharedPtr & message)
   {
+    bool should_process_reference = false;
     {
-      // 各topicの履歴を短く保持し、基準LiDAR到着時にheader.stampが最も近い候補を選べるようにする。
+      // topicごとの履歴は到着順に積み、基準topicだけ2件目以降で処理を進められるようにする。
       std::scoped_lock lock(mutex_);
-      auto & cache = cached_messages_[topic];
-      cache.push_back(CachedCustomMessage{message});
-      while (static_cast<int>(cache.size()) > std::max(1, sync_queue_size_)) {
-        cache.pop_front();
+      auto & queue = cached_messages_[topic];
+      queue.push_back(message);
+      enforce_cache_limit(queue);
+      if (topic == reference_custom_topic_ && queue.size() >= 2U) {
+        should_process_reference = true;
       }
     }
 
-    if (topic != reference_custom_topic_) {
+    if (!should_process_reference) {
       return;
     }
 
-    PointCloud2 output_points;
-    CustomMsg output_custom;
-    if (!build_fused_cloud(*message, output_points, output_custom)) {
-      return;
+    while (process_oldest_reference_scan()) {
     }
-    fused_points_pub_->publish(output_points);
-    fused_custom_pub_->publish(output_custom);
   }
 
-  bool build_fused_cloud(
-    const CustomMsg & reference_cloud, PointCloud2 & output_points, CustomMsg & output_custom)
+  bool process_oldest_reference_scan()
+  {
+    CustomMsg::SharedPtr reference_message;
+    {
+      // 次の基準scanが到着した後にだけ最古scanを確定し、後続LiDARの遅延到着を吸収する。
+      std::scoped_lock lock(mutex_);
+      const auto iterator = cached_messages_.find(reference_custom_topic_);
+      if (iterator == cached_messages_.end() || iterator->second.size() < 2U) {
+        return false;
+      }
+      reference_message = iterator->second.front();
+    }
+
+    if (reference_message == nullptr) {
+      return false;
+    }
+
+    CustomMsg output_custom;
+    if (!build_fused_custom(*reference_message, output_custom)) {
+      prune_processed_messages(rclcpp::Time(reference_message->header.stamp));
+      return true;
+    }
+    fused_custom_pub_->publish(output_custom);
+    prune_processed_messages(rclcpp::Time(reference_message->header.stamp));
+    return true;
+  }
+
+  bool build_fused_custom(const CustomMsg & reference_cloud, CustomMsg & output_custom)
   {
     const rclcpp::Time reference_stamp(reference_cloud.header.stamp);
-    std::vector<TransformedCloud> transformed_clouds;
-    transformed_clouds.reserve(input_custom_topics_.size());
+    const auto reference_frame = reference_cloud.header.frame_id;
+    if (reference_frame.empty()) {
+      RCLCPP_ERROR_THROTTLE(
+        get_logger(), *get_clock(), 2000,
+        "Skip fusion because reference topic %s has an empty frame_id.",
+        reference_custom_topic_.c_str());
+      return false;
+    }
+
+    std::vector<MatchedCustomMessage> matched_messages;
+    matched_messages.reserve(input_custom_topics_.size());
 
     {
-      // 基準LiDAR時刻に最も近いCustomMsgを各topicから選び、使えるものだけを今回の合成対象にする。
+      // 基準scanに対して各topicの最近傍scanだけを選び、使えないLiDARは今回分から外す。
       std::scoped_lock lock(mutex_);
       for (const auto & topic : input_custom_topics_) {
-        const auto cached_cloud = find_best_matching_cloud(topic, reference_stamp);
-        if (!cached_cloud.has_value()) {
+        const auto matched_message = find_best_matching_cloud(topic, reference_stamp);
+        if (!matched_message.has_value()) {
           if (topic != reference_custom_topic_) {
             RCLCPP_WARN_THROTTLE(
               get_logger(), *get_clock(), 2000,
@@ -268,65 +327,82 @@ private:
             "Skip fusion because reference topic %s has no cached CustomMsg.", topic.c_str());
           return false;
         }
-
-        TransformedCloud transformed_cloud;
-        if (!convert_custom_to_cloud(cached_cloud.value(), reference_stamp, transformed_cloud)) {
-          if (topic == reference_custom_topic_) {
-            return false;
-          }
-
-          RCLCPP_WARN_THROTTLE(
-            get_logger(), *get_clock(), 2000,
-            "Skip topic %s because CustomMsg transform into reference frame failed.",
-            topic.c_str());
-          continue;
-        }
-        transformed_clouds.push_back(std::move(transformed_cloud));
+        matched_messages.push_back(MatchedCustomMessage{topic, matched_message.value()});
       }
     }
 
-    if (transformed_clouds.empty()) {
+    if (matched_messages.empty()) {
       RCLCPP_ERROR_THROTTLE(
         get_logger(), *get_clock(), 2000,
         "Skip fusion because no CustomMsg was available for publication.");
       return false;
     }
 
-    // 融合後もLIO-SAM互換のfield layoutを維持するため、固定レイアウトの生バイト列を連結する。
-    output_points = transformed_clouds.front().point_cloud;
     std::size_t total_points = 0;
-    for (const auto & cloud : transformed_clouds) {
-      total_points += cloud.custom_points.size();
+    for (const auto & matched_message : matched_messages) {
+      if (matched_message.message != nullptr) {
+        total_points += matched_message.message->points.size();
+      }
     }
 
-    output_points.header.stamp = reference_cloud.header.stamp;
-    output_points.header.frame_id = reference_lidar_frame_;
-    output_points.height = 1;
-    output_points.width = static_cast<std::uint32_t>(total_points);
-    output_points.row_step = output_points.point_step * output_points.width;
-    output_points.data.clear();
-    output_points.data.reserve(total_points * output_points.point_step);
-    output_points.is_dense = true;
-
+    // 出力はCustomMsgだけに絞り、最終vectorへ直接書き込んで中間コピーを避ける。
     output_custom = reference_cloud;
     output_custom.header.stamp = reference_cloud.header.stamp;
-    output_custom.header.frame_id = reference_lidar_frame_;
-    output_custom.points.clear();
-    output_custom.points.reserve(total_points);
+    output_custom.header.frame_id = reference_frame;
+    output_custom.points.resize(total_points);
+    output_custom.point_num = static_cast<std::uint32_t>(total_points);
 
-    for (const auto & cloud : transformed_clouds) {
-      output_points.is_dense = output_points.is_dense && cloud.is_dense;
-      output_points.data.insert(
-        output_points.data.end(), cloud.point_cloud.data.begin(), cloud.point_cloud.data.end());
-      output_custom.points.insert(
-        output_custom.points.end(), cloud.custom_points.begin(), cloud.custom_points.end());
+    std::size_t output_index = 0U;
+    for (const auto & matched_message : matched_messages) {
+      if (matched_message.message == nullptr) {
+        continue;
+      }
+
+      const auto transform = get_cached_transform(
+        reference_frame, matched_message.message->header.frame_id,
+        matched_message.message->header.stamp);
+      if (!transform.has_value()) {
+        if (matched_message.topic == reference_custom_topic_) {
+          return false;
+        }
+
+        RCLCPP_WARN_THROTTLE(
+          get_logger(), *get_clock(), 2000,
+          "Skip topic frame %s because transform into reference frame %s failed.",
+          matched_message.message->header.frame_id.c_str(), reference_frame.c_str());
+        continue;
+      }
+
+      const auto synthetic_info = build_synthetic_point_info(
+        *matched_message.message, ring_offset_for_topic(matched_message.topic));
+      const auto message_stamp = rclcpp::Time(matched_message.message->header.stamp);
+      const auto message_delta_sec = (message_stamp - reference_stamp).seconds();
+      for (std::size_t point_index = 0; point_index < matched_message.message->points.size();
+        ++point_index)
+      {
+        // 各点は基準frameへ直接変換し、header差分を点ごとの相対時刻へ反映する。
+        const auto appended = append_transformed_point(
+          matched_message.message->points[point_index], synthetic_info[point_index],
+          transform.value(), message_delta_sec, output_custom.points[output_index]);
+        if (appended) {
+          ++output_index;
+        }
+      }
     }
+
+    output_custom.points.resize(output_index);
     output_custom.point_num = static_cast<std::uint32_t>(output_custom.points.size());
+    if (output_custom.points.empty()) {
+      RCLCPP_WARN_THROTTLE(
+        get_logger(), *get_clock(), 2000,
+        "Skip fusion because all candidate point clouds were filtered out.");
+      return false;
+    }
 
     return true;
   }
 
-  std::optional<CachedCustomMessage> find_best_matching_cloud(
+  std::optional<CustomMsg::SharedPtr> find_best_matching_cloud(
     const std::string & topic, const rclcpp::Time & reference_stamp) const
   {
     const auto iterator = cached_messages_.find(topic);
@@ -334,99 +410,117 @@ private:
       return std::nullopt;
     }
 
-    CachedCustomMessage best_cloud{};
-    auto found = false;
+    CustomMsg::SharedPtr best_message;
     auto best_delta = std::numeric_limits<double>::max();
     for (const auto & candidate : iterator->second) {
-      if (candidate.message == nullptr) {
+      if (candidate == nullptr) {
         continue;
       }
 
-      const auto delta = seconds_between(reference_stamp, rclcpp::Time(candidate.message->header.stamp));
+      const auto delta = seconds_between(reference_stamp, rclcpp::Time(candidate->header.stamp));
       if (delta < best_delta) {
         best_delta = delta;
-        best_cloud = candidate;
-        found = true;
+        best_message = candidate;
       }
     }
 
     // 時刻差が大きい点群は採用せず、今回の合成に使えるLiDARだけでpublishする。
-    if (!found || best_delta > max_stamp_delta_sec_) {
+    if (best_message == nullptr || best_delta > max_stamp_delta_sec_) {
       return std::nullopt;
     }
-    return best_cloud;
+    return best_message;
   }
 
-  bool convert_custom_to_cloud(
-    const CachedCustomMessage & cached_input, const rclcpp::Time & reference_stamp,
-    TransformedCloud & output)
+  std::optional<CachedRigidTransform> get_cached_transform(
+    const std::string & target_frame, const std::string & source_frame,
+    const builtin_interfaces::msg::Time & stamp)
   {
-    const auto & input = *cached_input.message;
-    tf2::Transform transform;
-    if (input.header.frame_id == reference_lidar_frame_) {
-      transform.setIdentity();
-    } else {
-      try {
-        // LiDARごとの固定TFを使って基準LiDAR座標系へ正規化し、LIO-SAM入力座標系を統一する。
-        const auto stamped_transform = tf_buffer_.lookupTransform(
-          reference_lidar_frame_, input.header.frame_id, input.header.stamp,
-          tf2::durationFromSec(tf_timeout_sec_));
-        transform = to_tf2_transform(stamped_transform.transform);
-      } catch (const tf2::TransformException & ex) {
-        RCLCPP_WARN_THROTTLE(
-          get_logger(), *get_clock(), 2000,
-          "Failed to transform CustomMsg from %s to %s: %s", input.header.frame_id.c_str(),
-          reference_lidar_frame_.c_str(), ex.what());
-        return false;
+    if (target_frame == source_frame) {
+      CachedRigidTransform identity_transform;
+      identity_transform.identity = true;
+      return identity_transform;
+    }
+
+    const auto cache_key = target_frame + "<-" + source_frame;
+    {
+      // LiDAR間TFは固定として扱い、既に展開済みの回転行列と並進を再利用する。
+      std::scoped_lock lock(transform_mutex_);
+      const auto iterator = transform_cache_.find(cache_key);
+      if (iterator != transform_cache_.end()) {
+        return iterator->second;
       }
     }
 
-    // LIO-SAM互換PointCloud2へ変換し、simulation前提のtimeは後段で0固定にする。
-    output.point_cloud.header = input.header;
-    output.point_cloud.header.frame_id = reference_lidar_frame_;
-    output.point_cloud.header.stamp = reference_stamp;
-    output.point_cloud.height = 1;
-    output.point_cloud.width = static_cast<std::uint32_t>(input.points.size());
-    output.point_cloud.is_bigendian = false;
-    output.point_cloud.is_dense = true;
-    output.point_cloud.point_step = kOutputPointStep;
-    output.point_cloud.row_step = output.point_cloud.point_step * output.point_cloud.width;
-    output.point_cloud.fields = {
-      make_field("x", kXOffset, PointField::FLOAT32),
-      make_field("y", kYOffset, PointField::FLOAT32),
-      make_field("z", kZOffset, PointField::FLOAT32),
-      make_field("intensity", kIntensityOffset, PointField::FLOAT32),
-      make_field("ring", kRingOffset, PointField::UINT16),
-      make_field("time", kTimeOffset, PointField::FLOAT32),
-    };
-    output.point_cloud.data.resize(static_cast<std::size_t>(output.point_cloud.row_step));
-    output.custom_points.resize(input.points.size());
-    output.is_dense = true;
+    try {
+      // 初回だけtf2から取得し、点ごとの変換ではtf2::Transform生成と演算を避ける。
+      const auto stamped_transform = tf_buffer_.lookupTransform(
+        target_frame, source_frame, stamp, tf2::durationFromSec(tf_timeout_sec_));
+      const auto & translation = stamped_transform.transform.translation;
+      const auto & rotation = stamped_transform.transform.rotation;
+      tf2::Quaternion quaternion(rotation.x, rotation.y, rotation.z, rotation.w);
+      tf2::Matrix3x3 matrix(quaternion);
 
-    const auto source_stamp = rclcpp::Time(input.header.stamp);
-    const auto delta_sec = (source_stamp - reference_stamp).seconds();
-    const auto synthetic_info = build_synthetic_point_info(input);
-    for (std::uint32_t output_index = 0; output_index < output.point_cloud.width; ++output_index) {
-      output.is_dense = output.is_dense && append_point(
-        input.points[output_index], transform, delta_sec, synthetic_info[output_index],
-        output.point_cloud, output.custom_points[output_index], output_index);
+      CachedRigidTransform cached_transform;
+      cached_transform.r00 = static_cast<float>(matrix[0][0]);
+      cached_transform.r01 = static_cast<float>(matrix[0][1]);
+      cached_transform.r02 = static_cast<float>(matrix[0][2]);
+      cached_transform.r10 = static_cast<float>(matrix[1][0]);
+      cached_transform.r11 = static_cast<float>(matrix[1][1]);
+      cached_transform.r12 = static_cast<float>(matrix[1][2]);
+      cached_transform.r20 = static_cast<float>(matrix[2][0]);
+      cached_transform.r21 = static_cast<float>(matrix[2][1]);
+      cached_transform.r22 = static_cast<float>(matrix[2][2]);
+      cached_transform.tx = static_cast<float>(translation.x);
+      cached_transform.ty = static_cast<float>(translation.y);
+      cached_transform.tz = static_cast<float>(translation.z);
+
+      std::scoped_lock lock(transform_mutex_);
+      transform_cache_[cache_key] = cached_transform;
+      return cached_transform;
+    } catch (const tf2::TransformException & ex) {
+      RCLCPP_WARN_THROTTLE(
+        get_logger(), *get_clock(), 2000,
+        "Failed to transform CustomMsg from %s to %s: %s", source_frame.c_str(),
+        target_frame.c_str(), ex.what());
+      return std::nullopt;
     }
-    output.point_cloud.is_dense = output.is_dense;
-    return true;
   }
 
-  std::vector<SyntheticPointInfo> build_synthetic_point_info(const CustomMsg & input) const
+  int64_t ring_offset_for_topic(const std::string & topic) const
+  {
+    const auto iterator =
+      std::find(input_custom_topics_.begin(), input_custom_topics_.end(), topic);
+    if (iterator == input_custom_topics_.end() || input_ring_offsets_.empty()) {
+      return 0;
+    }
+    return input_ring_offsets_[static_cast<std::size_t>(iterator - input_custom_topics_.begin())];
+  }
+
+  std::uint16_t apply_ring_offset(const std::uint16_t ring, const int64_t ring_offset) const
+  {
+    const auto shifted_ring = static_cast<int64_t>(ring) + ring_offset;
+    if (shifted_ring < 0) {
+      return 0U;
+    }
+    return static_cast<std::uint16_t>(std::min<int64_t>(
+             shifted_ring, std::numeric_limits<std::uint16_t>::max()));
+  }
+
+  std::vector<SyntheticPointInfo> build_synthetic_point_info(
+    const CustomMsg & input, const int64_t ring_offset) const
   {
     std::vector<SyntheticPointInfo> info(input.points.size());
 
-    // Livox pluginがlineを出さないsimulation点群では、CSVの走査方向から本来のlineを復元する。
+    // LiDARごとにring帯域を分け、fusion後もLIO-SAMのrange image上で各LiDARを独立行へ載せる。
     for (std::size_t index = 0; index < input.points.size(); ++index) {
       const auto & point = input.points[index];
+      std::uint16_t ring = 0U;
       if (synthesize_ring_from_pattern_ && point.line == 0U && synthetic_ring_count_ > 1) {
-        info[index].ring = lookup_scan_pattern_ring(point).value_or(fallback_ring(index));
+        ring = lookup_scan_pattern_ring(point).value_or(fallback_ring(index));
       } else {
-        info[index].ring = static_cast<std::uint16_t>(point.line);
+        ring = static_cast<std::uint16_t>(point.line);
       }
+      info[index].ring = apply_ring_offset(ring, ring_offset);
     }
     return info;
   }
@@ -462,14 +556,16 @@ private:
 
   std::optional<ScanPatternDirectionKey> make_point_direction_key(const CustomPoint & point) const
   {
-    const auto horizontal_range = std::hypot(static_cast<double>(point.x), static_cast<double>(point.y));
+    const auto horizontal_range = std::hypot(
+      static_cast<double>(point.x), static_cast<double>(point.y));
     const auto range = std::hypot(horizontal_range, static_cast<double>(point.z));
     if (range <= std::numeric_limits<double>::epsilon()) {
       return std::nullopt;
     }
 
     // pluginのray生成式と逆変換し、点の方向をCSVのAzimuth/Zenith表現へ戻す。
-    const auto azimuth_deg = std::atan2(static_cast<double>(point.y), static_cast<double>(point.x)) *
+    const auto azimuth_deg =
+      std::atan2(static_cast<double>(point.y), static_cast<double>(point.x)) *
       kRadToDeg;
     const auto zenith_deg = 90.0 -
       std::atan2(static_cast<double>(point.z), horizontal_range) * kRadToDeg;
@@ -512,7 +608,9 @@ private:
         const auto key = make_scan_pattern_key(std::stod(azimuth_value), std::stod(zenith_value));
         const auto physical_line_count = static_cast<std::size_t>(
           std::max(1, scan_pattern_physical_line_count_));
-        const auto synthetic_ring_count = static_cast<std::size_t>(std::max(1, synthetic_ring_count_));
+        const auto synthetic_ring_count = static_cast<std::size_t>(std::max(
+            1,
+            synthetic_ring_count_));
         // 物理lineは有効点が偏るため、line内の進行順をLIO-SAM用の仮想ringへ均等に割り当てる。
         const auto ring = static_cast<std::uint16_t>(
           (pattern_index / physical_line_count) % synthetic_ring_count);
@@ -540,48 +638,82 @@ private:
     }
   }
 
-  bool append_point(
-    const CustomPoint & point, const tf2::Transform & transform, const double /*delta_sec*/,
-    const SyntheticPointInfo & synthetic_info, PointCloud2 & output, CustomPoint & output_custom_point,
-    const std::uint32_t output_index) const
+  bool append_transformed_point(
+    const CustomPoint & point, const SyntheticPointInfo & synthetic_info,
+    const CachedRigidTransform & transform, const double message_delta_sec,
+    CustomPoint & output_point) const
   {
-    const tf2::Vector3 source_point(point.x, point.y, point.z);
-    const tf2::Vector3 transformed_point = transform * source_point;
+    const auto transformed_x = transform.identity ? point.x :
+      transform.r00 * point.x + transform.r01 * point.y + transform.r02 * point.z + transform.tx;
+    const auto transformed_y = transform.identity ? point.y :
+      transform.r10 * point.x + transform.r11 * point.y + transform.r12 * point.z + transform.ty;
+    const auto transformed_z = transform.identity ? point.z :
+      transform.r20 * point.x + transform.r21 * point.y + transform.r22 * point.z + transform.tz;
     if (
-      !std::isfinite(transformed_point.x()) || !std::isfinite(transformed_point.y()) ||
-      !std::isfinite(transformed_point.z()))
+      !std::isfinite(transformed_x) || !std::isfinite(transformed_y) ||
+      !std::isfinite(transformed_z))
     {
       return false;
     }
 
-    // simulation点群はscan内で同一姿勢のため、LIO-SAMへは全点time=0を渡してdeskewを実質無効化する。
-    const auto output_offset = static_cast<std::size_t>(output_index) * kOutputPointStep;
-    write_unaligned<float>(output.data, output_offset + kXOffset, static_cast<float>(transformed_point.x()));
-    write_unaligned<float>(output.data, output_offset + kYOffset, static_cast<float>(transformed_point.y()));
-    write_unaligned<float>(output.data, output_offset + kZOffset, static_cast<float>(transformed_point.z()));
-    write_unaligned<float>(
-      output.data, output_offset + kIntensityOffset, static_cast<float>(point.reflectivity));
-    write_unaligned<std::uint16_t>(output.data, output_offset + kRingOffset, synthetic_info.ring);
-    write_unaligned<float>(output.data, output_offset + kTimeOffset, 0.0F);
-
-    // UV-Lab版LIO-SAMはCustomMsgを直接読むため、同じ補正済み点をCustomPointにも反映する。
-    output_custom_point.offset_time = 0U;
-    output_custom_point.x = static_cast<float>(transformed_point.x());
-    output_custom_point.y = static_cast<float>(transformed_point.y());
-    output_custom_point.z = static_cast<float>(transformed_point.z());
-    output_custom_point.reflectivity = point.reflectivity;
-    output_custom_point.tag = point.tag;
-    output_custom_point.line = static_cast<std::uint8_t>(std::min<std::uint16_t>(
-      synthetic_info.ring, std::numeric_limits<std::uint8_t>::max()));
+    // 異なるscan時刻の点群を基準scanの相対時刻系へ揃え、LIO-SAM用CustomMsgへ直接反映する。
+    const auto adjusted_offset_sec = message_delta_sec +
+      point_offset_seconds(point, timestamp_unit_scale_);
+    output_point = point;
+    output_point.offset_time = seconds_to_offset_time(
+      adjusted_offset_sec, timestamp_unit_scale_, max_relative_time_sec_);
+    output_point.x = transformed_x;
+    output_point.y = transformed_y;
+    output_point.z = transformed_z;
+    output_point.line = static_cast<std::uint8_t>(std::min<std::uint16_t>(
+        synthetic_info.ring, std::numeric_limits<std::uint8_t>::max()));
     return true;
   }
 
+  void prune_processed_messages(const rclcpp::Time & processed_reference_stamp)
+  {
+    // 処理済み基準scanを落とし、非基準topicは次回最近傍探索に必要な境界候補を残して剪定する。
+    std::scoped_lock lock(mutex_);
+    const auto reference_iterator = cached_messages_.find(reference_custom_topic_);
+    if (reference_iterator != cached_messages_.end() && !reference_iterator->second.empty()) {
+      reference_iterator->second.pop_front();
+    }
+
+    for (auto & [topic, queue] : cached_messages_) {
+      if (topic == reference_custom_topic_) {
+        continue;
+      }
+      while (queue.size() >= 2U) {
+        if (queue[1] == nullptr) {
+          queue.pop_front();
+          continue;
+        }
+        const auto next_stamp = rclcpp::Time(queue[1]->header.stamp);
+        if (next_stamp <= processed_reference_stamp) {
+          queue.pop_front();
+          continue;
+        }
+        break;
+      }
+      enforce_cache_limit(queue);
+    }
+  }
+
+  void enforce_cache_limit(std::deque<CustomMsg::SharedPtr> & queue) const
+  {
+    if (cache_size_limit_ <= 0) {
+      return;
+    }
+    while (static_cast<int>(queue.size()) > cache_size_limit_) {
+      queue.pop_front();
+    }
+  }
+
   std::vector<std::string> input_custom_topics_;
-  std::string output_points_topic_;
   std::string output_custom_topic_;
   std::string reference_custom_topic_;
-  std::string reference_lidar_frame_;
-  int sync_queue_size_;
+  std::vector<int64_t> input_ring_offsets_;
+  int cache_size_limit_;
   double max_stamp_delta_sec_;
   double tf_timeout_sec_;
   double timestamp_unit_scale_;
@@ -591,14 +723,15 @@ private:
   int scan_pattern_physical_line_count_;
   int synthetic_ring_count_;
   std::mutex mutex_;
-  std::unordered_map<std::string, std::deque<CachedCustomMessage>> cached_messages_;
+  std::unordered_map<std::string, std::deque<CustomMsg::SharedPtr>> cached_messages_;
+  std::mutex transform_mutex_;
+  std::unordered_map<std::string, CachedRigidTransform> transform_cache_;
   std::unordered_map<
     ScanPatternDirectionKey, std::uint16_t, ScanPatternDirectionKeyHash>
-    scan_pattern_line_by_direction_;
+  scan_pattern_line_by_direction_;
   tf2_ros::Buffer tf_buffer_;
   tf2_ros::TransformListener tf_listener_;
   std::vector<rclcpp::Subscription<CustomMsg>::SharedPtr> subscriptions_;
-  rclcpp::Publisher<PointCloud2>::SharedPtr fused_points_pub_;
   rclcpp::Publisher<CustomMsg>::SharedPtr fused_custom_pub_;
 };
 }  // namespace ai_ship_robot_slam

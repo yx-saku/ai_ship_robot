@@ -1,13 +1,23 @@
+/**:
+  ros__parameters:
+    # LIO-SAMと基準TF生成が、fusion設定と同じCustomMsg入力を参照する。
+    pointCloudTopic: /fused/livox/lidar
+    reference_custom_topic: /lidar1/livox/lidar
+
 multi_lidar_pointcloud_fusion_node:
   ros__parameters:
+    # fusion出力はLivox CustomMsgだけに限定し、PointCloud2はpublishしない。
     input_custom_topics:
-      - /livox/lidar
-    output_points_topic: /livox/fused_points
-    output_custom_topic: /livox/lidar_fused
-    reference_custom_topic: /livox/lidar
-    reference_lidar_frame: left_lidar_link
-    sync_queue_size: 10
-    max_stamp_delta_sec: 0.05
+      - /lidar1/livox/lidar
+      - /lidar2/livox/lidar
+    # 各LiDARをLIO-SAMのrange image上で別ring帯域に載せ、後続LiDARの遠方点欠落を防ぐ。
+    input_ring_offsets:
+      - 0
+      - 4
+    output_custom_topic: /fused/livox/lidar
+    reference_custom_topic: /lidar1/livox/lidar
+    cache_size_limit: 0
+    max_stamp_delta_sec: 0.07
     tf_timeout_sec: 0.1
     timestamp_unit_scale: 1.0e-9
     max_relative_time_sec: 0.2

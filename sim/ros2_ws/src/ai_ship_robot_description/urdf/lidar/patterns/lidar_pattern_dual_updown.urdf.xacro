@@ -11,28 +11,28 @@
   <xacro:property name="lidar_z" value="${lidar_ground_height}" />
   <xacro:property name="lidar_roll" value="0.0" />
   <xacro:property name="lidar_yaw" value="0.0" />
-  <xacro:property name="left_lidar_pitch" value="${120.0 * deg_to_rad}" />
-  <xacro:property name="right_lidar_pitch" value="${30.0 * deg_to_rad}" />
+  <xacro:property name="lidar1_pitch" value="${120.0 * deg_to_rad}" />
+  <xacro:property name="lidar2_pitch" value="${30.0 * deg_to_rad}" />
 
   <xacro:mid360_lidar
-    prefix="left"
+    prefix="lidar1"
     x="${lidar_front_x}"
     y="${lidar_left_y}"
     z="${lidar_z}"
     roll="${lidar_roll}"
-    pitch="${left_lidar_pitch}"
+    pitch="${lidar1_pitch}"
     yaw="${lidar_yaw}"
     enable_imu="true"
-    imu_topic="/left_lidar/imu" />
+    imu_topic="/lidar1/imu" />
 
   <xacro:mid360_lidar
-    prefix="right"
+    prefix="lidar2"
     x="${lidar_front_x}"
     y="${lidar_right_y}"
     z="${lidar_z}"
     roll="${lidar_roll}"
-    pitch="${right_lidar_pitch}"
+    pitch="${lidar2_pitch}"
     yaw="${lidar_yaw}"
     enable_imu="true"
-    imu_topic="/right_lidar/imu" />
+    imu_topic="/lidar2/imu" />
 </robot>

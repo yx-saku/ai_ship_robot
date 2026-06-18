@@ -1,25 +1,31 @@
 # AgentCoding補助ツール
 
-このディレクトリは、AgentCoding中に作成した開発・調査用ツールを置く場所です。
+このディレクトリには、開発中の調査や検証に使う補助ツールを置きます。本番運用スクリプトは含みません。
 
-## 位置づけ
-- 本番環境の起動・運用には使いません。
-- `scripts/` 配下の運用スクリプトとは分けて管理します。
-- コンテキストが変わった後でも、なぜ存在するか分かるように、このREADMEに用途を残します。
-
-## ツール一覧
+## 一覧
 
 ### `evaluate_lio_sam_bag.py`
 
-LIO-SAM実行後のrosbag2を読み、odometryや初期推定値の簡易メトリクスをJSONで出力する調査用スクリプトです。
+LIO-SAM 実行後の rosbag2 を読み、簡易メトリクスを JSON で標準出力する調査用スクリプトです。
 
-主な確認項目:
-- `/lio_sam/mapping/odometry` の開始・終了姿勢、移動量、yaw変化量
-- `/odometry/imu` の開始・終了姿勢、移動量、yaw変化量
-- `/lio_sam/feature/cloud_info` の `initial_guess_x/y/z` の最大ジャンプ量
-- `/tf` の指定parent/childをground truth相当として読んだ移動量
+主な集計対象です。
 
-実行例:
+- `/lio_sam/mapping/odometry`
+- `/odometry/imu`
+- `/lio_sam/feature/cloud_info`
+- `/tf` 内の指定 parent/child 変換
+
+主な出力内容です。
+
+- 開始・終了姿勢
+- 変位と経路長
+- yaw 変化量
+- `cloud_info` の初期推定ジャンプ量
+- ground truth 相当 TF の移動量
+
+## 実行例
+
+ROS 2 Humble の Python 環境を読み込んでから実行します。
 
 ```bash
 source /opt/ros/humble/setup.bash
@@ -27,7 +33,7 @@ source ros2_ws/install/setup.bash
 python3 dev/agent_tools/evaluate_lio_sam_bag.py outputs/rosbag2/slam_xxx
 ```
 
-元のsimulation bagをground truthとして別指定する例:
+ground truth を別 bag から読む例です。
 
 ```bash
 source /opt/ros/humble/setup.bash
@@ -37,6 +43,19 @@ python3 dev/agent_tools/evaluate_lio_sam_bag.py \
   --ground-truth-bag outputs/rosbag2/sim_xxx
 ```
 
-注意:
-- ROS 2 Humble環境のPythonで実行してください。
-- rosbag2 topic構成が変わった場合は、引数でtopic名を上書きしてください。
+## 主なオプション
+
+- `--tf-topic`
+- `--tf-parent`
+- `--tf-child`
+- `--lio-odom-topic`
+- `--imu-odom-topic`
+- `--cloud-info-topic`
+- `--ground-truth-bag`
+
+## 注意
+
+- 入力は `metadata.yaml` を含む rosbag2 ディレクトリです
+- `metadata.yaml` が無い場合は終了コード `2` で終了します
+- topic 名が既定と異なる bag では各オプションで上書きしてください
+- replay 後 bag では SLAM 側 TF と simulation 側 TF が混在するため、ground truth を厳密に取りたい場合は `--ground-truth-bag` で元 simulation bag を指定します

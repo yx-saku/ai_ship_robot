@@ -14,7 +14,7 @@
   <xacro:property name="lidar_outward_yaw" value="${38.0 * deg_to_rad}" />
 
   <xacro:mid360_lidar
-    prefix="left"
+    prefix="lidar1"
     x="${lidar_front_x}"
     y="${lidar_left_y}"
     z="${lidar_z}"
@@ -22,10 +22,10 @@
     pitch="${lidar_pitch}"
     yaw="${lidar_outward_yaw}"
     enable_imu="true"
-    imu_topic="/left_lidar/imu" />
+    imu_topic="/lidar1/imu" />
 
   <xacro:mid360_lidar
-    prefix="right"
+    prefix="lidar2"
     x="${lidar_front_x}"
     y="${lidar_right_y}"
     z="${lidar_z}"
@@ -33,5 +33,5 @@
     pitch="${lidar_pitch}"
     yaw="${-lidar_outward_yaw}"
     enable_imu="true"
-    imu_topic="/right_lidar/imu" />
+    imu_topic="/lidar2/imu" />
 </robot>

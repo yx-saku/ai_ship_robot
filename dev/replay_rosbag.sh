@@ -5,13 +5,14 @@ ROS_DISTRO="${ROS_DISTRO:-humble}"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 WORKSPACE_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
 SIM_ROOT="${WORKSPACE_ROOT}/sim"
-AI_SHIP_ROBOT_OPT_ROOT="${AI_SHIP_ROBOT_OPT_ROOT:-/opt/ai_ship_robot}"
-THIRD_PARTY_UNDERLAY_SETUP="${AI_SHIP_ROBOT_OPT_ROOT}/ros_underlay/${ROS_DISTRO}/third_party_ws/install/setup.bash"
+SYSTEM_INSTALL_ROOT="/opt/ai_ship_robot"
+THIRD_PARTY_UNDERLAY_SETUP="${SYSTEM_INSTALL_ROOT}/ros_underlay/${ROS_DISTRO}/third_party_ws/install/setup.bash"
 SLAM_RVIZ_CONFIG="${WORKSPACE_ROOT}/ros2_ws/src/ai_ship_robot_slam/rviz/lio_sam.rviz"
 SIMULATION_RVIZ_CONFIG="${SIM_ROOT}/ros2_ws/src/ai_ship_robot_gazebo/config/mid360_points.rviz"
 ROSBAG_PID=""
 RVIZ_PID=""
 MAP_SAVER_PID=""
+POINTCLOUD_BRIDGE_PID=""
 ROSBAG_ROOT="${WORKSPACE_ROOT}/outputs/rosbag2"
 
 usage() {
@@ -166,6 +167,10 @@ cleanup_background_processes() {
     kill -INT "${MAP_SAVER_PID}" 2>/dev/null || kill -TERM "${MAP_SAVER_PID}" 2>/dev/null || true
     wait "${MAP_SAVER_PID}" 2>/dev/null || true
   fi
+  if [[ -n "${POINTCLOUD_BRIDGE_PID}" ]] && kill -0 "${POINTCLOUD_BRIDGE_PID}" 2>/dev/null; then
+    kill -INT "${POINTCLOUD_BRIDGE_PID}" 2>/dev/null || kill -TERM "${POINTCLOUD_BRIDGE_PID}" 2>/dev/null || true
+    wait "${POINTCLOUD_BRIDGE_PID}" 2>/dev/null || true
+  fi
 }
 
 trap cleanup_background_processes EXIT
@@ -283,6 +288,9 @@ fi
 echo "Replay mode: ${REPLAY_MODE}" >&2
 echo "RViz config: ${RVIZ_CONFIG}" >&2
 echo "Rosbag replay: ${BAG_PATH}" >&2
+ros2 run ai_ship_robot_slam livox_custommsg_to_pointcloud2_node --ros-args -p use_sim_time:=true &
+POINTCLOUD_BRIDGE_PID=$!
+sleep 1
 if [[ "${SAVE_MAP}" == "true" ]]; then
   ros2 run ai_ship_robot_slam pcd_map_saver_node --ros-args -p use_sim_time:=true &
   MAP_SAVER_PID=$!

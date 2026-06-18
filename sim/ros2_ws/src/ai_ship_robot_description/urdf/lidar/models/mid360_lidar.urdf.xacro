@@ -16,8 +16,8 @@
   <xacro:property name="mid360_imu_size" value="0.015" />
 
   <xacro:macro name="mid360_gazebo_sensor" params="prefix">
-    <gazebo reference="${prefix}_lidar_link">
-      <sensor name="${prefix}_lidar_link" type="ray">
+    <gazebo reference="${prefix}_link">
+      <sensor name="${prefix}_link" type="ray">
         <always_on>true</always_on>
         <visualize>false</visualize>
         <update_rate>10</update_rate>
@@ -65,16 +65,17 @@
           </xacro:if>
           <csv_file_name>$(find ros2_livox_simulation)/scan_mode/mid360.csv</csv_file_name>
           <topic>${prefix}_livox</topic>
-          <custom_topic>/${prefix}_lidar/custom</custom_topic>
-          <pointcloud2_topic>/${prefix}_lidar/points</pointcloud2_topic>
+          <custom_topic>/${prefix}/custom</custom_topic>
+          <pointcloud2_topic>/${prefix}/points</pointcloud2_topic>
+          <enable_pointcloud2>false</enable_pointcloud2>
         </plugin>
       </sensor>
     </gazebo>
   </xacro:macro>
 
   <xacro:macro name="mid360_gazebo_imu" params="prefix imu_topic">
-    <gazebo reference="${prefix}_lidar_imu_link">
-      <sensor name="${prefix}_lidar_imu" type="imu">
+    <gazebo reference="${prefix}_imu_link">
+      <sensor name="${prefix}_imu" type="imu">
         <always_on>true</always_on>
         <update_rate>200</update_rate>
         <!-- Mid-360内蔵IMUとして扱えるよう、IMU topicとframeをLiDAR個体に紐付ける。 -->
@@ -84,14 +85,14 @@
             <namespace>/</namespace>
             <remapping>~/out:=${imu_topic}</remapping>
           </ros>
-          <frame_name>${prefix}_lidar_imu_link</frame_name>
+          <frame_name>${prefix}_imu_link</frame_name>
         </plugin>
       </sensor>
     </gazebo>
   </xacro:macro>
 
   <xacro:macro name="mid360_lidar" params="prefix x y z roll pitch yaw enable_imu:=false imu_topic:=/imu/data">
-    <link name="${prefix}_lidar_link">
+    <link name="${prefix}_link">
       <visual>
         <origin xyz="0 0 0" rpy="0 0 0" />
         <geometry>
@@ -110,7 +111,7 @@
       <xacro:box_inertia mass="0.265" x="${mid360_depth}" y="${mid360_width}" z="${mid360_height}" />
     </link>
 
-    <link name="${prefix}_lidar_imu_link">
+    <link name="${prefix}_imu_link">
       <visual>
         <origin xyz="0 0 0" rpy="0 0 0" />
         <geometry>
@@ -123,15 +124,15 @@
       <xacro:box_inertia mass="0.01" x="${mid360_imu_size}" y="${mid360_imu_size}" z="${mid360_imu_size}" />
     </link>
 
-    <joint name="${prefix}_lidar_joint" type="fixed">
+    <joint name="${prefix}_joint" type="fixed">
       <parent link="base_link" />
-      <child link="${prefix}_lidar_link" />
+      <child link="${prefix}_link" />
       <origin xyz="${x} ${y} ${z}" rpy="${roll} ${pitch} ${yaw}" />
     </joint>
 
-    <joint name="${prefix}_lidar_imu_joint" type="fixed">
-      <parent link="${prefix}_lidar_link" />
-      <child link="${prefix}_lidar_imu_link" />
+    <joint name="${prefix}_imu_joint" type="fixed">
+      <parent link="${prefix}_link" />
+      <child link="${prefix}_imu_link" />
       <!-- 公式Mid-360 manual p.15のIMU chip位置をpoint cloud coordinates基準で反映する。 -->
       <origin xyz="${mid360_imu_x} ${mid360_imu_y} ${mid360_imu_z}" rpy="0 0 0" />
     </joint>

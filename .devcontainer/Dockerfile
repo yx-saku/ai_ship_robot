@@ -66,6 +66,8 @@ COPY install/ /workspaces/ai_ship_robot/install/
 COPY install/third_party_overrides/ /workspaces/ai_ship_robot/install/third_party_overrides/
 COPY sim/install/ /workspaces/ai_ship_robot/sim/install/
 
+USER ${USERNAME}
+
 # 本番向けの system 依存だけを独立layerにし、workspace build は mount 後の setup へ回す。
 RUN --mount=type=cache,id=ai-ship-robot-apt-cache,target=/var/cache/apt,sharing=locked \
     --mount=type=cache,id=ai-ship-robot-apt-lists,target=/var/lib/apt/lists,sharing=locked \
@@ -85,8 +87,6 @@ RUN --mount=type=cache,id=ai-ship-robot-apt-cache,target=/var/cache/apt,sharing=
 RUN --mount=type=cache,id=ai-ship-robot-apt-cache,target=/var/cache/apt,sharing=locked \
     --mount=type=cache,id=ai-ship-robot-apt-lists,target=/var/lib/apt/lists,sharing=locked \
     bash /workspaces/ai_ship_robot/sim/install/install_third_party.sh \
-    && mkdir -p /home/${USERNAME}/.ros/log \
-    && chown -R ${USER_UID}:${USER_GID} /home/${USERNAME}/.ros
+    && mkdir -p /home/${USERNAME}/.ros/log
 
-USER ${USERNAME}
 WORKDIR /workspaces/ai_ship_robot

@@ -7,8 +7,8 @@ WORKSPACE_ROOT="$(cd "${SCRIPT_DIR}/../.." && pwd)"
 SIM_ROOT="${WORKSPACE_ROOT}/sim"
 SETUP_RUNTIME_SCRIPT="${WORKSPACE_ROOT}/install/setup.sh"
 SETUP_SIMULATION_SCRIPT="${SIM_ROOT}/install/setup.sh"
-AI_SHIP_ROBOT_OPT_ROOT="${AI_SHIP_ROBOT_OPT_ROOT:-/opt/ai_ship_robot}"
-THIRD_PARTY_UNDERLAY_SETUP="${AI_SHIP_ROBOT_OPT_ROOT}/ros_underlay/${ROS_DISTRO}/third_party_ws/install/setup.bash"
+SYSTEM_INSTALL_ROOT="/opt/ai_ship_robot"
+THIRD_PARTY_UNDERLAY_SETUP="${SYSTEM_INSTALL_ROOT}/ros_underlay/${ROS_DISTRO}/third_party_ws/install/setup.bash"
 
 usage() {
   cat <<'EOF'
@@ -17,8 +17,6 @@ Usage: bash sim/scripts/drive_robot.sh [OPTIONS]
 Options:
   --build                  Run one-time environment setup before starting keyboard drive.
   --scenario FILE          Run scripted drive with a YAML scenario file.
-  --once                   Run scenario once. Default when --scenario is set.
-  --loop                   Loop scenario until interrupted.
   --start-delay SEC        Wait before starting scripted drive. Default: 0.0
   --linear-speed VALUE     Forward/backward speed in m/s. Default: 0.20
   --lateral-speed VALUE    Left/right strafe speed in m/s. Default: 0.20
@@ -124,7 +122,6 @@ trap cleanup_terminal EXIT
 BUILD_WORKSPACE=false
 SCENARIO_FILE=""
 START_DELAY_SEC="0.0"
-LOOP_SCENARIO=false
 LINEAR_SPEED="0.20"
 LATERAL_SPEED="0.20"
 ANGULAR_SPEED="0.60"
@@ -146,12 +143,6 @@ while [[ $# -gt 0 ]]; do
     --scenario)
       shift
       SCENARIO_FILE="$(require_value --scenario "${1:-}")"
-      ;;
-    --once)
-      LOOP_SCENARIO=false
-      ;;
-    --loop)
-      LOOP_SCENARIO=true
       ;;
     --start-delay=*)
       START_DELAY_SEC="$(normalize_ros_double "$(require_value --start-delay "${1#*=}")")"
@@ -242,7 +233,6 @@ if [[ -n "${SCENARIO_FILE}" ]]; then
     -p cmd_vel_topic:="${CMD_VEL_TOPIC}" \
     -p scenario_file:="${SCENARIO_FILE}" \
     -p start_delay_sec:="${START_DELAY_SEC}" \
-    -p loop:="${LOOP_SCENARIO}" \
     -p use_sim_time:=true \
     -p publish_rate:="${PUBLISH_RATE}"
 else

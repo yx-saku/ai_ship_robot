@@ -22,12 +22,6 @@ def generate_launch_description():
     quarter_lidar_resolution = LaunchConfiguration("quarter_lidar_resolution")
     publish_odom_tf = LaunchConfiguration("publish_odom_tf")
     use_mid360_sim_adapter = LaunchConfiguration("use_mid360_sim_adapter")
-    sim_lidar_topic = LaunchConfiguration("sim_lidar_topic")
-    sim_imu_topic = LaunchConfiguration("sim_imu_topic")
-    livox_lidar_topic = LaunchConfiguration("livox_lidar_topic")
-    livox_imu_topic = LaunchConfiguration("livox_imu_topic")
-    livox_lidar_frame = LaunchConfiguration("livox_lidar_frame")
-    livox_imu_frame = LaunchConfiguration("livox_imu_frame")
     use_scan_pattern_line_lookup = LaunchConfiguration("use_scan_pattern_line_lookup")
     force_zero_offset_time = LaunchConfiguration("force_zero_offset_time")
     input_lidar_reliable = LaunchConfiguration("input_lidar_reliable")
@@ -130,12 +124,37 @@ def generate_launch_description():
         parameters=[
             {
                 "use_sim_time": use_sim_time,
-                "input_custom_topic": sim_lidar_topic,
-                "input_imu_topic": sim_imu_topic,
-                "output_custom_topic": livox_lidar_topic,
-                "output_imu_topic": livox_imu_topic,
-                "output_lidar_frame": livox_lidar_frame,
-                "output_imu_frame": livox_imu_frame,
+                "input_custom_topics": [
+                    "/lidar1/custom",
+                    "/lidar2/custom",
+                    "/lidar3/custom",
+                    "/lidar4/custom",
+                ],
+                "input_imu_topics": [
+                    "/lidar1/imu",
+                    "/lidar2/imu",
+                    "/lidar3/imu",
+                    "/lidar4/imu",
+                ],
+                "output_custom_topics": [
+                    "/lidar1/livox/lidar",
+                    "/lidar2/livox/lidar",
+                    "/lidar3/livox/lidar",
+                    "/lidar4/livox/lidar",
+                ],
+                "output_imu_topics": [
+                    "/lidar1/livox/imu",
+                    "/lidar2/livox/imu",
+                    "/lidar3/livox/imu",
+                    "/lidar4/livox/imu",
+                ],
+                "output_lidar_frames": ["lidar1_link", "lidar2_link", "lidar3_link", "lidar4_link"],
+                "output_imu_frames": [
+                    "lidar1_imu_link",
+                    "lidar2_imu_link",
+                    "lidar3_imu_link",
+                    "lidar4_imu_link",
+                ],
                 "use_scan_pattern_line_lookup": use_scan_pattern_line_lookup,
                 "force_zero_offset_time": force_zero_offset_time,
                 "input_lidar_reliable": input_lidar_reliable,
@@ -163,17 +182,11 @@ def generate_launch_description():
             DeclareLaunchArgument("gui", default_value="true"),
             DeclareLaunchArgument("verbose", default_value="false"),
             DeclareLaunchArgument("lite", default_value="false"),
-            DeclareLaunchArgument("lidar_pattern_file", default_value="lidar_pattern_dual_updown.urdf.xacro"),
+            DeclareLaunchArgument("lidar_pattern_file", default_value="lidar_pattern_dual_front_updown.urdf.xacro"),
             DeclareLaunchArgument("half_lidar_resolution", default_value="false"),
             DeclareLaunchArgument("quarter_lidar_resolution", default_value="false"),
             DeclareLaunchArgument("publish_odom_tf", default_value="true"),
             DeclareLaunchArgument("use_mid360_sim_adapter", default_value="true"),
-            DeclareLaunchArgument("sim_lidar_topic", default_value="/left_lidar/custom"),
-            DeclareLaunchArgument("sim_imu_topic", default_value="/left_lidar/imu"),
-            DeclareLaunchArgument("livox_lidar_topic", default_value="/livox/lidar"),
-            DeclareLaunchArgument("livox_imu_topic", default_value="/livox/imu"),
-            DeclareLaunchArgument("livox_lidar_frame", default_value="left_lidar_link"),
-            DeclareLaunchArgument("livox_imu_frame", default_value="left_lidar_imu_link"),
             DeclareLaunchArgument("use_scan_pattern_line_lookup", default_value="false"),
             DeclareLaunchArgument("force_zero_offset_time", default_value="true"),
             DeclareLaunchArgument("input_lidar_reliable", default_value="true"),

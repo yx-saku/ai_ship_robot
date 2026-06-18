@@ -14,6 +14,7 @@
 #include <fstream>
 #include <initializer_list>
 #include <optional>
+#include <memory>
 #include <sstream>
 #include <stdexcept>
 #include <string>
@@ -113,12 +114,23 @@ public:
   Mid360SimAdapter()
   : Node("mid360_sim_adapter")
   {
-    input_custom_topic_ = declare_parameter<std::string>("input_custom_topic", "/left_lidar/custom");
-    input_imu_topic_ = declare_parameter<std::string>("input_imu_topic", "/left_lidar/imu");
-    output_custom_topic_ = declare_parameter<std::string>("output_custom_topic", "/livox/lidar");
-    output_imu_topic_ = declare_parameter<std::string>("output_imu_topic", "/livox/imu");
-    output_lidar_frame_ = declare_parameter<std::string>("output_lidar_frame", "left_lidar_link");
-    output_imu_frame_ = declare_parameter<std::string>("output_imu_frame", "left_lidar_imu_link");
+    input_custom_topics_ = declare_parameter<std::vector<std::string>>(
+      "input_custom_topics", std::vector<std::string>{"/lidar1/custom", "/lidar2/custom", "/lidar3/custom", "/lidar4/custom"});
+    input_imu_topics_ = declare_parameter<std::vector<std::string>>(
+      "input_imu_topics", std::vector<std::string>{"/lidar1/imu", "/lidar2/imu", "/lidar3/imu", "/lidar4/imu"});
+    output_custom_topics_ = declare_parameter<std::vector<std::string>>(
+      "output_custom_topics",
+      std::vector<std::string>{
+        "/lidar1/livox/lidar", "/lidar2/livox/lidar", "/lidar3/livox/lidar", "/lidar4/livox/lidar"});
+    output_imu_topics_ = declare_parameter<std::vector<std::string>>(
+      "output_imu_topics",
+      std::vector<std::string>{
+        "/lidar1/livox/imu", "/lidar2/livox/imu", "/lidar3/livox/imu", "/lidar4/livox/imu"});
+    output_lidar_frames_ = declare_parameter<std::vector<std::string>>(
+      "output_lidar_frames", std::vector<std::string>{"lidar1_link", "lidar2_link", "lidar3_link", "lidar4_link"});
+    output_imu_frames_ = declare_parameter<std::vector<std::string>>(
+      "output_imu_frames",
+      std::vector<std::string>{"lidar1_imu_link", "lidar2_imu_link", "lidar3_imu_link", "lidar4_imu_link"});
     gravity_ = declare_parameter<double>("gravity", 9.80511);
     convert_imu_acceleration_to_g_ = declare_parameter<bool>("convert_imu_acceleration_to_g", true);
     enable_imu_passthrough_ = declare_parameter<bool>("enable_imu_passthrough", true);
@@ -138,6 +150,18 @@ public:
     }
     if (lidar_qos_depth_ <= 0 || imu_qos_depth_ <= 0) {
       throw std::invalid_argument("qos depth parameters must be positive.");
+    }
+    if (
+      input_custom_topics_.size() != input_imu_topics_.size() ||
+      input_custom_topics_.size() != output_custom_topics_.size() ||
+      input_custom_topics_.size() != output_imu_topics_.size() ||
+      input_custom_topics_.size() != output_lidar_frames_.size() ||
+      input_custom_topics_.size() != output_imu_frames_.size())
+    {
+      throw std::invalid_argument("mid360_sim_adapter topic/frame parameter arrays must have the same length.");
+    }
+    if (input_custom_topics_.empty()) {
+      throw std::invalid_argument("mid360_sim_adapter requires at least one lidar topic pair.");
     }
     if (use_scan_pattern_line_lookup_) {
       load_scan_pattern();
@@ -160,20 +184,38 @@ public:
       .reliable()
       .durability_volatile();
 
-    custom_publisher_ = create_publisher<livox_ros_driver2::msg::CustomMsg>(output_custom_topic_, output_lidar_qos);
-    custom_subscription_ = create_subscription<livox_ros_driver2::msg::CustomMsg>(
-      input_custom_topic_, input_lidar_qos,
-      std::bind(&Mid360SimAdapter::custom_callback, this, std::placeholders::_1));
-    if (enable_imu_passthrough_) {
-      // 点群line補完だけを使う検証ではIMU経路を止め、LiDAR callbackの処理余力を確保する。
-      imu_publisher_ = create_publisher<sensor_msgs::msg::Imu>(output_imu_topic_, output_imu_qos);
-      imu_subscription_ = create_subscription<sensor_msgs::msg::Imu>(
-        input_imu_topic_, input_imu_qos, std::bind(&Mid360SimAdapter::imu_callback, this, std::placeholders::_1));
+    // 各LiDARを独立チャネルとして扱い、配置パターンに応じた複数台入力を単一nodeで中継する。
+    channels_.reserve(input_custom_topics_.size());
+    for (std::size_t index = 0; index < input_custom_topics_.size(); ++index) {
+      Channel channel;
+      channel.input_custom_topic = input_custom_topics_[index];
+      channel.input_imu_topic = input_imu_topics_[index];
+      channel.output_custom_topic = output_custom_topics_[index];
+      channel.output_imu_topic = output_imu_topics_[index];
+      channel.output_lidar_frame = output_lidar_frames_[index];
+      channel.output_imu_frame = output_imu_frames_[index];
+      channel.custom_publisher = create_publisher<livox_ros_driver2::msg::CustomMsg>(
+        channel.output_custom_topic, output_lidar_qos);
+      channel.custom_subscription = create_subscription<livox_ros_driver2::msg::CustomMsg>(
+        channel.input_custom_topic, input_lidar_qos,
+        [this, index](const livox_ros_driver2::msg::CustomMsg::SharedPtr message) {
+          this->custom_callback(index, message);
+        });
+      if (enable_imu_passthrough_) {
+        // 点群line補完だけを使う検証ではIMU経路を止め、LiDAR callbackの処理余力を確保する。
+        channel.imu_publisher = create_publisher<sensor_msgs::msg::Imu>(channel.output_imu_topic, output_imu_qos);
+        channel.imu_subscription = create_subscription<sensor_msgs::msg::Imu>(
+          channel.input_imu_topic, input_imu_qos,
+          [this, index](const sensor_msgs::msg::Imu::SharedPtr message) {
+            this->imu_callback(index, message);
+          });
+      }
+      RCLCPP_INFO(
+        get_logger(), "Mid-360 sim adapter channel %zu: %s -> %s, %s -> %s", index + 1,
+        channel.input_custom_topic.c_str(), channel.output_custom_topic.c_str(),
+        channel.input_imu_topic.c_str(), channel.output_imu_topic.c_str());
+      channels_.push_back(std::move(channel));
     }
-
-    RCLCPP_INFO(
-      get_logger(), "Mid-360 sim adapter: %s -> %s, %s -> %s", input_custom_topic_.c_str(),
-      output_custom_topic_.c_str(), input_imu_topic_.c_str(), output_imu_topic_.c_str());
     RCLCPP_INFO(
       get_logger(), "Mid-360 sim adapter QoS: input_lidar=%s, output_lidar=%s, lidar_depth=%d, imu_depth=%d",
       input_lidar_reliable_ ? "reliable" : "best_effort", output_lidar_reliable_ ? "reliable" : "best_effort",
@@ -237,11 +279,12 @@ private:
     }
   }
 
-  void custom_callback(const livox_ros_driver2::msg::CustomMsg::SharedPtr message)
+  void custom_callback(const std::size_t channel_index, const livox_ros_driver2::msg::CustomMsg::SharedPtr message)
   {
+    auto & channel = channels_.at(channel_index);
     livox_ros_driver2::msg::CustomMsg output;
     output.header.stamp = message->header.stamp;
-    output.header.frame_id = output_lidar_frame_.empty() ? message->header.frame_id : output_lidar_frame_;
+    output.header.frame_id = channel.output_lidar_frame.empty() ? message->header.frame_id : channel.output_lidar_frame;
     output.timebase = message->timebase;
     output.lidar_id = message->lidar_id;
     output.rsvd = message->rsvd;
@@ -253,7 +296,7 @@ private:
       output.points.push_back(convert_point(message->points[index], index));
     }
     output.point_num = static_cast<std::uint32_t>(output.points.size());
-    custom_publisher_->publish(std::move(output));
+    channel.custom_publisher->publish(std::move(output));
   }
 
   livox_ros_driver2::msg::CustomPoint convert_point(
@@ -315,10 +358,11 @@ private:
     return std::nullopt;
   }
 
-  void imu_callback(const sensor_msgs::msg::Imu::SharedPtr message)
+  void imu_callback(const std::size_t channel_index, const sensor_msgs::msg::Imu::SharedPtr message)
   {
+    auto & channel = channels_.at(channel_index);
     sensor_msgs::msg::Imu output = *message;
-    output.header.frame_id = output_imu_frame_.empty() ? message->header.frame_id : output_imu_frame_;
+    output.header.frame_id = channel.output_imu_frame.empty() ? message->header.frame_id : channel.output_imu_frame;
 
     // ROS標準のm/s^2をG単位へ変換し、UV-Lab版LIO-SAMのimuConverter前提に合わせる。
     const double acceleration_scale = convert_imu_acceleration_to_g_ ? 1.0 / gravity_ : 1.0;
@@ -331,15 +375,29 @@ private:
         value *= covariance_scale;
       }
     }
-    imu_publisher_->publish(std::move(output));
+    channel.imu_publisher->publish(std::move(output));
   }
 
-  std::string input_custom_topic_;
-  std::string input_imu_topic_;
-  std::string output_custom_topic_;
-  std::string output_imu_topic_;
-  std::string output_lidar_frame_;
-  std::string output_imu_frame_;
+  struct Channel
+  {
+    std::string input_custom_topic;
+    std::string input_imu_topic;
+    std::string output_custom_topic;
+    std::string output_imu_topic;
+    std::string output_lidar_frame;
+    std::string output_imu_frame;
+    rclcpp::Publisher<livox_ros_driver2::msg::CustomMsg>::SharedPtr custom_publisher;
+    rclcpp::Publisher<sensor_msgs::msg::Imu>::SharedPtr imu_publisher;
+    rclcpp::Subscription<livox_ros_driver2::msg::CustomMsg>::SharedPtr custom_subscription;
+    rclcpp::Subscription<sensor_msgs::msg::Imu>::SharedPtr imu_subscription;
+  };
+
+  std::vector<std::string> input_custom_topics_;
+  std::vector<std::string> input_imu_topics_;
+  std::vector<std::string> output_custom_topics_;
+  std::vector<std::string> output_imu_topics_;
+  std::vector<std::string> output_lidar_frames_;
+  std::vector<std::string> output_imu_frames_;
   double gravity_{};
   bool convert_imu_acceleration_to_g_{};
   bool enable_imu_passthrough_{};
@@ -354,10 +412,7 @@ private:
   int lidar_qos_depth_{};
   int imu_qos_depth_{};
   std::unordered_map<DirectionKey, std::uint8_t, DirectionKeyHash> scan_pattern_line_by_direction_;
-  rclcpp::Publisher<livox_ros_driver2::msg::CustomMsg>::SharedPtr custom_publisher_;
-  rclcpp::Publisher<sensor_msgs::msg::Imu>::SharedPtr imu_publisher_;
-  rclcpp::Subscription<livox_ros_driver2::msg::CustomMsg>::SharedPtr custom_subscription_;
-  rclcpp::Subscription<sensor_msgs::msg::Imu>::SharedPtr imu_subscription_;
+  std::vector<Channel> channels_;
 };
 
 }  // namespace ai_ship_robot_gazebo

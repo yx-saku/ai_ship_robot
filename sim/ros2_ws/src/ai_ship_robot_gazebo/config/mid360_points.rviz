@@ -3,9 +3,11 @@ Panels:
     Help Height: 70
     Name: Displays
     Property Tree Widget:
-      Expanded: ~
+      Expanded:
+        - /LiDAR2 MID-360 Points1/Topic1
+        - /LiDAR4 MID-360 Points1/Topic1
       Splitter Ratio: 0.5
-    Tree Height: 363
+    Tree Height: 409
   - Class: rviz_common/Views
     Expanded:
       - /Current View1
@@ -51,9 +53,23 @@ Visualization Manager:
           Value: true
         imu_link:
           Value: true
-        left_lidar_link:
+        left_front_omni_wheel_link:
           Value: true
-        right_lidar_link:
+        left_rear_omni_wheel_link:
+          Value: true
+        lidar1_imu_link:
+          Value: true
+        lidar1_link:
+          Value: true
+        lidar2_imu_link:
+          Value: true
+        lidar2_link:
+          Value: true
+        odom:
+          Value: true
+        right_front_omni_wheel_link:
+          Value: true
+        right_rear_omni_wheel_link:
           Value: true
       Marker Scale: 0.6000000238418579
       Name: TF
@@ -61,7 +77,30 @@ Visualization Manager:
       Show Axes: true
       Show Names: false
       Tree:
-        {}
+        odom:
+          base_footprint:
+            base_link:
+              arm_robot_body_link:
+                arm_robot_upper_arm_link:
+                  arm_robot_forearm_link:
+                    arm_robot_wrist_link:
+                      {}
+              imu_link:
+                {}
+              left_front_omni_wheel_link:
+                {}
+              left_rear_omni_wheel_link:
+                {}
+              lidar1_link:
+                lidar1_imu_link:
+                  {}
+              lidar2_link:
+                lidar2_imu_link:
+                  {}
+              right_front_omni_wheel_link:
+                {}
+              right_rear_omni_wheel_link:
+                {}
       Update Interval: 0
       Value: true
     - Alpha: 1
@@ -82,70 +121,6 @@ Visualization Manager:
         Expand Link Details: false
         Expand Tree: false
         Link Tree Style: Links in Alphabetic Order
-        arm_robot_body_link:
-          Alpha: 1
-          Show Axes: false
-          Show Trail: false
-          Value: true
-        arm_robot_forearm_link:
-          Alpha: 1
-          Show Axes: false
-          Show Trail: false
-          Value: true
-        arm_robot_upper_arm_link:
-          Alpha: 1
-          Show Axes: false
-          Show Trail: false
-          Value: true
-        arm_robot_wrist_link:
-          Alpha: 1
-          Show Axes: false
-          Show Trail: false
-          Value: true
-        base_footprint:
-          Alpha: 1
-          Show Axes: false
-          Show Trail: false
-        base_link:
-          Alpha: 1
-          Show Axes: false
-          Show Trail: false
-          Value: true
-        imu_link:
-          Alpha: 1
-          Show Axes: false
-          Show Trail: false
-          Value: true
-        left_front_wheel_link:
-          Alpha: 1
-          Show Axes: false
-          Show Trail: false
-          Value: true
-        left_lidar_link:
-          Alpha: 1
-          Show Axes: false
-          Show Trail: false
-          Value: true
-        left_rear_wheel_link:
-          Alpha: 1
-          Show Axes: false
-          Show Trail: false
-          Value: true
-        right_front_wheel_link:
-          Alpha: 1
-          Show Axes: false
-          Show Trail: false
-          Value: true
-        right_lidar_link:
-          Alpha: 1
-          Show Axes: false
-          Show Trail: false
-          Value: true
-        right_rear_wheel_link:
-          Alpha: 1
-          Show Axes: false
-          Show Trail: false
-          Value: true
       Mass Properties:
         Inertia: false
         Mass: false
@@ -157,42 +132,8 @@ Visualization Manager:
     - Alpha: 1
       Autocompute Intensity Bounds: true
       Autocompute Value Bounds:
-        Max Value: 10
-        Min Value: -10
-        Value: true
-      Axis: Z
-      Channel Name: intensity
-      Class: rviz_default_plugins/PointCloud2
-      Color: 255; 255; 255
-      Color Transformer: AxisColor
-      Decay Time: 0
-      Enabled: true
-      Invert Rainbow: false
-      Max Color: 255; 255; 255
-      Max Intensity: 4096
-      Min Color: 0; 0; 0
-      Min Intensity: 0
-      Name: Center MID-360 Points
-      Position Transformer: XYZ
-      Selectable: true
-      Size (Pixels): 2
-      Size (m): 0.029999999329447746
-      Style: Points
-      Topic:
-        Depth: 10
-        Durability Policy: Volatile
-        Filter size: 10
-        History Policy: Keep Last
-        Reliability Policy: Best Effort
-        Value: /center_lidar/points
-      Use Fixed Frame: true
-      Use rainbow: true
-      Value: true
-    - Alpha: 1
-      Autocompute Intensity Bounds: true
-      Autocompute Value Bounds:
-        Max Value: 1.9752874374389648
-        Min Value: 0.0021804869174957275
+        Max Value: 0.859473705291748
+        Min Value: -0.027345895767211914
         Value: true
       Axis: Z
       Channel Name: intensity
@@ -206,7 +147,7 @@ Visualization Manager:
       Max Intensity: 4096
       Min Color: 0; 0; 0
       Min Intensity: 0
-      Name: Left MID-360 Points
+      Name: LiDAR1 MID-360 Points
       Position Transformer: XYZ
       Selectable: true
       Size (Pixels): 4
@@ -218,15 +159,15 @@ Visualization Manager:
         Filter size: 10
         History Policy: Keep Last
         Reliability Policy: Best Effort
-        Value: /left_lidar/points
+        Value: /lidar1/livox/lidar/points
       Use Fixed Frame: true
       Use rainbow: true
       Value: true
     - Alpha: 1
       Autocompute Intensity Bounds: true
       Autocompute Value Bounds:
-        Max Value: 10
-        Min Value: -10
+        Max Value: 1.9752874374389648
+        Min Value: 0.0021804869174957275
         Value: true
       Axis: Z
       Channel Name: intensity
@@ -240,7 +181,7 @@ Visualization Manager:
       Max Intensity: 4096
       Min Color: 0; 0; 0
       Min Intensity: 0
-      Name: Right MID-360 Points
+      Name: LiDAR2 MID-360 Points
       Position Transformer: XYZ
       Selectable: true
       Size (Pixels): 4
@@ -252,7 +193,75 @@ Visualization Manager:
         Filter size: 10
         History Policy: Keep Last
         Reliability Policy: Best Effort
-        Value: /right_lidar/points
+        Value: /lidar2/livox/lidar/points
+      Use Fixed Frame: true
+      Use rainbow: true
+      Value: true
+    - Alpha: 1
+      Autocompute Intensity Bounds: true
+      Autocompute Value Bounds:
+        Max Value: 10
+        Min Value: -10
+        Value: true
+      Axis: Z
+      Channel Name: intensity
+      Class: rviz_default_plugins/PointCloud2
+      Color: 248; 255; 117
+      Color Transformer: FlatColor
+      Decay Time: 0
+      Enabled: true
+      Invert Rainbow: false
+      Max Color: 255; 255; 255
+      Max Intensity: 4096
+      Min Color: 0; 0; 0
+      Min Intensity: 0
+      Name: LiDAR3 MID-360 Points
+      Position Transformer: XYZ
+      Selectable: true
+      Size (Pixels): 4
+      Size (m): 0.029999999329447746
+      Style: Points
+      Topic:
+        Depth: 10
+        Durability Policy: Volatile
+        Filter size: 10
+        History Policy: Keep Last
+        Reliability Policy: Best Effort
+        Value: /lidar3/livox/lidar/points
+      Use Fixed Frame: true
+      Use rainbow: true
+      Value: true
+    - Alpha: 1
+      Autocompute Intensity Bounds: true
+      Autocompute Value Bounds:
+        Max Value: 1.9752874374389648
+        Min Value: 0.0021804869174957275
+        Value: true
+      Axis: Z
+      Channel Name: intensity
+      Class: rviz_default_plugins/PointCloud2
+      Color: 255; 148; 71
+      Color Transformer: FlatColor
+      Decay Time: 0
+      Enabled: true
+      Invert Rainbow: false
+      Max Color: 255; 255; 255
+      Max Intensity: 4096
+      Min Color: 0; 0; 0
+      Min Intensity: 0
+      Name: LiDAR4 MID-360 Points
+      Position Transformer: XYZ
+      Selectable: true
+      Size (Pixels): 4
+      Size (m): 0.029999999329447746
+      Style: Points
+      Topic:
+        Depth: 10
+        Durability Policy: Volatile
+        Filter size: 10
+        History Policy: Keep Last
+        Reliability Policy: Best Effort
+        Value: /lidar4/livox/lidar/points
       Use Fixed Frame: true
       Use rainbow: true
       Value: true
@@ -289,20 +298,20 @@ Visualization Manager:
       Invert Z Axis: false
       Name: Current View
       Near Clip Distance: 0.009999999776482582
-      Pitch: 0.9799997210502625
+      Pitch: 1.334999680519104
       Target Frame: <Fixed Frame>
       Value: Orbit (rviz_default_plugins)
-      Yaw: 1.4850001335144043
+      Yaw: 2.9850001335144043
     Saved: ~
 Window Geometry:
   Displays:
     collapsed: false
-  Height: 900
+  Height: 975
   Hide Left Dock: false
   Hide Right Dock: false
-  QMainWindow State: 000000ff00000000fd00000001000000000000019b0000032efc0200000002fb000000100044006900730070006c006100790073010000003b000001ec000000c700fffffffb0000000a00560069006500770073010000022d0000013c000000a000ffffff000003d70000032e00000004000000040000000800000008fc0000000100000002000000010000000a0054006f006f006c00730100000000ffffffff0000000000000000
+  QMainWindow State: 000000ff00000000fd00000001000000000000019b00000379fc0200000002fb000000100044006900730070006c006100790073010000003b0000021a000000c700fffffffb0000000a00560069006500770073010000025b00000159000000a000ffffff000005d30000037900000004000000040000000800000008fc0000000100000002000000010000000a0054006f006f006c00730100000000ffffffff0000000000000000
   Views:
     collapsed: false
-  Width: 1400
-  X: 2099
-  Y: 10
+  Width: 1908
+  X: 1663
+  Y: 41

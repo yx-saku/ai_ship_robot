@@ -2,8 +2,8 @@
 set -euo pipefail
 
 ROS_DISTRO="${ROS_DISTRO:-humble}"
-AI_SHIP_ROBOT_OPT_ROOT="${AI_SHIP_ROBOT_OPT_ROOT:-/opt/ai_ship_robot}"
-THIRD_PARTY_WS="${AI_SHIP_ROBOT_OPT_ROOT}/ros_underlay/${ROS_DISTRO}/third_party_ws"
+SYSTEM_INSTALL_ROOT="/opt/ai_ship_robot"
+THIRD_PARTY_WS="${SYSTEM_INSTALL_ROOT}/ros_underlay/${ROS_DISTRO}/third_party_ws"
 THIRD_PARTY_SRC_DIR="${THIRD_PARTY_WS}/src"
 THIRD_PARTY_BUILD_DIR="${THIRD_PARTY_WS}/build"
 THIRD_PARTY_INSTALL_DIR="${THIRD_PARTY_WS}/install"
@@ -151,6 +151,11 @@ plugin_text = plugin_text.replace(
     "        {\n"
     "            pointcloud2_topic = sdf->Get<std::string>(\"pointcloud2_topic\");\n"
     "        }\n"
+    "        bool enable_pointcloud2 = true;\n"
+    "        if (sdf->HasElement(\"enable_pointcloud2\"))\n"
+    "        {\n"
+    "            enable_pointcloud2 = sdf->Get<bool>(\"enable_pointcloud2\");\n"
+    "        }\n"
     "        RCLCPP_INFO(rclcpp::get_logger(\"LivoxPointsPlugin\"), \"custom topic name: %s\", custom_topic.c_str());\n"
     "        RCLCPP_INFO(rclcpp::get_logger(\"LivoxPointsPlugin\"), \"pointcloud2 topic name: %s\", pointcloud2_topic.c_str());\n"
     "        RCLCPP_INFO(rclcpp::get_logger(\"LivoxPointsPlugin\"), \"ros topic name: %s\", curr_scan_topic.c_str());",
@@ -160,8 +165,18 @@ plugin_text = plugin_text.replace(
     "        cloud2_pub = node_->create_publisher<sensor_msgs::msg::PointCloud2>(curr_scan_topic + \"_PointCloud2\", 10);\n"
     "        // CustomMsg publisher\n"
     "        custom_pub = node_->create_publisher<livox_ros_driver2::msg::CustomMsg>(curr_scan_topic, 10);",
-    "        cloud2_pub = node_->create_publisher<sensor_msgs::msg::PointCloud2>(pointcloud2_topic, 10);\n"
+    "        if (enable_pointcloud2)\n"
+    "        {\n"
+    "            cloud2_pub = node_->create_publisher<sensor_msgs::msg::PointCloud2>(pointcloud2_topic, 10);\n"
+    "        }\n"
     "        custom_pub = node_->create_publisher<livox_ros_driver2::msg::CustomMsg>(custom_topic, 10);",
+)
+plugin_text = plugin_text.replace(
+    "        cloud2_pub->publish(cloud2);",
+    "        if (cloud2_pub)\n"
+    "        {\n"
+    "            cloud2_pub->publish(cloud2);\n"
+    "        }",
 )
 
 # 無効値が原点付近の点として二重追加される処理を取り除く。

@@ -8,17 +8,19 @@ SIM_ROOT="${WORKSPACE_ROOT}/sim"
 SETUP_RUNTIME_SCRIPT="${WORKSPACE_ROOT}/install/setup.sh"
 SETUP_SIMULATION_SCRIPT="${SIM_ROOT}/install/setup.sh"
 LIDAR_PATTERN_DIR="${SIM_ROOT}/ros2_ws/src/ai_ship_robot_description/urdf/lidar/patterns"
-AI_SHIP_ROBOT_OPT_ROOT="${AI_SHIP_ROBOT_OPT_ROOT:-/opt/ai_ship_robot}"
-THIRD_PARTY_UNDERLAY_SETUP="${AI_SHIP_ROBOT_OPT_ROOT}/ros_underlay/${ROS_DISTRO}/third_party_ws/install/setup.bash"
+SYSTEM_INSTALL_ROOT="/opt/ai_ship_robot"
+THIRD_PARTY_UNDERLAY_SETUP="${SYSTEM_INSTALL_ROOT}/ros_underlay/${ROS_DISTRO}/third_party_ws/install/setup.bash"
 FORWARD_ARGS=()
 SIM_MODE=false
-DEFAULT_LIDAR_TOPICS=("/livox/lidar")
-DEFAULT_IMU_TOPICS=("/left_lidar/imu")
+DEFAULT_SIM_PARAMS_FILE="${WORKSPACE_ROOT}/ros2_ws/src/ai_ship_robot_slam/config/lio_sam_mid360_sim.yaml"
 ROSBAG_PID=""
 ROSBAG_PLAY_PID=""
 SLAM_PID=""
 ROSBAG_ROOT="${WORKSPACE_ROOT}/outputs/rosbag2"
 AUTO_STOP_AFTER_BAG_PLAY_SECONDS="${AUTO_STOP_AFTER_BAG_PLAY_SECONDS:-30}"
+WAIT_FOR_CLOUD_QUEUE_DRAIN_TIMEOUT_SECONDS="${WAIT_FOR_CLOUD_QUEUE_DRAIN_TIMEOUT_SECONDS:-300}"
+WAIT_FOR_CLOUD_QUEUE_DRAIN_POLL_SECONDS="${WAIT_FOR_CLOUD_QUEUE_DRAIN_POLL_SECONDS:-1}"
+WAIT_FOR_SLAM_STARTUP_TIMEOUT_SECONDS="${WAIT_FOR_SLAM_STARTUP_TIMEOUT_SECONDS:-30}"
 PROCESS_STOP_GRACE_SECONDS="15"
 PROCESS_STOP_TERM_SECONDS="5"
 ROSBAG_STOP_GRACE_SECONDS="60"
@@ -40,11 +42,14 @@ Options:
   --bag-start-offset SEC
                       Start rosbag playback after the given offset.
   --auto-stop-after-bag-play SEC
-                      Seconds to keep SLAM running after playback finishes. Default: 30.
+                       Seconds to keep SLAM running after cloudQueue drains. Default: 30.
+  --cloud-queue-drain-timeout SEC
+                       Max seconds to wait for LIO-SAM cloudQueue drain after bag playback.
+                       Default: 300. Use 0 to wait without timeout.
   --no-auto-exit     Keep SLAM and recording running after rosbag playback finishes.
   --rviz-config PATH Use a workspace RViz config file for LIO-SAM.
   --map              Enable PCD map saver service (/save_pcd_map).
-  --deskew-mode MODE Set LIO-SAM deskew mode: imu_angular | odom_interpolation | off.
+  --config PATH      Use a LIO-SAM parameter YAML. SLAM behavior/performance settings live there.
   --force-zero-offset-time
                      Force simulated Livox point offset_time to zero. Default for --sim.
   --no-force-zero-offset-time
@@ -54,8 +59,49 @@ Options:
 Examples:
   bash scripts/run_slam.sh --no-rviz
   bash scripts/run_slam.sh --sim --lite --no-gui
-  bash scripts/run_slam.sh --points /livox/lidar --raw-imu /livox/imu --imu /livox/imu_oriented
+  bash scripts/run_slam.sh --imu /lidar1/livox/imu
+  bash scripts/run_slam.sh --config ros2_ws/src/ai_ship_robot_slam/config/lio_sam_mid360.yaml
 EOF
+}
+
+reject_slam_behavior_option() {
+  local option="$1"
+
+  echo "${option} changes SLAM behavior/performance and is no longer a CLI option." >&2
+  echo "Move this setting into the YAML passed with --config." >&2
+  echo "Example configs:" >&2
+  echo "  ros2_ws/src/ai_ship_robot_slam/config/lio_sam_mid360.yaml" >&2
+  echo "  ros2_ws/src/ai_ship_robot_slam/config/lio_sam_mid360_sim.yaml" >&2
+  exit 2
+}
+
+reject_fusion_option() {
+  local option="$1"
+
+  echo "${option} changes LiDAR fusion wiring and is no longer a run_slam option." >&2
+  echo "Move this setting into ros2_ws/src/ai_ship_robot_slam/config/multi_lidar_fusion.yaml." >&2
+  exit 2
+}
+
+reject_pointcloud2_adapter_option() {
+  local option="$1"
+
+  echo "${option} has been removed because the SLAM input path is CustomMsg-only." >&2
+  echo "Use multi_lidar_fusion.yaml and output_custom_topic for LiDAR input wiring." >&2
+  exit 2
+}
+
+has_config_arg() {
+  local index=0
+
+  for ((index = 0; index < ${#FORWARD_ARGS[@]}; index++)); do
+    case "${FORWARD_ARGS[index]}" in
+      --config|--config=*)
+        return 0
+        ;;
+    esac
+  done
+  return 1
 }
 
 require_value() {
@@ -376,31 +422,125 @@ ensure_process_started() {
   exit "${process_status}"
 }
 
+wait_for_lio_sam_startup() {
+  local started_seconds=${SECONDS}
+  local elapsed_seconds=0
+  local last_log_seconds=0
+  local node_list=""
+  local required_node=""
+  local missing_nodes=()
+  local required_nodes=(
+    "/multi_lidar_pointcloud_fusion_node"
+    "/slam_reference_lidar_static_tf_node"
+    "/lio_sam_imuPreintegration"
+    "/lio_sam_imageProjection"
+    "/lio_sam_featureExtraction"
+    "/lio_sam_mapOptimization"
+  )
+
+  echo "Waiting for LIO-SAM startup before rosbag playback..." >&2
+  while true; do
+    if [[ -n "${SLAM_PID}" ]] && ! kill -0 "${SLAM_PID}" 2>/dev/null; then
+      echo "LIO-SAM exited before startup completed." >&2
+      return 1
+    fi
+
+    # ROS graphに必須ノードが全て見えてからbagを流し、起動直後のIMU/topic取りこぼしを避ける。
+    node_list="$(ros2 node list 2>/dev/null || true)"
+    missing_nodes=()
+    for required_node in "${required_nodes[@]}"; do
+      if ! grep -Fxq "${required_node}" <<< "${node_list}"; then
+        missing_nodes+=("${required_node}")
+      fi
+    done
+
+    if [[ "${#missing_nodes[@]}" -eq 0 ]]; then
+      echo "LIO-SAM startup completed." >&2
+      return 0
+    fi
+
+    elapsed_seconds=$((SECONDS - started_seconds))
+    if [[ "${WAIT_FOR_SLAM_STARTUP_TIMEOUT_SECONDS}" != "0" &&
+          "${WAIT_FOR_SLAM_STARTUP_TIMEOUT_SECONDS}" != "0.0" &&
+          "${elapsed_seconds}" -ge "${WAIT_FOR_SLAM_STARTUP_TIMEOUT_SECONDS}" ]]; then
+      echo "Timed out waiting for LIO-SAM startup after ${elapsed_seconds}s." >&2
+      echo "Missing ROS nodes: ${missing_nodes[*]}" >&2
+      echo "Current ROS nodes:" >&2
+      echo "${node_list}" >&2
+      return 1
+    fi
+
+    if (( SECONDS - last_log_seconds >= 5 )); then
+      echo "Still waiting for LIO-SAM nodes: ${missing_nodes[*]}" >&2
+      last_log_seconds=${SECONDS}
+    fi
+    sleep 0.2
+  done
+}
+
+wait_for_lio_sam_cloud_queue_empty() {
+  local service_name="/lio_sam/deskew/is_cloud_queue_empty"
+  local service_type="lio_sam/srv/SaveMap"
+  local service_request="{resolution: 0.0, destination: ''}"
+  local call_output=""
+  local call_status=0
+  local started_seconds=${SECONDS}
+  local last_log_seconds=0
+  local elapsed_seconds=0
+
+  echo "Rosbag playback finished. Waiting for LIO-SAM imageProjection cloudQueue to drain..." >&2
+  while true; do
+    if [[ -n "${SLAM_PID}" ]] && ! kill -0 "${SLAM_PID}" 2>/dev/null; then
+      echo "LIO-SAM exited before cloudQueue drain completed." >&2
+      return 1
+    fi
+
+    set +e
+    call_output="$(timeout 5s ros2 service call "${service_name}" "${service_type}" "${service_request}" 2>&1)"
+    call_status=$?
+    set -e
+
+    if [[ "${call_status}" -eq 0 ]]; then
+      if [[ "${call_output}" == *"success=True"* || "${call_output}" == *"success: true"* || "${call_output}" == *"success: True"* ]]; then
+        echo "LIO-SAM imageProjection cloudQueue drained." >&2
+        return 0
+      fi
+      if (( SECONDS - last_log_seconds >= 10 )); then
+        echo "Still waiting for LIO-SAM cloudQueue drain: ${call_output//$'\n'/ }" >&2
+        last_log_seconds=${SECONDS}
+      fi
+    else
+      if (( SECONDS - last_log_seconds >= 10 )); then
+        echo "Waiting for cloudQueue status service ${service_name}: ${call_output//$'\n'/ }" >&2
+        last_log_seconds=${SECONDS}
+      fi
+    fi
+
+    elapsed_seconds=$((SECONDS - started_seconds))
+    if [[ "${WAIT_FOR_CLOUD_QUEUE_DRAIN_TIMEOUT_SECONDS}" != "0" &&
+          "${WAIT_FOR_CLOUD_QUEUE_DRAIN_TIMEOUT_SECONDS}" != "0.0" &&
+          "${elapsed_seconds}" -ge "${WAIT_FOR_CLOUD_QUEUE_DRAIN_TIMEOUT_SECONDS}" ]]; then
+      echo "Timed out waiting for LIO-SAM cloudQueue drain after ${elapsed_seconds}s." >&2
+      return 1
+    fi
+
+    sleep "${WAIT_FOR_CLOUD_QUEUE_DRAIN_POLL_SECONDS}"
+  done
+}
+
 run_slam_launch() {
   local build_workspace=false
   local launch_args=()
-  local left_points_topic=""
-  local right_points_topic=""
-
-  format_topic_list() {
-    local values=("$@")
-    local result="["
-    local index=0
-
-    for value in "${values[@]}"; do
-      [[ -n "${value}" ]] || continue
-      if [[ "${index}" -gt 0 ]]; then
-        result+=", "
-      fi
-      result+="'${value}'"
-      index=$((index + 1))
-    done
-
-    result+="]"
-    printf '%s' "${result}"
-  }
 
   while [[ $# -gt 0 ]]; do
+    # LiDAR fusion配線はmulti_lidar_fusion.yamlへ集約し、CLIからの上書きを禁止する。
+    if [[ "$1" =~ ^--lidar([0-9]+)-points=(.+)$ ]]; then
+      reject_fusion_option "--lidar${BASH_REMATCH[1]}-points"
+    fi
+    if [[ "$1" =~ ^--lidar([0-9]+)-points$ ]]; then
+      reject_fusion_option "--lidar${BASH_REMATCH[1]}-points"
+    fi
+
     case "$1" in
       --build)
         build_workspace=true
@@ -413,83 +553,40 @@ run_slam_launch() {
         launch_args+=("params_file:=$(require_value --config "${1:-}")")
         ;;
       --fusion-config=*)
-        launch_args+=("fusion_config:=${1#*=}")
+        reject_fusion_option "--fusion-config"
         ;;
       --fusion-config)
-        shift
-        launch_args+=("fusion_config:=$(require_value --fusion-config "${1:-}")")
+        reject_fusion_option "--fusion-config"
         ;;
       --input-points=*)
-        mapfile -t input_topics < <(parse_csv_topics "${1#*=}")
-        if [[ "${#input_topics[@]}" -eq 0 ]]; then
-          echo "--input-points requires at least one topic." >&2
-          exit 2
-        fi
-        launch_args+=("use_fusion:=true")
-        launch_args+=("input_points_topics:=$(format_topic_list "${input_topics[@]}")")
+        reject_fusion_option "--input-points"
         ;;
       --input-points)
-        shift
-        input_points_value="$(require_value --input-points "${1:-}")"
-        mapfile -t input_topics < <(parse_csv_topics "${input_points_value}")
-        if [[ "${#input_topics[@]}" -eq 0 ]]; then
-          echo "--input-points requires at least one topic." >&2
-          exit 2
-        fi
-        launch_args+=("use_fusion:=true")
-        launch_args+=("input_points_topics:=$(format_topic_list "${input_topics[@]}")")
+        reject_fusion_option "--input-points"
         ;;
       --points=*)
-        points_topic="${1#*=}"
-        launch_args+=("input_points_topics:=$(format_topic_list "${points_topic}")")
-        launch_args+=("reference_points_topic:=${points_topic}")
-        launch_args+=("lio_custom_topic:=${points_topic}")
+        reject_fusion_option "--points"
         ;;
       --points)
-        shift
-        points_topic="$(require_value --points "${1:-}")"
-        launch_args+=("input_points_topics:=$(format_topic_list "${points_topic}")")
-        launch_args+=("reference_points_topic:=${points_topic}")
-        launch_args+=("lio_custom_topic:=${points_topic}")
-        ;;
-      --left-points=*)
-        left_points_topic="${1#*=}"
-        ;;
-      --left-points)
-        shift
-        left_points_topic="$(require_value --left-points "${1:-}")"
-        ;;
-      --right-points=*)
-        right_points_topic="${1#*=}"
-        ;;
-      --right-points)
-        shift
-        right_points_topic="$(require_value --right-points "${1:-}")"
+        reject_fusion_option "--points"
         ;;
       --reference-points=*)
-        launch_args+=("use_fusion:=true")
-        launch_args+=("reference_points_topic:=${1#*=}")
+        reject_fusion_option "--reference-points"
         ;;
       --reference-points)
-        shift
-        launch_args+=("use_fusion:=true")
-        launch_args+=("reference_points_topic:=$(require_value --reference-points "${1:-}")")
+        reject_fusion_option "--reference-points"
         ;;
       --reference-lidar-frame=*)
-        launch_args+=("reference_lidar_frame:=${1#*=}")
+        reject_fusion_option "--reference-lidar-frame"
         ;;
       --reference-lidar-frame)
-        shift
-        launch_args+=("reference_lidar_frame:=$(require_value --reference-lidar-frame "${1:-}")")
+        reject_fusion_option "--reference-lidar-frame"
         ;;
       --fused-points=*)
-        launch_args+=("use_fusion:=true")
-        launch_args+=("fused_points_topic:=${1#*=}")
+        reject_fusion_option "--fused-points"
         ;;
       --fused-points)
-        shift
-        launch_args+=("use_fusion:=true")
-        launch_args+=("fused_points_topic:=$(require_value --fused-points "${1:-}")")
+        reject_fusion_option "--fused-points"
         ;;
       --imu=*)
         launch_args+=("imu_topic:=${1#*=}")
@@ -499,154 +596,98 @@ run_slam_launch() {
         launch_args+=("imu_topic:=$(require_value --imu "${1:-}")")
         ;;
       --imu-type=*)
-        launch_args+=("imu_type:=${1#*=}")
+        reject_slam_behavior_option "--imu-type"
         ;;
       --imu-type)
-        shift
-        launch_args+=("imu_type:=$(require_value --imu-type "${1:-}")")
+        reject_slam_behavior_option "--imu-type"
         ;;
       --imu-acceleration-unit=*)
-        launch_args+=("imu_acceleration_unit:=${1#*=}")
+        reject_slam_behavior_option "--imu-acceleration-unit"
         ;;
       --imu-acceleration-unit)
-        shift
-        launch_args+=("imu_acceleration_unit:=$(require_value --imu-acceleration-unit "${1:-}")")
+        reject_slam_behavior_option "--imu-acceleration-unit"
         ;;
       --imu-acceleration-scale=*)
-        launch_args+=("imu_acceleration_scale:=${1#*=}")
+        reject_slam_behavior_option "--imu-acceleration-scale"
         ;;
       --imu-acceleration-scale)
-        shift
-        launch_args+=("imu_acceleration_scale:=$(require_value --imu-acceleration-scale "${1:-}")")
+        reject_slam_behavior_option "--imu-acceleration-scale"
         ;;
       --imu-frequency=*)
-        launch_args+=("imu_frequency:=${1#*=}")
+        reject_slam_behavior_option "--imu-frequency"
         ;;
       --imu-frequency)
-        shift
-        launch_args+=("imu_frequency:=$(require_value --imu-frequency "${1:-}")")
-        ;;
-      --expected-acceleration-norm=*)
-        launch_args+=("expected_acceleration_norm:=${1#*=}")
-        ;;
-      --expected-acceleration-norm)
-        shift
-        launch_args+=("expected_acceleration_norm:=$(require_value --expected-acceleration-norm "${1:-}")")
-        ;;
-      --acceleration-norm-tolerance=*)
-        launch_args+=("acceleration_norm_tolerance:=${1#*=}")
-        ;;
-      --acceleration-norm-tolerance)
-        shift
-        launch_args+=("acceleration_norm_tolerance:=$(require_value --acceleration-norm-tolerance "${1:-}")")
+        reject_slam_behavior_option "--imu-frequency"
         ;;
       --imu-debug)
-        launch_args+=("imu_debug:=true")
+        reject_slam_behavior_option "--imu-debug"
         ;;
       --no-imu-debug)
-        launch_args+=("imu_debug:=false")
+        reject_slam_behavior_option "--no-imu-debug"
         ;;
       --deskew-mode=*)
-        launch_args+=("deskew_mode:=${1#*=}")
+        reject_slam_behavior_option "--deskew-mode"
         ;;
       --deskew-mode)
-        shift
-        launch_args+=("deskew_mode:=$(require_value --deskew-mode "${1:-}")")
+        reject_slam_behavior_option "--deskew-mode"
         ;;
       --wait-for-imu-initialization)
-        launch_args+=("wait_for_imu_initialization:=true")
+        reject_slam_behavior_option "--wait-for-imu-initialization"
         ;;
       --no-wait-for-imu-initialization)
-        launch_args+=("wait_for_imu_initialization:=false")
+        reject_slam_behavior_option "--no-wait-for-imu-initialization"
         ;;
       --use-imu-preintegration-initial-guess)
-        launch_args+=("use_imu_preintegration_initial_guess:=true")
+        reject_slam_behavior_option "--use-imu-preintegration-initial-guess"
         ;;
       --no-use-imu-preintegration-initial-guess)
-        launch_args+=("use_imu_preintegration_initial_guess:=false")
+        reject_slam_behavior_option "--no-use-imu-preintegration-initial-guess"
         ;;
       --use-imu-translation-initial-guess)
-        launch_args+=("use_imu_translation_initial_guess:=true")
+        reject_slam_behavior_option "--use-imu-translation-initial-guess"
         ;;
       --no-use-imu-translation-initial-guess)
-        launch_args+=("use_imu_translation_initial_guess:=false")
+        reject_slam_behavior_option "--no-use-imu-translation-initial-guess"
         ;;
       --use-imu-rotation-initial-guess)
-        launch_args+=("use_imu_rotation_initial_guess:=true")
+        reject_slam_behavior_option "--use-imu-rotation-initial-guess"
         ;;
       --no-use-imu-rotation-initial-guess)
-        launch_args+=("use_imu_rotation_initial_guess:=false")
-        ;;
-      --raw-imu=*)
-        launch_args+=("raw_imu_topic:=${1#*=}")
-        ;;
-      --raw-imu)
-        shift
-        launch_args+=("raw_imu_topic:=$(require_value --raw-imu "${1:-}")")
-        ;;
-      --imu-initializer)
-        launch_args+=("use_imu_orientation_initializer:=true")
-        ;;
-      --no-imu-initializer)
-        launch_args+=("use_imu_orientation_initializer:=false")
+        reject_slam_behavior_option "--no-use-imu-rotation-initial-guess"
         ;;
       --lio-points=*)
-        launch_args+=("lio_custom_topic:=${1#*=}")
+        reject_fusion_option "--lio-points"
         ;;
       --lio-points)
-        shift
-        launch_args+=("lio_custom_topic:=$(require_value --lio-points "${1:-}")")
+        reject_fusion_option "--lio-points"
         ;;
       --lio-custom=*)
-        launch_args+=("lio_custom_topic:=${1#*=}")
+        reject_fusion_option "--lio-custom"
         ;;
       --lio-custom)
-        shift
-        launch_args+=("lio_custom_topic:=$(require_value --lio-custom "${1:-}")")
+        reject_fusion_option "--lio-custom"
         ;;
       --adapter)
-        launch_args+=("use_adapter:=true")
+        reject_pointcloud2_adapter_option "--adapter"
         ;;
       --no-adapter)
-        launch_args+=("use_adapter:=false")
+        reject_pointcloud2_adapter_option "--no-adapter"
         ;;
       --fusion)
-        launch_args+=("use_fusion:=true")
+        reject_fusion_option "--fusion"
         ;;
       --no-fusion)
-        launch_args+=("use_fusion:=false")
+        reject_fusion_option "--no-fusion"
         ;;
       --map-to-odom-z|--map-to-odom-z=*)
         echo "--map-to-odom-z has been removed. Align world/odom later with an external static TF." >&2
         exit 2
         ;;
-      --derived-ring-count=*)
-        launch_args+=("derived_ring_count:=${1#*=}")
-        ;;
-      --derived-ring-count)
-        shift
-        launch_args+=("derived_ring_count:=$(require_value --derived-ring-count "${1:-}")")
-        ;;
-      --min-vertical-angle=*)
-        launch_args+=("min_vertical_angle_deg:=${1#*=}")
-        ;;
-      --min-vertical-angle)
-        shift
-        launch_args+=("min_vertical_angle_deg:=$(require_value --min-vertical-angle "${1:-}")")
-        ;;
-      --max-vertical-angle=*)
-        launch_args+=("max_vertical_angle_deg:=${1#*=}")
-        ;;
-      --max-vertical-angle)
-        shift
-        launch_args+=("max_vertical_angle_deg:=$(require_value --max-vertical-angle "${1:-}")")
-        ;;
       --fusion-timestamp-scale=*)
-        launch_args+=("fusion_timestamp_unit_scale:=${1#*=}")
+        reject_slam_behavior_option "--fusion-timestamp-scale"
         ;;
       --fusion-timestamp-scale)
-        shift
-        launch_args+=("fusion_timestamp_unit_scale:=$(require_value --fusion-timestamp-scale "${1:-}")")
+        reject_slam_behavior_option "--fusion-timestamp-scale"
         ;;
       --use-sim-time)
         launch_args+=("use_sim_time:=true")
@@ -693,17 +734,6 @@ run_slam_launch() {
     shift
   done
 
-  if [[ -n "${left_points_topic}" || -n "${right_points_topic}" ]]; then
-    input_topics=()
-    [[ -n "${left_points_topic}" ]] && input_topics+=("${left_points_topic}")
-    [[ -n "${right_points_topic}" ]] && input_topics+=("${right_points_topic}")
-    launch_args+=("input_points_topics:=$(format_topic_list "${input_topics[@]}")")
-    launch_args+=("use_fusion:=true")
-    if [[ -n "${left_points_topic}" ]]; then
-      launch_args+=("reference_points_topic:=${left_points_topic}")
-    fi
-  fi
-
   source_sim_slam_environment false
 
   if [[ "${build_workspace}" == "true" ]]; then
@@ -744,74 +774,18 @@ run_bag_play_lio_sam() {
   local record_topics=("$@")
   local play_cmd=(ros2 bag play "${bag_path}" --clock --rate "${bag_rate}" --start-offset "${bag_offset}")
   local slam_args=()
-  local play_topics=()
-  local derived_input_topics=""
-  local derived_imu_topic=""
-  local derived_raw_imu_topic=""
-
-  for ((i = 0; i < ${#FORWARD_ARGS[@]}; i++)); do
-    case "${FORWARD_ARGS[i]}" in
-      --input-points=*)
-        derived_input_topics="${FORWARD_ARGS[i]#*=}"
-        ;;
-      --input-points)
-        i=$((i + 1))
-        derived_input_topics="${FORWARD_ARGS[i]}"
-        ;;
-      --points=*)
-        derived_input_topics="${FORWARD_ARGS[i]#*=}"
-        ;;
-      --points)
-        i=$((i + 1))
-        derived_input_topics="${FORWARD_ARGS[i]}"
-        ;;
-      --imu=*)
-        derived_imu_topic="${FORWARD_ARGS[i]#*=}"
-        ;;
-      --imu)
-        i=$((i + 1))
-        derived_imu_topic="${FORWARD_ARGS[i]}"
-        ;;
-      --raw-imu=*)
-        derived_raw_imu_topic="${FORWARD_ARGS[i]#*=}"
-        ;;
-      --raw-imu)
-        i=$((i + 1))
-        derived_raw_imu_topic="${FORWARD_ARGS[i]}"
-        ;;
-    esac
-  done
-
-  if [[ -n "${derived_input_topics}" ]]; then
-    mapfile -t play_topics < <(parse_csv_topics "${derived_input_topics}")
-  else
-    play_topics=("${DEFAULT_LIDAR_TOPICS[@]}")
-  fi
-
-  if [[ -n "${derived_raw_imu_topic}" ]]; then
-    append_unique_topics play_topics "${derived_raw_imu_topic}"
-  else
-    append_unique_topics play_topics "${DEFAULT_IMU_TOPICS[@]}"
-  fi
-  append_unique_topics play_topics "/tf_static"
-  play_cmd+=(--topics "${play_topics[@]}")
 
   mapfile -t slam_args < <(build_passthrough_args)
+  if ! has_config_arg; then
+    slam_args+=(--config "${DEFAULT_SIM_PARAMS_FILE}")
+  fi
   run_slam_launch \
     --use-sim-time \
-    --points /livox/lidar \
-    --raw-imu /left_lidar/imu \
-    --imu /left_lidar/imu \
-    --no-imu-initializer \
-    --imu-acceleration-unit mps2 \
-    --expected-acceleration-norm 9.80511 \
-    --acceleration-norm-tolerance 3.5 \
-    --deskew-mode off \
-    --imu-frequency 200.0 \
+    --imu /lidar1/livox/imu \
     "${slam_args[@]}" &
   SLAM_PID=$!
-  sleep 2
   ensure_process_started "${SLAM_PID}" "LIO-SAM"
+  wait_for_lio_sam_startup
   # bag再生前にrecordを起動し、再生開始直後のtopicも取りこぼしにくくする。
   if [[ "${record_bag}" == "true" ]]; then
     start_rosbag_record "${bag_output}" true "${record_topics[@]}"
@@ -830,8 +804,13 @@ run_bag_play_lio_sam() {
   # bag再生完了後は既定で短い猶予を置いて終了し、明示指定時だけSLAM/recordを継続する。
   if [[ "${play_status}" -eq 0 ]]; then
     if [[ "${auto_exit}" == "true" ]]; then
-      echo "Rosbag playback finished. Stopping SLAM after ${AUTO_STOP_AFTER_BAG_PLAY_SECONDS}s..." >&2
-      sleep "${AUTO_STOP_AFTER_BAG_PLAY_SECONDS}"
+      if ! wait_for_lio_sam_cloud_queue_empty; then
+        echo "Proceeding to auto-stop after cloudQueue drain wait failed." >&2
+      fi
+      if [[ "${AUTO_STOP_AFTER_BAG_PLAY_SECONDS}" != "0" && "${AUTO_STOP_AFTER_BAG_PLAY_SECONDS}" != "0.0" ]]; then
+        echo "Stopping SLAM after ${AUTO_STOP_AFTER_BAG_PLAY_SECONDS}s post-drain grace..." >&2
+        sleep "${AUTO_STOP_AFTER_BAG_PLAY_SECONDS}"
+      fi
     else
       set +e
       wait "${SLAM_PID}"
@@ -849,31 +828,19 @@ run_sim_lio_sam() {
   local lite_mode=false
   local robot_name_set=false
   local launch_args=()
-  local left_points_topic=""
-  local right_points_topic=""
   local record_bag=false
   local bag_output=""
   local bag_topics=()
 
-  format_topic_list() {
-    local values=("$@")
-    local result="["
-    local index=0
-
-    for value in "${values[@]}"; do
-      [[ -n "${value}" ]] || continue
-      if [[ "${index}" -gt 0 ]]; then
-        result+=", "
-      fi
-      result+="'${value}'"
-      index=$((index + 1))
-    done
-
-    result+="]"
-    printf '%s' "${result}"
-  }
-
   while [[ $# -gt 0 ]]; do
+    # simulationでもLiDAR fusion配線はmulti_lidar_fusion.yamlからのみ読む。
+    if [[ "$1" =~ ^--lidar([0-9]+)-points=(.+)$ ]]; then
+      reject_fusion_option "--lidar${BASH_REMATCH[1]}-points"
+    fi
+    if [[ "$1" =~ ^--lidar([0-9]+)-points$ ]]; then
+      reject_fusion_option "--lidar${BASH_REMATCH[1]}-points"
+    fi
+
     case "$1" in
       --build)
         build_workspace=true
@@ -886,77 +853,40 @@ run_sim_lio_sam() {
         launch_args+=("params_file:=$(require_value --config "${1:-}")")
         ;;
       --fusion-config=*)
-        launch_args+=("fusion_config:=${1#*=}")
+        reject_fusion_option "--fusion-config"
         ;;
       --fusion-config)
-        shift
-        launch_args+=("fusion_config:=$(require_value --fusion-config "${1:-}")")
+        reject_fusion_option "--fusion-config"
         ;;
       --input-points=*)
-        mapfile -t input_topics < <(parse_csv_topics "${1#*=}")
-        if [[ "${#input_topics[@]}" -eq 0 ]]; then
-          echo "--input-points requires at least one topic." >&2
-          exit 2
-        fi
-        launch_args+=("input_points_topics:=$(format_topic_list "${input_topics[@]}")")
+        reject_fusion_option "--input-points"
         ;;
       --input-points)
-        shift
-        input_points_value="$(require_value --input-points "${1:-}")"
-        mapfile -t input_topics < <(parse_csv_topics "${input_points_value}")
-        if [[ "${#input_topics[@]}" -eq 0 ]]; then
-          echo "--input-points requires at least one topic." >&2
-          exit 2
-        fi
-        launch_args+=("input_points_topics:=$(format_topic_list "${input_topics[@]}")")
+        reject_fusion_option "--input-points"
         ;;
       --points=*)
-        points_topic="${1#*=}"
-        launch_args+=("input_points_topics:=$(format_topic_list "${points_topic}")")
-        launch_args+=("reference_points_topic:=${points_topic}")
-        launch_args+=("lio_custom_topic:=${points_topic}")
+        reject_fusion_option "--points"
         ;;
       --points)
-        shift
-        points_topic="$(require_value --points "${1:-}")"
-        launch_args+=("input_points_topics:=$(format_topic_list "${points_topic}")")
-        launch_args+=("reference_points_topic:=${points_topic}")
-        launch_args+=("lio_custom_topic:=${points_topic}")
-        ;;
-      --left-points=*)
-        left_points_topic="${1#*=}"
-        ;;
-      --left-points)
-        shift
-        left_points_topic="$(require_value --left-points "${1:-}")"
-        ;;
-      --right-points=*)
-        right_points_topic="${1#*=}"
-        ;;
-      --right-points)
-        shift
-        right_points_topic="$(require_value --right-points "${1:-}")"
+        reject_fusion_option "--points"
         ;;
       --reference-points=*)
-        launch_args+=("reference_points_topic:=${1#*=}")
+        reject_fusion_option "--reference-points"
         ;;
       --reference-points)
-        shift
-        launch_args+=("reference_points_topic:=$(require_value --reference-points "${1:-}")")
+        reject_fusion_option "--reference-points"
         ;;
       --reference-lidar-frame=*)
-        launch_args+=("reference_lidar_frame:=${1#*=}")
+        reject_fusion_option "--reference-lidar-frame"
         ;;
       --reference-lidar-frame)
-        shift
-        launch_args+=("reference_lidar_frame:=$(require_value --reference-lidar-frame "${1:-}")")
+        reject_fusion_option "--reference-lidar-frame"
         ;;
       --fused-points=*)
-        launch_args+=("fused_points_topic:=${1#*=}")
+        reject_fusion_option "--fused-points"
         ;;
       --fused-points)
-        shift
-        launch_args+=("fused_points_topic:=$(require_value --fused-points "${1:-}")")
+        reject_fusion_option "--fused-points"
         ;;
       --imu=*)
         launch_args+=("imu_topic:=${1#*=}")
@@ -966,45 +896,40 @@ run_sim_lio_sam() {
         launch_args+=("imu_topic:=$(require_value --imu "${1:-}")")
         ;;
       --imu-type=*)
-        launch_args+=("imu_type:=${1#*=}")
+        reject_slam_behavior_option "--imu-type"
         ;;
       --imu-type)
-        shift
-        launch_args+=("imu_type:=$(require_value --imu-type "${1:-}")")
+        reject_slam_behavior_option "--imu-type"
         ;;
       --imu-acceleration-unit=*)
-        launch_args+=("imu_acceleration_unit:=${1#*=}")
+        reject_slam_behavior_option "--imu-acceleration-unit"
         ;;
       --imu-acceleration-unit)
-        shift
-        launch_args+=("imu_acceleration_unit:=$(require_value --imu-acceleration-unit "${1:-}")")
+        reject_slam_behavior_option "--imu-acceleration-unit"
         ;;
       --imu-acceleration-scale=*)
-        launch_args+=("imu_acceleration_scale:=${1#*=}")
+        reject_slam_behavior_option "--imu-acceleration-scale"
         ;;
       --imu-acceleration-scale)
-        shift
-        launch_args+=("imu_acceleration_scale:=$(require_value --imu-acceleration-scale "${1:-}")")
+        reject_slam_behavior_option "--imu-acceleration-scale"
         ;;
       --imu-frequency=*)
-        launch_args+=("imu_frequency:=${1#*=}")
+        reject_slam_behavior_option "--imu-frequency"
         ;;
       --imu-frequency)
-        shift
-        launch_args+=("imu_frequency:=$(require_value --imu-frequency "${1:-}")")
+        reject_slam_behavior_option "--imu-frequency"
         ;;
       --imu-debug)
-        launch_args+=("imu_debug:=true")
+        reject_slam_behavior_option "--imu-debug"
         ;;
       --no-imu-debug)
-        launch_args+=("imu_debug:=false")
+        reject_slam_behavior_option "--no-imu-debug"
         ;;
       --deskew-mode=*)
-        launch_args+=("deskew_mode:=${1#*=}")
+        reject_slam_behavior_option "--deskew-mode"
         ;;
       --deskew-mode)
-        shift
-        launch_args+=("deskew_mode:=$(require_value --deskew-mode "${1:-}")")
+        reject_slam_behavior_option "--deskew-mode"
         ;;
       --force-zero-offset-time)
         launch_args+=("force_zero_offset_time:=true")
@@ -1013,41 +938,28 @@ run_sim_lio_sam() {
         launch_args+=("force_zero_offset_time:=false")
         ;;
       --wait-for-imu-initialization)
-        launch_args+=("wait_for_imu_initialization:=true")
+        reject_slam_behavior_option "--wait-for-imu-initialization"
         ;;
       --no-wait-for-imu-initialization)
-        launch_args+=("wait_for_imu_initialization:=false")
+        reject_slam_behavior_option "--no-wait-for-imu-initialization"
         ;;
       --use-imu-preintegration-initial-guess)
-        launch_args+=("use_imu_preintegration_initial_guess:=true")
+        reject_slam_behavior_option "--use-imu-preintegration-initial-guess"
         ;;
       --no-use-imu-preintegration-initial-guess)
-        launch_args+=("use_imu_preintegration_initial_guess:=false")
+        reject_slam_behavior_option "--no-use-imu-preintegration-initial-guess"
         ;;
       --use-imu-translation-initial-guess)
-        launch_args+=("use_imu_translation_initial_guess:=true")
+        reject_slam_behavior_option "--use-imu-translation-initial-guess"
         ;;
       --no-use-imu-translation-initial-guess)
-        launch_args+=("use_imu_translation_initial_guess:=false")
+        reject_slam_behavior_option "--no-use-imu-translation-initial-guess"
         ;;
       --use-imu-rotation-initial-guess)
-        launch_args+=("use_imu_rotation_initial_guess:=true")
+        reject_slam_behavior_option "--use-imu-rotation-initial-guess"
         ;;
       --no-use-imu-rotation-initial-guess)
-        launch_args+=("use_imu_rotation_initial_guess:=false")
-        ;;
-      --raw-imu=*)
-        launch_args+=("raw_imu_topic:=${1#*=}")
-        ;;
-      --raw-imu)
-        shift
-        launch_args+=("raw_imu_topic:=$(require_value --raw-imu "${1:-}")")
-        ;;
-      --imu-initializer)
-        launch_args+=("use_imu_orientation_initializer:=true")
-        ;;
-      --no-imu-initializer)
-        launch_args+=("use_imu_orientation_initializer:=false")
+        reject_slam_behavior_option "--no-use-imu-rotation-initial-guess"
         ;;
       --record-bag)
         record_bag=true
@@ -1067,58 +979,34 @@ run_sim_lio_sam() {
         mapfile -t bag_topics < <(parse_csv_topics "$(require_value --bag-topics "${1:-}")")
         ;;
       --lio-points=*)
-        launch_args+=("lio_custom_topic:=${1#*=}")
+        reject_fusion_option "--lio-points"
         ;;
       --lio-points)
-        shift
-        launch_args+=("lio_custom_topic:=$(require_value --lio-points "${1:-}")")
+        reject_fusion_option "--lio-points"
         ;;
       --lio-custom=*)
-        launch_args+=("lio_custom_topic:=${1#*=}")
+        reject_fusion_option "--lio-custom"
         ;;
       --lio-custom)
-        shift
-        launch_args+=("lio_custom_topic:=$(require_value --lio-custom "${1:-}")")
+        reject_fusion_option "--lio-custom"
         ;;
       --adapter)
-        launch_args+=("use_adapter:=true")
+        reject_pointcloud2_adapter_option "--adapter"
         ;;
       --no-adapter)
-        launch_args+=("use_adapter:=false")
+        reject_pointcloud2_adapter_option "--no-adapter"
         ;;
       --fusion)
-        launch_args+=("use_fusion:=true")
+        reject_fusion_option "--fusion"
         ;;
       --no-fusion)
-        launch_args+=("use_fusion:=false")
-        ;;
-      --derived-ring-count=*)
-        launch_args+=("derived_ring_count:=${1#*=}")
-        ;;
-      --derived-ring-count)
-        shift
-        launch_args+=("derived_ring_count:=$(require_value --derived-ring-count "${1:-}")")
-        ;;
-      --min-vertical-angle=*)
-        launch_args+=("min_vertical_angle_deg:=${1#*=}")
-        ;;
-      --min-vertical-angle)
-        shift
-        launch_args+=("min_vertical_angle_deg:=$(require_value --min-vertical-angle "${1:-}")")
-        ;;
-      --max-vertical-angle=*)
-        launch_args+=("max_vertical_angle_deg:=${1#*=}")
-        ;;
-      --max-vertical-angle)
-        shift
-        launch_args+=("max_vertical_angle_deg:=$(require_value --max-vertical-angle "${1:-}")")
+        reject_fusion_option "--no-fusion"
         ;;
       --fusion-timestamp-scale=*)
-        launch_args+=("fusion_timestamp_unit_scale:=${1#*=}")
+        reject_slam_behavior_option "--fusion-timestamp-scale"
         ;;
       --fusion-timestamp-scale)
-        shift
-        launch_args+=("fusion_timestamp_unit_scale:=$(require_value --fusion-timestamp-scale "${1:-}")")
+        reject_slam_behavior_option "--fusion-timestamp-scale"
         ;;
       --rviz)
         launch_args+=("use_rviz:=true")
@@ -1188,16 +1076,6 @@ run_sim_lio_sam() {
     esac
     shift
   done
-
-  if [[ -n "${left_points_topic}" || -n "${right_points_topic}" ]]; then
-    input_topics=()
-    [[ -n "${left_points_topic}" ]] && input_topics+=("${left_points_topic}")
-    [[ -n "${right_points_topic}" ]] && input_topics+=("${right_points_topic}")
-    launch_args+=("input_points_topics:=$(format_topic_list "${input_topics[@]}")")
-    if [[ -n "${left_points_topic}" ]]; then
-      launch_args+=("reference_points_topic:=${left_points_topic}")
-    fi
-  fi
 
   # lite指定時はGazebo GUIを止め、LiDAR処理もsimulation launch側の軽量設定へ切り替える。
   launch_args+=("lite:=${lite_mode}")
@@ -1329,6 +1207,13 @@ while [[ $# -gt 0 ]]; do
     --auto-stop-after-bag-play)
       shift
       AUTO_STOP_AFTER_BAG_PLAY_SECONDS="$(require_value --auto-stop-after-bag-play "${1:-}")"
+      ;;
+    --cloud-queue-drain-timeout=*)
+      WAIT_FOR_CLOUD_QUEUE_DRAIN_TIMEOUT_SECONDS="${1#*=}"
+      ;;
+    --cloud-queue-drain-timeout)
+      shift
+      WAIT_FOR_CLOUD_QUEUE_DRAIN_TIMEOUT_SECONDS="$(require_value --cloud-queue-drain-timeout "${1:-}")"
       ;;
     --no-auto-exit)
       BAG_AUTO_EXIT=false

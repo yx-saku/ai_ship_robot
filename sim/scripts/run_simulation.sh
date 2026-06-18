@@ -7,11 +7,12 @@ WORKSPACE_ROOT="$(cd "${SCRIPT_DIR}/../.." && pwd)"
 SIM_ROOT="${WORKSPACE_ROOT}/sim"
 SETUP_SIMULATION_SCRIPT="${SIM_ROOT}/install/setup.sh"
 LIDAR_PATTERN_DIR="${SIM_ROOT}/ros2_ws/src/ai_ship_robot_description/urdf/lidar/patterns"
-AI_SHIP_ROBOT_OPT_ROOT="${AI_SHIP_ROBOT_OPT_ROOT:-/opt/ai_ship_robot}"
-THIRD_PARTY_UNDERLAY_SETUP="${AI_SHIP_ROBOT_OPT_ROOT}/ros_underlay/${ROS_DISTRO}/third_party_ws/install/setup.bash"
+SYSTEM_INSTALL_ROOT="/opt/ai_ship_robot"
+THIRD_PARTY_UNDERLAY_SETUP="${SYSTEM_INSTALL_ROOT}/ros_underlay/${ROS_DISTRO}/third_party_ws/install/setup.bash"
 ROSBAG_PID=""
 SIMULATION_PID=""
 DRIVE_PID=""
+POINTCLOUD_BRIDGE_PID=""
 ROSBAG_ROOT="${WORKSPACE_ROOT}/outputs/rosbag2"
 AUTO_STOP_AFTER_DRIVE_SECONDS="5"
 SIM_READY_TIMEOUT_SECONDS="300"
@@ -66,15 +67,14 @@ Options:
                        Use a LiDAR pattern xacro file name.
   --robot-name NAME   Set the spawned robot name.
   --drive-scenario FILE
-                      Start drive_robot.sh with a YAML scenario file.
+                       Start drive_robot.sh with a YAML scenario file.
   --drive-start-delay SEC
-                      Wait before starting scripted drive. With --record-bag, the wait is completed before recording. Default: 0.0
-  --drive-loop        Loop drive scenario until interrupted.
-  --drive-once        Run drive scenario once. Default.
+                       Wait before starting scripted drive. With --record-bag, the wait is completed before recording. Default: 0.0
   --no-auto-exit      Keep simulation running after a non-loop drive scenario finishes.
-  --record-bag        Record all topics after simulation readiness checks complete.
+  --record-bag        Record default livox and tf topics after simulation readiness checks complete.
+  --bag-all-topics    With --record-bag, record all topics instead of the default selected topics.
   --bag-output PATH   Set rosbag output directory or prefix.
-  --bag-topics CSV    Record only the given comma-separated topics. Default records all topics.
+  --bag-topics CSV    Record only the given comma-separated topics. Default records selected livox and tf topics.
   -h, --help          Show this help.
 
 Available LiDAR patterns:
@@ -220,6 +220,7 @@ source_workspace_environment() {
   source "/opt/ros/${ROS_DISTRO}/setup.bash"
   if [[ "${include_overlays}" == "true" ]]; then
     if ! source_overlay_if_current "${THIRD_PARTY_UNDERLAY_SETUP}" \
+      || ! source_overlay_if_current "${WORKSPACE_ROOT}/ros2_ws/install/setup.bash" \
       || ! source_overlay_if_current "${SIM_ROOT}/ros2_ws/install/setup.bash"; then
       if [[ "${had_nounset}" -eq 1 ]]; then
         set -u
@@ -290,7 +291,8 @@ append_unique_topics() {
 start_rosbag_record() {
   local output_path="$1"
   local use_sim_time="$2"
-  shift 2
+  local record_all_topics="$3"
+  shift 3
   local topics=("$@")
   local record_cmd=(ros2 bag record --include-hidden-topics)
 
@@ -302,14 +304,14 @@ start_rosbag_record() {
     record_cmd+=(--use-sim-time)
   fi
 
-  # topic無指定時は明示的に全topic記録へ切り替え、起動後に現れるtopicもrecord対象にする。
-  if [[ "${#topics[@]}" -eq 0 ]]; then
+  # 明示opt-in時だけ全topic記録へ切り替え、既定では必要topicだけに絞る。
+  if [[ "${record_all_topics}" == "true" ]]; then
     record_cmd+=(--all)
   else
     record_cmd+=("${topics[@]}")
   fi
   echo "Rosbag output: ${output_path}" >&2
-  if [[ "${#topics[@]}" -eq 0 ]]; then
+  if [[ "${record_all_topics}" == "true" ]]; then
     echo "Recording rosbag topics: all topics" >&2
   else
     echo "Recording rosbag topics: ${topics[*]}" >&2
@@ -413,9 +415,9 @@ wait_for_simulation_ready() {
   ensure_simulation_process_running
   wait_for_topic_once "/tf_static" "${SIM_READY_TIMEOUT_SECONDS}" --qos-durability transient_local --qos-reliability reliable
   ensure_simulation_process_running
-  wait_for_topic_once "/livox/lidar" "${SIM_READY_TIMEOUT_SECONDS}" --qos-reliability reliable
+  wait_for_topic_once "/lidar1/livox/lidar" "${SIM_READY_TIMEOUT_SECONDS}" --qos-reliability reliable
   ensure_simulation_process_running
-  wait_for_topic_once "/livox/imu" "${SIM_READY_TIMEOUT_SECONDS}" --qos-reliability reliable
+  wait_for_topic_once "/lidar1/livox/imu" "${SIM_READY_TIMEOUT_SECONDS}" --qos-reliability reliable
   ensure_simulation_process_running
   wait_for_topic_once "/odom" "${SIM_READY_TIMEOUT_SECONDS}"
   ensure_simulation_process_running
@@ -431,16 +433,22 @@ start_scripted_drive() {
     --start-delay "${start_delay}"
   )
 
-  # シナリオの繰り返し指定だけをdrive_robot.shへ転送し、速度系はscenario YAMLを唯一の入力にする。
-  if [[ "${DRIVE_LOOP}" == "true" ]]; then
-    drive_cmd+=(--loop)
-  else
-    drive_cmd+=(--once)
-  fi
-
   echo "Starting scripted drive scenario: ${DRIVE_SCENARIO}" >&2
   "${drive_cmd[@]}" &
   DRIVE_PID=$!
+}
+
+start_custommsg_pointcloud_bridge() {
+  # 変換nodeは入力topic末尾に/pointsを付けて出力するため、RViz購読名の親topicを渡す。
+  local bridge_cmd=(
+    ros2 run ai_ship_robot_slam livox_custommsg_to_pointcloud2_node --ros-args
+    -p use_sim_time:=true
+    -p input_topics:="['/lidar1/livox/lidar','/lidar2/livox/lidar','/lidar3/livox/lidar','/lidar4/livox/lidar']"
+  )
+
+  echo "Starting CustomMsg->PointCloud2 bridge for RViz..." >&2
+  "${bridge_cmd[@]}" &
+  POINTCLOUD_BRIDGE_PID=$!
 }
 
 default_bag_output() {
@@ -574,6 +582,9 @@ cleanup_background_processes() {
   # 先に自動運転を止め、終了処理中にcmd_vel publishが継続しないようにする。
   stop_background_process "${DRIVE_PID}" "scripted drive" 5 3 || true
 
+  # 可視化専用の補助点群は他processより先に止め、終了中のpublishを抑える。
+  stop_background_process "${POINTCLOUD_BRIDGE_PID}" "custommsg pointcloud bridge" 5 3 || true
+
   # rosbag recordへINTを送り、metadata flushの機会を与えてbag破損を避ける。
   stop_background_process "${ROSBAG_PID}" "rosbag recorder" "${ROSBAG_STOP_GRACE_SECONDS}" "${PROCESS_STOP_TERM_SECONDS}" || true
   log_recorded_bag_output
@@ -596,13 +607,14 @@ BUILD_WORKSPACE=false
 LITE_MODE=false
 LIDAR_RESOLUTION_MODE="default"
 RECORD_BAG=false
+RECORD_ALL_BAG_TOPICS=false
 BAG_OUTPUT=""
 BAG_TOPICS=()
 DRIVE_SCENARIO=""
 DRIVE_START_DELAY="0.0"
-DRIVE_LOOP=false
 AUTO_EXIT_AFTER_DRIVE=true
 DRIVE_OPTION_REQUESTED=false
+USE_RVIZ=true
 
 trap cleanup_background_processes EXIT
 
@@ -626,9 +638,11 @@ while [[ $# -gt 0 ]]; do
       ;;
     --rviz)
       LAUNCH_ARGS+=("use_rviz:=true")
+      USE_RVIZ=true
       ;;
     --no-rviz)
       LAUNCH_ARGS+=("use_rviz:=false")
+      USE_RVIZ=false
       ;;
     -4|--quarter-resolution)
       LIDAR_RESOLUTION_MODE="quarter"
@@ -700,19 +714,14 @@ while [[ $# -gt 0 ]]; do
       DRIVE_START_DELAY="$(require_value --drive-start-delay "${1:-}")"
       DRIVE_OPTION_REQUESTED=true
       ;;
-    --drive-loop)
-      DRIVE_LOOP=true
-      DRIVE_OPTION_REQUESTED=true
-      ;;
-    --drive-once)
-      DRIVE_LOOP=false
-      DRIVE_OPTION_REQUESTED=true
-      ;;
     --no-auto-exit)
       AUTO_EXIT_AFTER_DRIVE=false
       ;;
     --record-bag)
       RECORD_BAG=true
+      ;;
+    --bag-all-topics)
+      RECORD_ALL_BAG_TOPICS=true
       ;;
     --bag-output=*)
       BAG_OUTPUT="${1#*=}"
@@ -813,6 +822,20 @@ if [[ "${RECORD_BAG}" == "true" ]]; then
   if [[ -z "${BAG_OUTPUT}" ]]; then
     BAG_OUTPUT="$(default_bag_output)"
   fi
+  if [[ "${RECORD_ALL_BAG_TOPICS}" == "false" && "${#BAG_TOPICS[@]}" -eq 0 ]]; then
+    BAG_TOPICS=(
+      "/lidar1/livox/lidar"
+      "/lidar1/livox/imu"
+      "/lidar2/livox/lidar"
+      "/lidar2/livox/imu"
+      "/lidar3/livox/lidar"
+      "/lidar3/livox/imu"
+      "/lidar4/livox/lidar"
+      "/lidar4/livox/imu"
+      "/tf"
+      "/tf_static"
+    )
+  fi
 fi
 
 if [[ -n "${DRIVE_SCENARIO}" || "${RECORD_BAG}" == "true" ]]; then
@@ -824,9 +847,13 @@ if [[ -n "${DRIVE_SCENARIO}" || "${RECORD_BAG}" == "true" ]]; then
 
   wait_for_simulation_ready
 
+  if [[ "${USE_RVIZ}" == "true" ]]; then
+    start_custommsg_pointcloud_bridge
+  fi
+
   if [[ "${RECORD_BAG}" == "true" ]]; then
     # 明示指定があればそのtopicだけを記録し、未指定時は全topicを記録する。
-    start_rosbag_record "${BAG_OUTPUT}" true "${BAG_TOPICS[@]}"
+    start_rosbag_record "${BAG_OUTPUT}" true "${RECORD_ALL_BAG_TOPICS}" "${BAG_TOPICS[@]}"
   fi
 
   if [[ -n "${DRIVE_SCENARIO}" ]]; then
@@ -841,31 +868,35 @@ if [[ -n "${DRIVE_SCENARIO}" || "${RECORD_BAG}" == "true" ]]; then
     exit "${simulation_status}"
   fi
 
-  # loopなしの単発シナリオではdrive完了を確認し、成功時だけ自動停止または継続待機へ進む。
-  if [[ "${DRIVE_LOOP}" == "false" ]]; then
-    set +e
-    wait "${DRIVE_PID}"
-    drive_status=$?
-    set -e
+  # driveの終了有無を基準に後処理を統一し、loop有無はscenario YAML側へ完全移譲する。
+  set +e
+  wait "${DRIVE_PID}"
+  drive_status=$?
+  set -e
 
-    if [[ "${drive_status}" -ne 0 ]]; then
-      exit "${drive_status}"
-    fi
-
-    if [[ "${AUTO_EXIT_AFTER_DRIVE}" == "true" ]] && kill -0 "${SIMULATION_PID}" 2>/dev/null; then
-      echo "Scripted drive finished. Stopping simulation after ${AUTO_STOP_AFTER_DRIVE_SECONDS}s..." >&2
-      sleep "${AUTO_STOP_AFTER_DRIVE_SECONDS}"
-      stop_background_process "${SIMULATION_PID}" "simulation" "${PROCESS_STOP_GRACE_SECONDS}" "${PROCESS_STOP_TERM_SECONDS}" || true
-      exit 0
-    fi
-
-    set +e
-    wait "${SIMULATION_PID}"
-    simulation_status=$?
-    set -e
-
-    exit "${simulation_status}"
+  if [[ "${drive_status}" -ne 0 ]]; then
+    exit "${drive_status}"
   fi
+
+  if [[ "${AUTO_EXIT_AFTER_DRIVE}" == "true" ]] && kill -0 "${SIMULATION_PID}" 2>/dev/null; then
+    echo "Scripted drive finished. Stopping simulation after ${AUTO_STOP_AFTER_DRIVE_SECONDS}s..." >&2
+    sleep "${AUTO_STOP_AFTER_DRIVE_SECONDS}"
+    stop_background_process "${SIMULATION_PID}" "simulation" "${PROCESS_STOP_GRACE_SECONDS}" "${PROCESS_STOP_TERM_SECONDS}" || true
+    exit 0
+  fi
+
+  set +e
+  wait "${SIMULATION_PID}"
+  simulation_status=$?
+  set -e
+  exit "${simulation_status}"
+fi
+
+if [[ "${USE_RVIZ}" == "true" ]]; then
+  # plugin側のPointCloud2 publishは無効なため、通常起動でもRViz用変換bridgeを併走させる。
+  ros2 launch ai_ship_robot_gazebo simulation.launch.py "${LAUNCH_ARGS[@]}" &
+  SIMULATION_PID=$!
+  start_custommsg_pointcloud_bridge
 
   set +e
   wait "${SIMULATION_PID}"

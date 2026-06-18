@@ -153,6 +153,20 @@ public:
     float odometrySurfLeafSize;
     float mappingCornerLeafSize;
     float mappingSurfLeafSize ;
+    // AI_SHIP_ROBOT_BEGIN: 地図保存用hybrid点群をlocal frameで出すための最小parameterを追加する。
+    bool hybridRegisteredCloudEnabled;
+    float hybridRegisteredCloudRawNearRange;
+    float hybridRegisteredCloudRawNearLeafSize;
+    string hybridRegisteredCloudTopic;
+    bool publishDeskewedCloud;
+    bool publishFeatureClouds;
+    bool publishMapGlobalCloud;
+    bool publishMapLocalCloud;
+    bool publishTrajectoryCloud;
+    bool publishCloudRegistered;
+    bool publishCloudRegisteredRaw;
+    bool publishLoopClosureClouds;
+    // AI_SHIP_ROBOT_END
 
     float z_tollerance;
     float rotation_tollerance;
@@ -160,6 +174,11 @@ public:
     // CPU Params
     int numberOfCores;
     double mappingProcessInterval;
+    // AI_SHIP_ROBOT_BEGIN: rosbag再生backlog時の処理追跡とtimer内batch処理を制御する。
+    int imageProjectionMaxScansPerTimer;
+    int imageProjectionBacklogLogThreshold;
+    double processingTimeLogIntervalSec;
+    // AI_SHIP_ROBOT_END
 
     // Surrounding map
     float surroundingkeyframeAddingDistThreshold;
@@ -351,6 +370,37 @@ public:
         get_parameter("mappingCornerLeafSize", mappingCornerLeafSize);
         declare_parameter("mappingSurfLeafSize", 0.4);
         get_parameter("mappingSurfLeafSize", mappingSurfLeafSize);
+        // AI_SHIP_ROBOT_BEGIN: 近傍raw点群と遠方feature点群を外部map builderへ渡す設定を読む。
+        declare_parameter("hybridRegisteredCloudEnabled", true);
+        get_parameter("hybridRegisteredCloudEnabled", hybridRegisteredCloudEnabled);
+        declare_parameter("hybridRegisteredCloudRawNearRange", 2.0);
+        get_parameter("hybridRegisteredCloudRawNearRange", hybridRegisteredCloudRawNearRange);
+        declare_parameter("hybridRegisteredCloudRawNearLeafSize", 0.01);
+        get_parameter("hybridRegisteredCloudRawNearLeafSize", hybridRegisteredCloudRawNearLeafSize);
+        declare_parameter("hybridRegisteredCloudTopic", "/lio_sam/mapping/cloud_registered_hybrid");
+        get_parameter("hybridRegisteredCloudTopic", hybridRegisteredCloudTopic);
+        declare_parameter("publishDeskewedCloud", false);
+        get_parameter("publishDeskewedCloud", publishDeskewedCloud);
+        declare_parameter("publishFeatureClouds", false);
+        get_parameter("publishFeatureClouds", publishFeatureClouds);
+        declare_parameter("publishMapGlobalCloud", false);
+        get_parameter("publishMapGlobalCloud", publishMapGlobalCloud);
+        declare_parameter("publishMapLocalCloud", false);
+        get_parameter("publishMapLocalCloud", publishMapLocalCloud);
+        declare_parameter("publishTrajectoryCloud", false);
+        get_parameter("publishTrajectoryCloud", publishTrajectoryCloud);
+        declare_parameter("publishCloudRegistered", false);
+        get_parameter("publishCloudRegistered", publishCloudRegistered);
+        declare_parameter("publishCloudRegisteredRaw", false);
+        get_parameter("publishCloudRegisteredRaw", publishCloudRegisteredRaw);
+        declare_parameter("publishLoopClosureClouds", false);
+        get_parameter("publishLoopClosureClouds", publishLoopClosureClouds);
+        if (hybridRegisteredCloudRawNearRange < 0.0 || hybridRegisteredCloudRawNearLeafSize < 0.0)
+        {
+            RCLCPP_ERROR(get_logger(), "Invalid hybrid registered cloud range or leaf size: must be non-negative.");
+            rclcpp::shutdown();
+        }
+        // AI_SHIP_ROBOT_END
 
         declare_parameter("z_tollerance", 1000.0);
         get_parameter("z_tollerance", z_tollerance);
@@ -361,6 +411,19 @@ public:
         get_parameter("numberOfCores", numberOfCores);
         declare_parameter("mappingProcessInterval", 0.15);
         get_parameter("mappingProcessInterval", mappingProcessInterval);
+        // AI_SHIP_ROBOT_BEGIN: backlog時に複数scanを連続処理し、重い処理の内訳を一定周期で出力する。
+        declare_parameter("imageProjectionMaxScansPerTimer", 5);
+        get_parameter("imageProjectionMaxScansPerTimer", imageProjectionMaxScansPerTimer);
+        declare_parameter("imageProjectionBacklogLogThreshold", 10);
+        get_parameter("imageProjectionBacklogLogThreshold", imageProjectionBacklogLogThreshold);
+        declare_parameter("processingTimeLogIntervalSec", 5.0);
+        get_parameter("processingTimeLogIntervalSec", processingTimeLogIntervalSec);
+        if (imageProjectionMaxScansPerTimer <= 0 || imageProjectionBacklogLogThreshold < 0 || processingTimeLogIntervalSec < 0.0)
+        {
+            RCLCPP_ERROR(get_logger(), "Invalid processing performance parameter.");
+            rclcpp::shutdown();
+        }
+        // AI_SHIP_ROBOT_END
 
         declare_parameter("surroundingkeyframeAddingDistThreshold", 1.0);
         get_parameter("surroundingkeyframeAddingDistThreshold", surroundingkeyframeAddingDistThreshold);

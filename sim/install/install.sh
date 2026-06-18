@@ -2,6 +2,8 @@
 set -euo pipefail
 
 ROS_DISTRO="${ROS_DISTRO:-humble}"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+WORKSPACE_ROOT="$(cd "${SCRIPT_DIR}/../.." && pwd)"
 DEBIAN_FRONTEND="${DEBIAN_FRONTEND:-noninteractive}"
 APT_PRIMARY_MIRROR="${APT_PRIMARY_MIRROR:-}"
 APT_PORTS_MIRROR="${APT_PORTS_MIRROR:-}"
@@ -12,6 +14,8 @@ APT_HTTP_TIMEOUT="${APT_HTTP_TIMEOUT:-20}"
 APT_HTTPS_TIMEOUT="${APT_HTTPS_TIMEOUT:-${APT_HTTP_TIMEOUT}}"
 APT_UPDATED=0
 export DEBIAN_FRONTEND
+
+source "${SCRIPT_DIR}/../../install/shell_environment.sh"
 
 usage() {
   cat <<'EOF'
@@ -190,3 +194,6 @@ install_simulation_packages() {
 configure_ros2_apt_repository
 install_simulation_packages
 ensure_rosdep_initialized
+
+# simulation依存導入後も同じbashrc入口を再生成し、初回ターミナルでROS 2環境を見える状態にする。
+write_shell_environment_setup "${WORKSPACE_ROOT}" "${ROS_DISTRO}"

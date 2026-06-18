@@ -8,11 +8,14 @@ SIM_ROOT="${WORKSPACE_ROOT}/sim"
 ROS_WS="${WORKSPACE_ROOT}/ros2_ws"
 ROS_SIM_WS="${SIM_ROOT}/ros2_ws"
 ROS_SIM_WS_SRC_DIR="${ROS_SIM_WS}/src"
-AI_SHIP_ROBOT_OPT_ROOT="${AI_SHIP_ROBOT_OPT_ROOT:-/opt/ai_ship_robot}"
-THIRD_PARTY_WS="${AI_SHIP_ROBOT_OPT_ROOT}/ros_underlay/${ROS_DISTRO}/third_party_ws"
+SYSTEM_INSTALL_ROOT="/opt/ai_ship_robot"
+THIRD_PARTY_WS="${SYSTEM_INSTALL_ROOT}/ros_underlay/${ROS_DISTRO}/third_party_ws"
 THIRD_PARTY_UNDERLAY_SETUP="${THIRD_PARTY_WS}/install/setup.bash"
+
+source "${SCRIPT_DIR}/../../install/shell_environment.sh"
 ROSDEP_UPDATE_MAX_AGE_SECONDS="${ROSDEP_UPDATE_MAX_AGE_SECONDS:-86400}"
 ROSDEP_UPDATED=0
+SIM_INSTALL_THIRD_PARTY_SCRIPT="${SIM_ROOT}/install/install_third_party.sh"
 
 usage() {
   cat <<'EOF'
@@ -83,6 +86,19 @@ require_simulation_underlay_package() {
   fi
 }
 
+ensure_simulation_underlay_patch_current() {
+  local plugin_source="${THIRD_PARTY_WS}/src/ros2_livox_simulation/src/livox_points_plugin.cpp"
+
+  [[ -f "${plugin_source}" ]] || return 0
+  if grep -Fq "enable_pointcloud2" "${plugin_source}"; then
+    return 0
+  fi
+
+  # PointCloud2既定無効化を反映するため、古いplugin sourceを検出したらunderlayを更新する。
+  echo "Updating simulation third-party underlay patches..."
+  bash "${SIM_INSTALL_THIRD_PARTY_SCRIPT}"
+}
+
 source_runtime_workspace_if_exists() {
   if [[ ! -f "${ROS_WS}/install/setup.bash" ]]; then
     return 0
@@ -116,87 +132,6 @@ remove_stale_workspace_artifacts() {
   echo "Remove stale workspace artifacts that reference old third_party paths."
   if [[ "${stale_runtime}" -eq 1 ]]; then rm -rf "${ROS_WS}/build" "${ROS_WS}/install" "${ROS_WS}/log"; fi
   if [[ "${stale_simulation}" -eq 1 ]]; then rm -rf "${ROS_SIM_WS}/build" "${ROS_SIM_WS}/install" "${ROS_SIM_WS}/log"; fi
-}
-
-write_shell_environment_setup() {
-  local bashrc_path="${AI_SHIP_ROBOT_BASHRC:-${HOME}/.bashrc}"
-  local env_script_path="${AI_SHIP_ROBOT_ENV_SCRIPT:-${HOME}/.ai_ship_robot_environment.bash}"
-  local bashrc_dir=""
-  local env_script_dir=""
-  local begin_marker="# >>> ai_ship_robot environment >>>"
-  local end_marker="# <<< ai_ship_robot environment <<<"
-  local filtered_bashrc=""
-  local updated_bashrc=""
-  local skip_block=0
-  local line=""
-
-  bashrc_dir="$(dirname "${bashrc_path}")"
-  env_script_dir="$(dirname "${env_script_path}")"
-  filtered_bashrc="$(mktemp)"
-  updated_bashrc="$(mktemp)"
-
-  # simulation追加後はsystem underlay、runtime、simulationの順に同じ入口から読み込めるようにする。
-  mkdir -p "${env_script_dir}"
-  cat > "${env_script_path}" <<EOF
-# This file is managed by sim/install/setup.sh.
-export AI_SHIP_ROBOT_WORKSPACE="${WORKSPACE_ROOT}"
-export AI_SHIP_ROBOT_OPT_ROOT="${AI_SHIP_ROBOT_OPT_ROOT}"
-export ROS_DISTRO="\${ROS_DISTRO:-${ROS_DISTRO}}"
-if [ -f "/opt/ros/\${ROS_DISTRO}/setup.bash" ]; then
-  _ai_ship_robot_source_overlay_if_current() {
-    _ai_ship_robot_setup_file="\$1"
-    if [ ! -f "\${_ai_ship_robot_setup_file}" ]; then
-      return 0
-    fi
-    if grep -Fq "\${AI_SHIP_ROBOT_WORKSPACE}/third_party/ws" "\${_ai_ship_robot_setup_file}" 2>/dev/null \
-      || grep -Fq "\${AI_SHIP_ROBOT_WORKSPACE}/third_party/vendor" "\${_ai_ship_robot_setup_file}" 2>/dev/null \
-      || grep -Fq "\${AI_SHIP_ROBOT_WORKSPACE}/third_party_ws" "\${_ai_ship_robot_setup_file}" 2>/dev/null \
-      || grep -Fq "\${AI_SHIP_ROBOT_WORKSPACE}/third_party_vendor" "\${_ai_ship_robot_setup_file}" 2>/dev/null; then
-      return 0
-    fi
-    source "\${_ai_ship_robot_setup_file}"
-  }
-  _ai_ship_robot_had_nounset=0
-  if [ "\${-}" != "\${-#*u}" ]; then
-    _ai_ship_robot_had_nounset=1
-    set +u
-  fi
-  source "/opt/ros/\${ROS_DISTRO}/setup.bash"
-  _ai_ship_robot_source_overlay_if_current "\${AI_SHIP_ROBOT_OPT_ROOT}/ros_underlay/\${ROS_DISTRO}/third_party_ws/install/setup.bash"
-  _ai_ship_robot_source_overlay_if_current "\${AI_SHIP_ROBOT_WORKSPACE}/ros2_ws/install/setup.bash"
-  _ai_ship_robot_source_overlay_if_current "\${AI_SHIP_ROBOT_WORKSPACE}/sim/ros2_ws/install/setup.bash"
-  if [ "\${_ai_ship_robot_had_nounset}" -eq 1 ]; then
-    set -u
-  fi
-  unset _ai_ship_robot_had_nounset _ai_ship_robot_setup_file
-  unset -f _ai_ship_robot_source_overlay_if_current
-fi
-EOF
-
-  mkdir -p "${bashrc_dir}"
-  touch "${bashrc_path}"
-  while IFS= read -r line || [[ -n "${line}" ]]; do
-    if [[ "${line}" == "${begin_marker}" ]]; then skip_block=1; continue; fi
-    if [[ "${line}" == "${end_marker}" ]]; then skip_block=0; continue; fi
-    if [[ "${skip_block}" -eq 0 ]]; then printf '%s\n' "${line}" >> "${filtered_bashrc}"; fi
-  done < "${bashrc_path}"
-
-  {
-    cat <<EOF
-${begin_marker}
-if [ -f "${env_script_path}" ]; then
-  source "${env_script_path}"
-fi
-${end_marker}
-EOF
-    printf '\n'
-    if [[ -s "${filtered_bashrc}" ]]; then cat "${filtered_bashrc}"; fi
-  } > "${updated_bashrc}"
-
-  mv "${updated_bashrc}" "${bashrc_path}"
-  rm -f "${filtered_bashrc}"
-  echo "Updated shell environment setup: ${bashrc_path}"
-  echo "Updated shell environment script: ${env_script_path}"
 }
 
 ensure_rosdep_initialized() {
@@ -262,6 +197,7 @@ setup_simulation_workspace() {
   source_ros2
   require_third_party_underlay
   source_third_party_underlay
+  ensure_simulation_underlay_patch_current
   require_simulation_underlay_package
   remove_stale_workspace_artifacts
   source_runtime_workspace_if_exists
@@ -271,4 +207,4 @@ setup_simulation_workspace() {
 
 require_ros2
 setup_simulation_workspace
-write_shell_environment_setup
+write_shell_environment_setup "${WORKSPACE_ROOT}" "${ROS_DISTRO}"

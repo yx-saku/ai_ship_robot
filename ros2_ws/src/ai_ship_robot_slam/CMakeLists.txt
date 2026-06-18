@@ -8,6 +8,8 @@ endif()
 find_package(ament_cmake REQUIRED)
 find_package(ament_index_cpp REQUIRED)
 find_package(livox_ros_driver2 REQUIRED)
+find_package(geometry_msgs REQUIRED)
+find_package(nav_msgs REQUIRED)
 find_package(tf2 REQUIRED)
 find_package(tf2_ros REQUIRED)
 find_package(tf2_sensor_msgs REQUIRED)
@@ -15,10 +17,11 @@ find_package(rclcpp REQUIRED)
 find_package(sensor_msgs REQUIRED)
 find_package(std_srvs REQUIRED)
 
-add_executable(mid360_lio_sam_pointcloud_adapter_node src/mid360_lio_sam_pointcloud_adapter_node.cpp)
-target_compile_features(mid360_lio_sam_pointcloud_adapter_node PUBLIC cxx_std_17)
+add_executable(livox_custommsg_to_pointcloud2_node src/livox_custommsg_to_pointcloud2_node.cpp)
+target_compile_features(livox_custommsg_to_pointcloud2_node PUBLIC cxx_std_17)
 ament_target_dependencies(
-  mid360_lio_sam_pointcloud_adapter_node
+  livox_custommsg_to_pointcloud2_node
+  livox_ros_driver2
   rclcpp
   sensor_msgs
 )
@@ -30,25 +33,27 @@ ament_target_dependencies(
   ament_index_cpp
   livox_ros_driver2
   rclcpp
-  sensor_msgs
   tf2
   tf2_ros
-  tf2_sensor_msgs
 )
 
-add_executable(six_axis_imu_initial_orientation_node src/six_axis_imu_initial_orientation_node.cpp)
-target_compile_features(six_axis_imu_initial_orientation_node PUBLIC cxx_std_17)
+add_executable(slam_reference_lidar_static_tf_node src/slam_reference_lidar_static_tf_node.cpp)
+target_compile_features(slam_reference_lidar_static_tf_node PUBLIC cxx_std_17)
 ament_target_dependencies(
-  six_axis_imu_initial_orientation_node
+  slam_reference_lidar_static_tf_node
+  geometry_msgs
+  livox_ros_driver2
   rclcpp
-  sensor_msgs
   tf2
+  tf2_ros
 )
 
 add_executable(pcd_map_saver_node src/pcd_map_saver_node.cpp)
 target_compile_features(pcd_map_saver_node PUBLIC cxx_std_17)
 ament_target_dependencies(
   pcd_map_saver_node
+  geometry_msgs
+  nav_msgs
   rclcpp
   sensor_msgs
   std_srvs
@@ -59,10 +64,10 @@ ament_target_dependencies(
 
 install(
   TARGETS
-    mid360_lio_sam_pointcloud_adapter_node
+    livox_custommsg_to_pointcloud2_node
     multi_lidar_pointcloud_fusion_node
     pcd_map_saver_node
-    six_axis_imu_initial_orientation_node
+    slam_reference_lidar_static_tf_node
   DESTINATION lib/${PROJECT_NAME}
 )
 

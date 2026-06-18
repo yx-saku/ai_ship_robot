@@ -25,17 +25,15 @@ public:
     declare_parameter<std::string>("cmd_vel_topic", "cmd_vel");
     declare_parameter<std::string>("scenario_file", "");
     declare_parameter<double>("start_delay_sec", 0.0);
-    declare_parameter<bool>("loop", false);
     declare_parameter<double>("publish_rate", 10.0);
 
     cmd_vel_topic_ = get_parameter("cmd_vel_topic").as_string();
     scenario_file_ = get_parameter("scenario_file").as_string();
     start_delay_sec_ = get_parameter("start_delay_sec").as_double();
-    loop_enabled_ = get_parameter("loop").as_bool();
     publish_rate_ = get_parameter("publish_rate").as_double();
 
     publisher_ = create_publisher<geometry_msgs::msg::Twist>(cmd_vel_topic_, rclcpp::QoS(10));
-    steps_ = load_scenario_file(scenario_file_);
+    scenario_ = load_scenario_file(scenario_file_);
   }
 
   void run()
@@ -54,12 +52,8 @@ public:
     }
 
     const auto period = std::chrono::duration<double>(1.0 / publish_rate_);
-    bool keep_running = true;
-    while (rclcpp::ok() && keep_running) {
-      RCLCPP_INFO(get_logger(), "Starting scripted drive scenario");
-      run_steps(period);
-      keep_running = loop_enabled_;
-    }
+    RCLCPP_INFO(get_logger(), "Starting scripted drive scenario");
+    run_steps(period);
   }
 
   void stop()
@@ -117,8 +111,8 @@ private:
 
   void run_steps(const std::chrono::duration<double> period)
   {
-    for (std::size_t index = 0; rclcpp::ok() && index < steps_.size(); ++index) {
-      const auto & step = steps_[index];
+    for (std::size_t index = 0; rclcpp::ok() && index < scenario_.steps.size(); ++index) {
+      const auto & step = scenario_.steps[index];
       const auto active_step_time = wait_for_active_sim_time();
       if (!active_step_time) {
         return;
@@ -163,10 +157,9 @@ private:
   std::string cmd_vel_topic_;
   std::string scenario_file_;
   double start_delay_sec_{};
-  bool loop_enabled_{};
   double publish_rate_{};
   rclcpp::Publisher<geometry_msgs::msg::Twist>::SharedPtr publisher_;
-  std::vector<ScenarioStep> steps_;
+  ScenarioDefinition scenario_;
 };
 
 }  // namespace ai_ship_robot_gazebo

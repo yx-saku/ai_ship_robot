@@ -1,0 +1,72 @@
+<?xml version="1.0"?>
+<robot xmlns:xacro="http://www.ros.org/wiki/xacro" name="lidar_pattern_quad_front_right_rear_left_updown">
+  <xacro:include filename="../models/mid360_lidar.urdf.xacro" />
+
+  <!-- 前右セットは車体前面右端へ密着させ、2台を同一点で上下反転のみ変えて重ねる。 -->
+  <xacro:property name="lidar1_x" value="${base_length / 2.0 + mid360_depth / 2.0}" />
+  <xacro:property name="lidar1_y" value="${-(base_width / 2.0 - mid360_width / 2.0)}" />
+  <xacro:property name="lidar1_z" value="${0.150 + mid360_height / 2.0}" />
+  <xacro:property name="lidar2_x" value="${lidar1_x}" />
+  <xacro:property name="lidar2_y" value="${lidar1_y}" />
+  <xacro:property name="lidar2_z" value="${0.150 - mid360_height / 2.0}" />
+
+  <!-- 後左セットは車体後面左側へ密着させ、同様に2台を同一点へ上下反転で重ねる。 -->
+  <xacro:property name="lidar3_x" value="${-(base_length / 2.0 + mid360_depth / 2.0)}" />
+  <xacro:property name="lidar3_y" value="${base_width / 2.0 - mid360_width / 2.0}" />
+  <xacro:property name="lidar3_z" value="${0.150 + mid360_height / 2.0}" />
+  <xacro:property name="lidar4_x" value="${lidar3_x}" />
+  <xacro:property name="lidar4_y" value="${lidar3_y}" />
+  <xacro:property name="lidar4_z" value="${0.150 - mid360_height / 2.0}" />
+
+  <!-- dual_front_updown と同じく、正向きと逆さまを小さくずらしたロールで区別する。 -->
+  <xacro:property name="deg_to_rad" value="${pi / 180.0}" />
+  <xacro:property name="upright_roll" value="${3.0 * deg_to_rad}" />
+  <xacro:property name="inverted_roll" value="${183.0 * deg_to_rad}" />
+  <xacro:property name="lidar_pitch" value="0.0" />
+  <xacro:property name="front_set_yaw" value="0.0" />
+  <xacro:property name="rear_set_yaw" value="${pi}" />
+
+  <xacro:mid360_lidar
+    prefix="lidar1"
+    x="${lidar1_x}"
+    y="${lidar1_y}"
+    z="${lidar1_z}"
+    roll="${inverted_roll}"
+    pitch="${lidar_pitch}"
+    yaw="${front_set_yaw}"
+    enable_imu="true"
+    imu_topic="/lidar1/imu" />
+
+  <xacro:mid360_lidar
+    prefix="lidar2"
+    x="${lidar2_x}"
+    y="${lidar2_y}"
+    z="${lidar2_z}"
+    roll="${upright_roll}"
+    pitch="${lidar_pitch}"
+    yaw="${front_set_yaw}"
+    enable_imu="true"
+    imu_topic="/lidar2/imu" />
+
+  <xacro:mid360_lidar
+    prefix="lidar3"
+    x="${lidar3_x}"
+    y="${lidar3_y}"
+    z="${lidar3_z}"
+    roll="${inverted_roll}"
+    pitch="${lidar_pitch}"
+    yaw="${rear_set_yaw}"
+    enable_imu="true"
+    imu_topic="/lidar3/imu" />
+
+  <xacro:mid360_lidar
+    prefix="lidar4"
+    x="${lidar4_x}"
+    y="${lidar4_y}"
+    z="${lidar4_z}"
+    roll="${upright_roll}"
+    pitch="${lidar_pitch}"
+    yaw="${rear_set_yaw}"
+    enable_imu="true"
+    imu_topic="/lidar4/imu" />
+</robot>

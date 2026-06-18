@@ -26,7 +26,7 @@ Panels:
     Experimental: false
     Name: Time
     SyncMode: 0
-    SyncSource: LIO-SAM Deskewed Cloud
+    SyncSource: LIO-SAM Registered Cloud
 Visualization Manager:
   Class: ""
   Displays:
@@ -69,23 +69,25 @@ Visualization Manager:
           Value: true
         left_front_omni_wheel_link:
           Value: true
-        left_lidar_imu_link:
-          Value: true
-        left_lidar_init:
-          Value: true
-        left_lidar_link:
-          Value: true
-        left_lidar_odom:
-          Value: true
         left_rear_omni_wheel_link:
+          Value: true
+        lidar1_imu_link:
+          Value: true
+        lidar1_link:
+          Value: true
+        lidar2_imu_link:
+          Value: true
+        lidar2_link:
+          Value: true
+        lidar_init:
+          Value: true
+        lidar_odom:
           Value: true
         map:
           Value: true
+        odom:
+          Value: true
         right_front_omni_wheel_link:
-          Value: true
-        right_lidar_imu_link:
-          Value: true
-        right_lidar_link:
           Value: true
         right_rear_omni_wheel_link:
           Value: true
@@ -96,29 +98,24 @@ Visualization Manager:
       Show Names: true
       Tree:
         map:
-          left_lidar_init:
-            left_lidar_odom:
+          lidar_init:
+            lidar_odom:
               base_footprint:
                 base_link:
                   arm_robot_body_link:
-                    arm_robot_upper_arm_link:
-                      arm_robot_forearm_link:
-                        arm_robot_wrist_link:
-                          {}
+                    {}
                   imu_link:
                     {}
                   left_front_omni_wheel_link:
                     {}
-                  left_lidar_link:
-                    left_lidar_imu_link:
-                      {}
                   left_rear_omni_wheel_link:
+                    {}
+                  lidar1_link:
+                    {}
+                  lidar2_link:
                     {}
                   right_front_omni_wheel_link:
                     {}
-                  right_lidar_link:
-                    right_lidar_imu_link:
-                      {}
                   right_rear_omni_wheel_link:
                     {}
       Update Interval: 0
@@ -213,10 +210,44 @@ Visualization Manager:
         Filter size: 10
         History Policy: Keep Last
         Reliability Policy: Best Effort
-        Value: /lio_sam/mapping/cloud_registered
+        Value: /lio_sam/mapping/cloud_registered_hybrid
       Use Fixed Frame: true
       Use rainbow: true
       Value: true
+    - Alpha: 1
+      Autocompute Intensity Bounds: true
+      Autocompute Value Bounds:
+        Max Value: 10
+        Min Value: -10
+        Value: true
+      Axis: Z
+      Channel Name: intensity
+      Class: rviz_default_plugins/PointCloud2
+      Color: 255; 255; 255
+      Color Transformer: Intensity
+      Decay Time: 0
+      Enabled: false
+      Invert Rainbow: false
+      Max Color: 255; 255; 255
+      Max Intensity: 0
+      Min Color: 0; 0; 0
+      Min Intensity: 0
+      Name: Fused Livox Points
+      Position Transformer: XYZ
+      Selectable: true
+      Size (Pixels): 2
+      Size (m): 0.009999999776482582
+      Style: Points
+      Topic:
+        Depth: 5
+        Durability Policy: Volatile
+        Filter size: 10
+        History Policy: Keep Last
+        Reliability Policy: Best Effort
+        Value: /fused/livox/lidar/points
+      Use Fixed Frame: true
+      Use rainbow: true
+      Value: false
     - Alpha: 1
       Buffer Length: 1
       Class: rviz_default_plugins/Path
@@ -400,5 +431,5 @@ Window Geometry:
   Views:
     collapsed: true
   Width: 1588
-  X: 1296
+  X: 1172
   Y: 815

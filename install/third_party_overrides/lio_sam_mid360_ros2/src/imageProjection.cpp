@@ -1,7 +1,9 @@
 #include "utility.hpp"
 #include "lio_sam/msg/cloud_info.hpp"
+#include "lio_sam/srv/save_map.hpp"
 
-// AI_SHIP_ROBOT_BEGIN: LiDAR callbackを軽量化し、timerで1scanずつ処理するためにchronoを使う。
+// AI_SHIP_ROBOT_BEGIN: LiDAR callbackを軽量化し、timerで複数scan処理と処理時間計測を行う。
+#include <algorithm>
 #include <chrono>
 // AI_SHIP_ROBOT_END
 
@@ -80,10 +82,15 @@ private:
 
     rclcpp::Publisher<sensor_msgs::msg::PointCloud2>::SharedPtr pubExtractedCloud;
     rclcpp::Publisher<lio_sam::msg::CloudInfo>::SharedPtr pubLaserCloudInfo;
+    rclcpp::Service<lio_sam::srv::SaveMap>::SharedPtr srvCloudQueueEmpty;
 
     rclcpp::Subscription<sensor_msgs::msg::Imu>::SharedPtr subImu;
     rclcpp::CallbackGroup::SharedPtr callbackGroupImu;
     std::deque<sensor_msgs::msg::Imu> imuQueue;
+    // AI_SHIP_ROBOT_BEGIN: 6軸IMU初期姿勢確定前のIMUをrawで保持し、確定後に再変換する。
+    std::deque<sensor_msgs::msg::Imu> rawImuQueue;
+    bool deferredRawImuConverted = false;
+    // AI_SHIP_ROBOT_END
 
     rclcpp::Subscription<nav_msgs::msg::Odometry>::SharedPtr subOdom;
     rclcpp::CallbackGroup::SharedPtr callbackGroupOdom;
@@ -91,6 +98,24 @@ private:
 
     std::deque<livox_ros_driver2::msg::CustomMsg> cloudQueue;
     livox_ros_driver2::msg::CustomMsg currentCloudMsg;
+    string lastDropReason = "none";
+    uint64_t cloudEnqueuedCount = 0;
+    uint64_t cloudProcessedCount = 0;
+    uint64_t cloudDroppedCount = 0;
+    std::chrono::steady_clock::time_point lastImageProjectionTimingLogTime = std::chrono::steady_clock::now();
+    uint64_t imageProjectionTimingScanCount = 0;
+    double imageProjectionCacheMsSum = 0.0;
+    double imageProjectionDeskewMsSum = 0.0;
+    double imageProjectionProjectMsSum = 0.0;
+    double imageProjectionExtractionMsSum = 0.0;
+    double imageProjectionPublishMsSum = 0.0;
+    double imageProjectionTotalMsSum = 0.0;
+    double rawNearVoxelMsSum = 0.0;
+    size_t rawNearVoxelInputSum = 0;
+    size_t rawNearVoxelOutputSum = 0;
+    double lastRawNearVoxelMs = 0.0;
+    size_t lastRawNearVoxelInputSize = 0;
+    size_t lastRawNearVoxelOutputSize = 0;
 
     double *imuTime = new double[queueLength];
     double *imuRotX = new double[queueLength];
@@ -105,9 +130,12 @@ private:
     pcl::PointCloud<OusterPointXYZIRT>::Ptr tmpOusterCloudIn;
     pcl::PointCloud<PointType>::Ptr   fullCloud;
     pcl::PointCloud<PointType>::Ptr   extractedCloud;
+    pcl::PointCloud<PointType>::Ptr   rawNearCloud;
+    pcl::PointCloud<PointType>::Ptr   rawNearCloudDS;
 
     int deskewFlag;
     cv::Mat rangeMat;
+    pcl::VoxelGrid<PointType> downSizeFilterRawNear;
 
     bool odomDeskewFlag;
     // AI_SHIP_ROBOT_BEGIN: odom補間deskewと初回scan publish待機を明示的な状態で管理する。
@@ -170,6 +198,11 @@ public:
         const auto cloudInfoQos = rclcpp::QoS(rclcpp::KeepLast(200)).reliable().durability_volatile();
         pubLaserCloudInfo = create_publisher<lio_sam::msg::CloudInfo>(
             "lio_sam/deskew/cloud_info", cloudInfoQos);
+        // rosbag再生後に未処理scanが残っていないかscript側から確認できるようにする。
+        srvCloudQueueEmpty = create_service<lio_sam::srv::SaveMap>(
+            "lio_sam/deskew/is_cloud_queue_empty",
+            std::bind(&ImageProjection::cloudQueueEmptyHandler, this,
+                std::placeholders::_1, std::placeholders::_2, std::placeholders::_3));
 
         allocateMemory();
         resetParameters();
@@ -183,8 +216,14 @@ public:
         tmpOusterCloudIn.reset(new pcl::PointCloud<OusterPointXYZIRT>());
         fullCloud.reset(new pcl::PointCloud<PointType>());
         extractedCloud.reset(new pcl::PointCloud<PointType>());
+        rawNearCloud.reset(new pcl::PointCloud<PointType>());
+        rawNearCloudDS.reset(new pcl::PointCloud<PointType>());
 
         fullCloud->points.resize(N_SCAN*Horizon_SCAN);
+        downSizeFilterRawNear.setLeafSize(
+            hybridRegisteredCloudRawNearLeafSize,
+            hybridRegisteredCloudRawNearLeafSize,
+            hybridRegisteredCloudRawNearLeafSize);
 
         cloudInfo.start_ring_index.assign(N_SCAN, 0);
         cloudInfo.end_ring_index.assign(N_SCAN, 0);
@@ -199,6 +238,8 @@ public:
     {
         laserCloudIn->clear();
         extractedCloud->clear();
+        rawNearCloud->clear();
+        rawNearCloudDS->clear();
         // reset range matrix for range image projection
         rangeMat = cv::Mat(N_SCAN, Horizon_SCAN, CV_32F, cv::Scalar::all(FLT_MAX));
 
@@ -220,12 +261,63 @@ public:
 
     ~ImageProjection(){}
 
+    void cloudQueueEmptyHandler(
+        const std::shared_ptr<rmw_request_id_t> request_header,
+        const std::shared_ptr<lio_sam::srv::SaveMap::Request> req,
+        std::shared_ptr<lio_sam::srv::SaveMap::Response> res)
+    {
+        (void)request_header;
+        (void)req;
+
+        size_t queueSize = 0;
+        uint64_t enqueuedCount = 0;
+        uint64_t processedCount = 0;
+        uint64_t droppedCount = 0;
+        {
+            std::lock_guard<std::mutex> lock(cloudLock);
+            queueSize = cloudQueue.size();
+            enqueuedCount = cloudEnqueuedCount;
+            processedCount = cloudProcessedCount;
+            droppedCount = cloudDroppedCount;
+        }
+
+        // SaveMap service型をqueue空判定に流用し、success=trueを「未処理scanなし」として返す。
+        res->success = queueSize == 0;
+        RCLCPP_INFO(
+            get_logger(),
+            "Cloud queue drain status: empty=%d queued_clouds=%zu enqueued=%lu processed=%lu dropped=%lu",
+            res->success ? 1 : 0, queueSize,
+            static_cast<unsigned long>(enqueuedCount),
+            static_cast<unsigned long>(processedCount),
+            static_cast<unsigned long>(droppedCount));
+    }
+
     void imuHandler(const sensor_msgs::msg::Imu::SharedPtr imuMsg)
     {
-        sensor_msgs::msg::Imu thisImu = imuConverter(*imuMsg);
+        sensor_msgs::msg::Imu rawImu = *imuMsg;
+        sensor_msgs::msg::Imu thisImu = imuConverter(rawImu);
 
         {
             std::lock_guard<std::mutex> lock1(imuLock);
+            // 初期姿勢待機中のIMUは変換済みqueueへ入れず、姿勢確定後にraw履歴から作り直す。
+            if (usingSixAxisImu() && waitForImuInitialization && !deferredRawImuConverted)
+            {
+                rawImuQueue.push_back(rawImu);
+                if (!sixAxisImuReady())
+                    return;
+
+                imuQueue.clear();
+                for (const auto& queuedRawImu : rawImuQueue)
+                    imuQueue.push_back(imuConverter(queuedRawImu));
+                RCLCPP_INFO(
+                    get_logger(),
+                    "Converted deferred raw IMU queue after 6-axis initialization: samples=%zu",
+                    rawImuQueue.size());
+                rawImuQueue.clear();
+                deferredRawImuConverted = true;
+                return;
+            }
+
             imuQueue.push_back(thisImu);
         }
 
@@ -245,56 +337,210 @@ public:
         {
             std::lock_guard<std::mutex> lock(cloudLock);
             cloudQueue.push_back(*laserCloudMsg);
+            ++cloudEnqueuedCount;
         }
+    }
+
+    double elapsedMilliseconds(
+        const std::chrono::steady_clock::time_point& start,
+        const std::chrono::steady_clock::time_point& end) const
+    {
+        return std::chrono::duration<double, std::milli>(end - start).count();
+    }
+
+    void resetImageProjectionTimingAccumulator()
+    {
+        imageProjectionTimingScanCount = 0;
+        imageProjectionCacheMsSum = 0.0;
+        imageProjectionDeskewMsSum = 0.0;
+        imageProjectionProjectMsSum = 0.0;
+        imageProjectionExtractionMsSum = 0.0;
+        imageProjectionPublishMsSum = 0.0;
+        imageProjectionTotalMsSum = 0.0;
+        rawNearVoxelMsSum = 0.0;
+        rawNearVoxelInputSum = 0;
+        rawNearVoxelOutputSum = 0;
+    }
+
+    void recordImageProjectionTiming(
+        const double cacheMs,
+        const double deskewMs,
+        const double projectMs,
+        const double extractionMs,
+        const double publishMs,
+        const double totalMs,
+        const size_t queueStartSize,
+        const size_t queueRemainingSize)
+    {
+        if (processingTimeLogIntervalSec <= 0.0)
+            return;
+
+        // 処理時間はscanごとの瞬間値ではなく平均で出し、負荷傾向とbacklogの増減を追いやすくする。
+        ++imageProjectionTimingScanCount;
+        imageProjectionCacheMsSum += cacheMs;
+        imageProjectionDeskewMsSum += deskewMs;
+        imageProjectionProjectMsSum += projectMs;
+        imageProjectionExtractionMsSum += extractionMs;
+        imageProjectionPublishMsSum += publishMs;
+        imageProjectionTotalMsSum += totalMs;
+        rawNearVoxelMsSum += lastRawNearVoxelMs;
+        rawNearVoxelInputSum += lastRawNearVoxelInputSize;
+        rawNearVoxelOutputSum += lastRawNearVoxelOutputSize;
+
+        const auto now = std::chrono::steady_clock::now();
+        const double elapsedSec = std::chrono::duration<double>(now - lastImageProjectionTimingLogTime).count();
+        const bool backlogNeedsLog = queueStartSize >= static_cast<size_t>(imageProjectionBacklogLogThreshold) && elapsedSec >= 1.0;
+        if (elapsedSec < processingTimeLogIntervalSec && !backlogNeedsLog)
+            return;
+
+        const double count = static_cast<double>(std::max<uint64_t>(imageProjectionTimingScanCount, 1));
+        RCLCPP_INFO(
+            get_logger(),
+            "ImageProjection timing: scans=%lu avg_ms total=%.3f cache=%.3f deskew=%.3f project=%.3f extraction=%.3f publish=%.3f raw_near_voxel=%.3f raw_near_points=%.1f->%.1f queue=%zu->%zu max_per_timer=%d",
+            static_cast<unsigned long>(imageProjectionTimingScanCount),
+            imageProjectionTotalMsSum / count,
+            imageProjectionCacheMsSum / count,
+            imageProjectionDeskewMsSum / count,
+            imageProjectionProjectMsSum / count,
+            imageProjectionExtractionMsSum / count,
+            imageProjectionPublishMsSum / count,
+            rawNearVoxelMsSum / count,
+            static_cast<double>(rawNearVoxelInputSum) / count,
+            static_cast<double>(rawNearVoxelOutputSum) / count,
+            queueStartSize,
+            queueRemainingSize,
+            imageProjectionMaxScansPerTimer);
+        lastImageProjectionTimingLogTime = now;
+        resetImageProjectionTimingAccumulator();
     }
 
     void processCloudQueue()
     {
-        if (!rclcpp::ok())
-            return;
+        // backlog時は同じtimer callback内で複数scanを進め、再生後の未処理queue滞留を短縮する。
+        int processedInThisTimer = 0;
+        for (; processedInThisTimer < imageProjectionMaxScansPerTimer; ++processedInThisTimer)
+        {
+            if (!processOneCloudQueueScan())
+                break;
+        }
 
+        size_t remainingCloudCount = 0;
+        {
+            std::lock_guard<std::mutex> lock(cloudLock);
+            remainingCloudCount = cloudQueue.size();
+        }
+        if (processedInThisTimer >= imageProjectionMaxScansPerTimer && remainingCloudCount > 0)
+        {
+            RCLCPP_WARN_THROTTLE(
+                get_logger(), *get_clock(), 1000,
+                "ImageProjection cloudQueue backlog remains after batch: processed_in_timer=%d remaining=%zu max_per_timer=%d",
+                processedInThisTimer, remainingCloudCount, imageProjectionMaxScansPerTimer);
+        }
+    }
+
+    bool processOneCloudQueueScan()
+    {
+        if (!rclcpp::ok())
+            return false;
+
+        size_t queuedCloudCount = 0;
+        const auto totalStartTime = std::chrono::steady_clock::now();
         {
             std::lock_guard<std::mutex> lock(cloudLock);
             if (cloudQueue.empty())
-                return;
+                return false;
+            queuedCloudCount = cloudQueue.size();
             // 点群変換中はlockを解放し、rosbag再生中のLiDAR callback取りこぼしを避ける。
             currentCloudMsg = cloudQueue.front();
         }
 
+        const auto cacheStartTime = std::chrono::steady_clock::now();
         if (!cachePointCloud())
         {
+            // 変換不能scanを捨てる瞬間に、入力stampとqueue長を残してdrop原因を追跡できるようにする。
+            RCLCPP_WARN(
+                get_logger(),
+                "Drop LiDAR scan before deskew: reason=%s stamp=%.6f point_num=%u queued_clouds=%zu",
+                lastDropReason.c_str(), stamp2Sec(currentCloudMsg.header.stamp),
+                currentCloudMsg.point_num, queuedCloudCount);
             // 空scanなど変換不能な入力はここで破棄し、queue操作の責務をtimer側へ集約する。
             std::lock_guard<std::mutex> lock(cloudLock);
             if (!cloudQueue.empty())
+            {
                 cloudQueue.pop_front();
+                ++cloudDroppedCount;
+            }
             resetParameters();
-            return;
+            return true;
         }
+        const auto cacheEndTime = std::chrono::steady_clock::now();
 
+        const auto deskewStartTime = std::chrono::steady_clock::now();
         const DeskewStatus deskewStatus = deskewInfo();
         if (deskewStatus == DeskewStatus::Wait)
-            return;
+            return false;
+        const auto deskewEndTime = std::chrono::steady_clock::now();
         if (deskewStatus == DeskewStatus::Drop)
         {
+            size_t imuQueueSize = 0;
+            size_t odomQueueSize = 0;
+            {
+                std::lock_guard<std::mutex> lock1(imuLock);
+                imuQueueSize = imuQueue.size();
+            }
+            {
+                std::lock_guard<std::mutex> lock2(odoLock);
+                odomQueueSize = odomQueue.size();
+            }
+            // 復旧不能と判定したscanだけを捨て、原因と関連queue長を必ずログへ残す。
+            RCLCPP_WARN(
+                get_logger(),
+                "Drop LiDAR scan during deskew: reason=%s scan_start=%.6f scan_end=%.6f queued_clouds=%zu imu_queue=%zu odom_queue=%zu",
+                lastDropReason.c_str(), timeScanCur, timeScanEnd, queuedCloudCount,
+                imuQueueSize, odomQueueSize);
             // 必要な時刻のIMUやodomが既に失われたscanだけを破棄し、後続scanの処理を止めない。
             std::lock_guard<std::mutex> lock(cloudLock);
             if (!cloudQueue.empty())
+            {
                 cloudQueue.pop_front();
+                ++cloudDroppedCount;
+            }
             resetParameters();
-            return;
+            return true;
         }
 
         // 1回のtimerで1scanだけ処理し、後段featureExtraction/mapOptimizationの入力queueをburstで溢れさせない。
+        const auto projectStartTime = std::chrono::steady_clock::now();
         projectPointCloud();
+        const auto projectEndTime = std::chrono::steady_clock::now();
+        const auto extractionStartTime = std::chrono::steady_clock::now();
         cloudExtraction();
+        const auto extractionEndTime = std::chrono::steady_clock::now();
+        const auto publishStartTime = std::chrono::steady_clock::now();
         publishClouds();
+        const auto publishEndTime = std::chrono::steady_clock::now();
 
+        size_t remainingCloudCount = 0;
         {
             std::lock_guard<std::mutex> lock(cloudLock);
             if (!cloudQueue.empty())
+            {
                 cloudQueue.pop_front();
+                ++cloudProcessedCount;
+            }
+            remainingCloudCount = cloudQueue.size();
         }
+        recordImageProjectionTiming(
+            elapsedMilliseconds(cacheStartTime, cacheEndTime),
+            elapsedMilliseconds(deskewStartTime, deskewEndTime),
+            elapsedMilliseconds(projectStartTime, projectEndTime),
+            elapsedMilliseconds(extractionStartTime, extractionEndTime),
+            elapsedMilliseconds(publishStartTime, publishEndTime),
+            elapsedMilliseconds(totalStartTime, publishEndTime),
+            queuedCloudCount,
+            remainingCloudCount);
         resetParameters();
+        return true;
     }
     // AI_SHIP_ROBOT_END
 
@@ -365,6 +611,7 @@ public:
         cloudHeader = currentCloudMsg.header;
         if (laserCloudIn->empty())
         {
+            lastDropReason = "empty_livox_custom_msg";
             RCLCPP_WARN(get_logger(), "Received an empty Livox CustomMsg; skip this scan.");
             return false;
         }
@@ -394,9 +641,12 @@ public:
 
         if (shouldWaitForSixAxisImuInitialization())
         {
-            // 初期姿勢が未確定のscanを後で処理すると、古い点群に確定後の姿勢が適用され初期mapが歪む。
-            RCLCPP_INFO_THROTTLE(get_logger(), *get_clock(), 2000, "Drop scan until initial 6-axis IMU roll/pitch estimate is ready ...");
-            return DeskewStatus::Drop;
+            // 初期姿勢確定前のscanも保持し、raw IMU履歴を再変換してから先頭scanから順に処理する。
+            RCLCPP_INFO_THROTTLE(
+                get_logger(), *get_clock(), 2000,
+                "Waiting for initial 6-axis IMU roll/pitch estimate; queued raw IMU samples=%zu ...",
+                rawImuQueue.size());
+            return DeskewStatus::Wait;
         }
 
         const bool needImuAngular = deskewMode == "imu_angular";
@@ -409,10 +659,11 @@ public:
             }
             if (stamp2Sec(imuQueue.front().header.stamp) > timeScanCur)
             {
+                lastDropReason = "start_imu_unavailable";
                 RCLCPP_WARN(
                     get_logger(),
-                    "Drop scan because required start IMU is unavailable: scan_start=%.6f first_imu=%.6f",
-                    timeScanCur, stamp2Sec(imuQueue.front().header.stamp));
+                    "Drop scan because required start IMU is unavailable: scan_start=%.6f first_imu=%.6f imu_queue=%zu",
+                    timeScanCur, stamp2Sec(imuQueue.front().header.stamp), imuQueue.size());
                 return DeskewStatus::Drop;
             }
         }
@@ -447,10 +698,11 @@ public:
             }
             if (stamp2Sec(odomQueue.front().header.stamp) > timeScanCur)
             {
+                lastDropReason = "start_odometry_unavailable";
                 RCLCPP_WARN(
                     get_logger(),
-                    "Drop scan because required start odometry is unavailable: scan_start=%.6f first_odom=%.6f",
-                    timeScanCur, stamp2Sec(odomQueue.front().header.stamp));
+                    "Drop scan because required start odometry is unavailable: scan_start=%.6f first_odom=%.6f odom_queue=%zu",
+                    timeScanCur, stamp2Sec(odomQueue.front().header.stamp), odomQueue.size());
                 return DeskewStatus::Drop;
             }
 
@@ -721,6 +973,11 @@ public:
     void projectPointCloud()
     {
         int cloudSize = laserCloudIn->points.size();
+        if (hybridRegisteredCloudEnabled)
+        {
+            // 近傍raw抽出はpush_backが多いため、入力scan規模に合わせてcapacityを先に確保する。
+            rawNearCloud->points.reserve(cloudSize);
+        }
         // range image projection
         for (int i = 0; i < cloudSize; ++i)
         {
@@ -737,6 +994,15 @@ public:
             int rowIdn = laserCloudIn->points[i].ring;
             if (rowIdn < 0 || rowIdn >= N_SCAN)
                 continue;
+
+            bool pointDeskewedForRawNear = false;
+            // downsampleRateでSLAM用点群を落としても、近傍地形保存用のdeskew済みraw点は先に確保する。
+            if (hybridRegisteredCloudEnabled && range <= hybridRegisteredCloudRawNearRange)
+            {
+                thisPoint = deskewPoint(&thisPoint, laserCloudIn->points[i].time);
+                rawNearCloud->push_back(thisPoint);
+                pointDeskewedForRawNear = true;
+            }
 
             if (rowIdn % downsampleRate != 0)
                 continue;
@@ -763,7 +1029,8 @@ public:
             if (rangeMat.at<float>(rowIdn, columnIdn) != FLT_MAX)
                 continue;
 
-            thisPoint = deskewPoint(&thisPoint, laserCloudIn->points[i].time);
+            if (!pointDeskewedForRawNear)
+                thisPoint = deskewPoint(&thisPoint, laserCloudIn->points[i].time);
 
             rangeMat.at<float>(rowIdn, columnIdn) = range;
 
@@ -799,8 +1066,35 @@ public:
 
     void publishClouds()
     {
+        sensor_msgs::msg::PointCloud2 rawNearCloudMsg;
+        pcl::PointCloud<PointType>::Ptr rawNearCloudToPublish = rawNearCloud;
+        lastRawNearVoxelMs = 0.0;
+        lastRawNearVoxelInputSize = rawNearCloud->size();
+        lastRawNearVoxelOutputSize = rawNearCloud->size();
         cloudInfo.header = cloudHeader;
-        cloudInfo.cloud_deskewed  = publishCloud(pubExtractedCloud, extractedCloud, cloudHeader.stamp, lidarFrame);
+        // CloudInfo内部ではdeskew済み点群が必須だが、外部diagnostic topicは必要時だけpublishする。
+        pcl::toROSMsg(*extractedCloud, cloudInfo.cloud_deskewed);
+        cloudInfo.cloud_deskewed.header.stamp = cloudHeader.stamp;
+        cloudInfo.cloud_deskewed.header.frame_id = lidarFrame;
+        if (publishDeskewedCloud && pubExtractedCloud->get_subscription_count() != 0)
+            pubExtractedCloud->publish(cloudInfo.cloud_deskewed);
+        // 近傍rawは密度過多になりやすいため、地形検知に必要な粒度だけ残してCloudInfoへ載せる。
+        if (hybridRegisteredCloudEnabled && hybridRegisteredCloudRawNearLeafSize > 0.0 && rawNearCloud->size() > 1)
+        {
+            const auto voxelStartTime = std::chrono::steady_clock::now();
+            rawNearCloudDS->clear();
+            downSizeFilterRawNear.setInputCloud(rawNearCloud);
+            downSizeFilterRawNear.filter(*rawNearCloudDS);
+            const auto voxelEndTime = std::chrono::steady_clock::now();
+            rawNearCloudToPublish = rawNearCloudDS;
+            lastRawNearVoxelMs = elapsedMilliseconds(voxelStartTime, voxelEndTime);
+            lastRawNearVoxelOutputSize = rawNearCloudDS->size();
+        }
+        // CloudInfo内だけで近傍raw点群を渡し、既存のdeskew済み点群topicは従来どおり維持する。
+        pcl::toROSMsg(*rawNearCloudToPublish, rawNearCloudMsg);
+        rawNearCloudMsg.header.stamp = cloudHeader.stamp;
+        rawNearCloudMsg.header.frame_id = lidarFrame;
+        cloudInfo.cloud_deskewed_raw_near = rawNearCloudMsg;
         pubLaserCloudInfo->publish(cloudInfo);
     }
 };

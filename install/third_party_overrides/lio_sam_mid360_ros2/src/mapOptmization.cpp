@@ -16,6 +16,9 @@
 
 #include <gtsam/nonlinear/ISAM2.h>
 
+#include <algorithm>
+#include <chrono>
+
 using namespace gtsam;
 
 using symbol_shorthand::X; // Pose3 (x,y,z,r,p,y)
@@ -70,7 +73,17 @@ public:
     rclcpp::Publisher<sensor_msgs::msg::PointCloud2>::SharedPtr pubRecentKeyFrames;
     rclcpp::Publisher<sensor_msgs::msg::PointCloud2>::SharedPtr pubRecentKeyFrame;
     rclcpp::Publisher<sensor_msgs::msg::PointCloud2>::SharedPtr pubCloudRegisteredRaw;
+    rclcpp::Publisher<sensor_msgs::msg::PointCloud2>::SharedPtr pubRecentKeyFrameHybrid;
     rclcpp::Publisher<visualization_msgs::msg::MarkerArray>::SharedPtr pubLoopConstraintEdge;
+    std::chrono::steady_clock::time_point lastHybridCloudTimingLogTime = std::chrono::steady_clock::now();
+    uint64_t hybridCloudTimingCount = 0;
+    double hybridCloudFromRosMsSum = 0.0;
+    double hybridCloudAppendMsSum = 0.0;
+    double hybridCloudPublishMsSum = 0.0;
+    double hybridCloudTotalMsSum = 0.0;
+    size_t hybridCloudRawNearPointsSum = 0;
+    size_t hybridCloudFarFeaturePointsSum = 0;
+    size_t hybridCloudOutputPointsSum = 0;
 
     rclcpp::Service<lio_sam::srv::SaveMap>::SharedPtr srvSaveMap;
     rclcpp::Subscription<lio_sam::msg::CloudInfo>::SharedPtr subCloud;
@@ -247,6 +260,7 @@ public:
         pubRecentKeyFrames = create_publisher<sensor_msgs::msg::PointCloud2>("lio_sam/mapping/map_local", 1);
         pubRecentKeyFrame = create_publisher<sensor_msgs::msg::PointCloud2>("lio_sam/mapping/cloud_registered", 1);
         pubCloudRegisteredRaw = create_publisher<sensor_msgs::msg::PointCloud2>("lio_sam/mapping/cloud_registered_raw", 1);
+        pubRecentKeyFrameHybrid = create_publisher<sensor_msgs::msg::PointCloud2>(hybridRegisteredCloudTopic, 1);
 
         downSizeFilterCorner.setLeafSize(mappingCornerLeafSize, mappingCornerLeafSize, mappingCornerLeafSize);
         downSizeFilterSurf.setLeafSize(mappingSurfLeafSize, mappingSurfLeafSize, mappingSurfLeafSize);
@@ -332,6 +346,14 @@ public:
             publishOdometry();
 
             publishFrames();
+        }
+        else
+        {
+            // mappingProcessIntervalでscanを処理しない場合も、地図密度低下の原因として追えるようにする。
+            RCLCPP_WARN_THROTTLE(
+                get_logger(), *get_clock(), 2000,
+                "Skip CloudInfo in mapOptimization due to mappingProcessInterval: stamp=%.6f last=%.6f interval=%.6f delta=%.6f",
+                timeLaserInfoCur, timeLastProcessing, mappingProcessInterval, timeLaserInfoCur - timeLastProcessing);
         }
     }
 
@@ -463,6 +485,9 @@ public:
 
     void publishGlobalMap()
     {
+        if (!publishMapGlobalCloud)
+            return;
+
         if (pubLaserCloudSurround->get_subscription_count() == 0)
             return;
 
@@ -575,7 +600,7 @@ public:
             loopFindNearKeyframes(prevKeyframeCloud, loopKeyPre, historyKeyframeSearchNum);
             if (cureKeyframeCloud->size() < 300 || prevKeyframeCloud->size() < 1000)
                 return;
-            if (pubHistoryKeyFrames->get_subscription_count() != 0)
+            if (publishLoopClosureClouds && pubHistoryKeyFrames->get_subscription_count() != 0)
                 publishCloud(pubHistoryKeyFrames, prevKeyframeCloud, timeLaserInfoStamp, odometryFrame);
         }
 
@@ -597,7 +622,7 @@ public:
             return;
 
         // publish corrected cloud
-        if (pubIcpKeyFrames->get_subscription_count() != 0)
+        if (publishLoopClosureClouds && pubIcpKeyFrames->get_subscription_count() != 0)
         {
             pcl::PointCloud<PointType>::Ptr closed_cloud(new pcl::PointCloud<PointType>());
             pcl::transformPointCloud(*cureKeyframeCloud, *closed_cloud, icp.getFinalTransformation());
@@ -746,6 +771,9 @@ public:
 
     void visualizeLoopClosure()
     {
+        if (!publishLoopClosureClouds || pubLoopConstraintEdge->get_subscription_count() == 0)
+            return;
+
         if (loopIndexContainer.empty())
             return;
 
@@ -1685,6 +1713,87 @@ public:
         globalPath.poses.push_back(pose_stamped);
     }
 
+    double elapsedMilliseconds(
+        const std::chrono::steady_clock::time_point& start,
+        const std::chrono::steady_clock::time_point& end) const
+    {
+        return std::chrono::duration<double, std::milli>(end - start).count();
+    }
+
+    void resetHybridCloudTimingAccumulator()
+    {
+        hybridCloudTimingCount = 0;
+        hybridCloudFromRosMsSum = 0.0;
+        hybridCloudAppendMsSum = 0.0;
+        hybridCloudPublishMsSum = 0.0;
+        hybridCloudTotalMsSum = 0.0;
+        hybridCloudRawNearPointsSum = 0;
+        hybridCloudFarFeaturePointsSum = 0;
+        hybridCloudOutputPointsSum = 0;
+    }
+
+    void recordHybridCloudTiming(
+        const double fromRosMs,
+        const double appendMs,
+        const double publishMs,
+        const double totalMs,
+        const size_t rawNearPoints,
+        const size_t farFeaturePoints,
+        const size_t outputPoints)
+    {
+        if (processingTimeLogIntervalSec <= 0.0)
+            return;
+
+        // hybrid生成はmap保存品質とCPU負荷の両方に効くため、平均時間と点数をまとめて記録する。
+        ++hybridCloudTimingCount;
+        hybridCloudFromRosMsSum += fromRosMs;
+        hybridCloudAppendMsSum += appendMs;
+        hybridCloudPublishMsSum += publishMs;
+        hybridCloudTotalMsSum += totalMs;
+        hybridCloudRawNearPointsSum += rawNearPoints;
+        hybridCloudFarFeaturePointsSum += farFeaturePoints;
+        hybridCloudOutputPointsSum += outputPoints;
+
+        const auto now = std::chrono::steady_clock::now();
+        const double elapsedSec = std::chrono::duration<double>(now - lastHybridCloudTimingLogTime).count();
+        if (elapsedSec < processingTimeLogIntervalSec)
+            return;
+
+        const double count = static_cast<double>(std::max<uint64_t>(hybridCloudTimingCount, 1));
+        RCLCPP_INFO(
+            get_logger(),
+            "Hybrid cloud timing: scans=%lu avg_ms total=%.3f from_ros=%.3f append=%.3f publish=%.3f points raw_near=%.1f far_feature=%.1f output=%.1f",
+            static_cast<unsigned long>(hybridCloudTimingCount),
+            hybridCloudTotalMsSum / count,
+            hybridCloudFromRosMsSum / count,
+            hybridCloudAppendMsSum / count,
+            hybridCloudPublishMsSum / count,
+            static_cast<double>(hybridCloudRawNearPointsSum) / count,
+            static_cast<double>(hybridCloudFarFeaturePointsSum) / count,
+            static_cast<double>(hybridCloudOutputPointsSum) / count);
+        lastHybridCloudTimingLogTime = now;
+        resetHybridCloudTimingAccumulator();
+    }
+
+    size_t appendFarFeaturePoints(
+        pcl::PointCloud<PointType>::Ptr cloudOut,
+        const pcl::PointCloud<PointType>::Ptr cloudIn)
+    {
+        size_t appendedCount = 0;
+        const float nearRangeSquared = hybridRegisteredCloudRawNearRange * hybridRegisteredCloudRawNearRange;
+        // 近傍はdeskew済みraw点群を優先し、feature点群は遠方だけ残して重複と密度偏りを避ける。
+        for (const auto &point : cloudIn->points)
+        {
+            const float rangeSquared = point.x * point.x + point.y * point.y + point.z * point.z;
+            if (rangeSquared > nearRangeSquared)
+            {
+                cloudOut->push_back(point);
+                ++appendedCount;
+            }
+        }
+        return appendedCount;
+    }
+
     // AI_SHIP_ROBOT_BEGIN: 公開odometry/TFをodometryFrame->lidarFrameに統一し、incrementalにも同じIMU融合を使う。
     void publishOdometry()
     {
@@ -1753,26 +1862,51 @@ public:
         if (cloudKeyPoses3D->points.empty())
             return;
         // publish key poses
-        publishCloud(pubKeyPoses, cloudKeyPoses3D, timeLaserInfoStamp, odometryFrame);
+        if (publishTrajectoryCloud && pubKeyPoses->get_subscription_count() != 0)
+            publishCloud(pubKeyPoses, cloudKeyPoses3D, timeLaserInfoStamp, odometryFrame);
         // Publish surrounding key frames
-        publishCloud(pubRecentKeyFrames, laserCloudSurfFromMapDS, timeLaserInfoStamp, odometryFrame);
+        if (publishMapLocalCloud && pubRecentKeyFrames->get_subscription_count() != 0)
+            publishCloud(pubRecentKeyFrames, laserCloudSurfFromMapDS, timeLaserInfoStamp, odometryFrame);
         // publish registered key frame
-        if (pubRecentKeyFrame->get_subscription_count() != 0)
+        if (publishCloudRegistered && pubRecentKeyFrame->get_subscription_count() != 0)
         {
             pcl::PointCloud<PointType>::Ptr cloudOut(new pcl::PointCloud<PointType>());
-            PointTypePose thisPose6D = trans2PointTypePose(transformTobeMapped);
-            *cloudOut += *transformPointCloud(laserCloudCornerLastDS,  &thisPose6D);
-            *cloudOut += *transformPointCloud(laserCloudSurfLastDS,    &thisPose6D);
-            publishCloud(pubRecentKeyFrame, cloudOut, timeLaserInfoStamp, odometryFrame);
+            // 蓄積ノード側でpose変換できるよう、登録済みfeature点群はscan local frameのままpublishする。
+            *cloudOut += *laserCloudCornerLastDS;
+            *cloudOut += *laserCloudSurfLastDS;
+            publishCloud(pubRecentKeyFrame, cloudOut, timeLaserInfoStamp, lidarFrame);
         }
         // publish registered high-res raw cloud
-        if (pubCloudRegisteredRaw->get_subscription_count() != 0)
+        if (publishCloudRegisteredRaw && pubCloudRegisteredRaw->get_subscription_count() != 0)
         {
             pcl::PointCloud<PointType>::Ptr cloudOut(new pcl::PointCloud<PointType>());
             pcl::fromROSMsg(cloudInfo.cloud_deskewed, *cloudOut);
-            PointTypePose thisPose6D = trans2PointTypePose(transformTobeMapped);
-            *cloudOut = *transformPointCloud(cloudOut,  &thisPose6D);
-            publishCloud(pubCloudRegisteredRaw, cloudOut, timeLaserInfoStamp, odometryFrame);
+            publishCloud(pubCloudRegisteredRaw, cloudOut, timeLaserInfoStamp, lidarFrame);
+        }
+        // publish registered hybrid cloud for external map builder
+        if (hybridRegisteredCloudEnabled && pubRecentKeyFrameHybrid->get_subscription_count() != 0)
+        {
+            const auto hybridStartTime = std::chrono::steady_clock::now();
+            pcl::PointCloud<PointType>::Ptr cloudOut(new pcl::PointCloud<PointType>());
+            pcl::PointCloud<PointType>::Ptr rawNearCloud(new pcl::PointCloud<PointType>());
+            pcl::fromROSMsg(cloudInfo.cloud_deskewed_raw_near, *rawNearCloud);
+            const auto fromRosEndTime = std::chrono::steady_clock::now();
+            cloudOut->points.reserve(rawNearCloud->size() + laserCloudCornerLastDS->size() + laserCloudSurfLastDS->size());
+            // 近傍rawを優先してから遠方featureを足し、外部map builderへlocal frame点群として渡す。
+            *cloudOut += *rawNearCloud;
+            const size_t farCornerCount = appendFarFeaturePoints(cloudOut, laserCloudCornerLastDS);
+            const size_t farSurfCount = appendFarFeaturePoints(cloudOut, laserCloudSurfLastDS);
+            const auto appendEndTime = std::chrono::steady_clock::now();
+            publishCloud(pubRecentKeyFrameHybrid, cloudOut, timeLaserInfoStamp, lidarFrame);
+            const auto publishEndTime = std::chrono::steady_clock::now();
+            recordHybridCloudTiming(
+                elapsedMilliseconds(hybridStartTime, fromRosEndTime),
+                elapsedMilliseconds(fromRosEndTime, appendEndTime),
+                elapsedMilliseconds(appendEndTime, publishEndTime),
+                elapsedMilliseconds(hybridStartTime, publishEndTime),
+                rawNearCloud->size(),
+                farCornerCount + farSurfCount,
+                cloudOut->size());
         }
         // publish path
         if (pubPath->get_subscription_count() != 0)

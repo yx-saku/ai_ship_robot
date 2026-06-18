@@ -41,9 +41,11 @@ class TransformFusion : public ParamServer {
     std::shared_ptr<tf2_ros::TransformBroadcaster> tfBroadcaster;
     std::shared_ptr<tf2_ros::TransformListener> tfListener;
     tf2::Stamped<tf2::Transform> lidar2Baselink;
+    bool lidar2BaselinkReady = false;
 
     double lidarOdomTime = -1;
     deque<nav_msgs::msg::Odometry> imuOdomQueue;
+    static constexpr size_t kMaxCachedImuOdomMessages = 50000;
 
     TransformFusion(const rclcpp::NodeOptions& options) : ParamServer("lio_sam_transformFusion", options) {
         tfBuffer = std::make_shared<tf2_ros::Buffer>(get_clock());
@@ -76,6 +78,47 @@ class TransformFusion : public ParamServer {
         return tf2::transformToEigen(tf2::toMsg(t));
     }
 
+    bool ensureLidarToBaselinkTransformReady() {
+        if (lidarFrame == baselinkFrame || lidar2BaselinkReady) {
+            return true;
+        }
+
+        // AI_SHIP_ROBOT_BEGIN: rosbag初期のTF未接続期間は処理を止め、queueを保持する。
+        // reference LiDAR由来のstatic TFが後から出るため、成功まで変換をcacheしない。
+        try {
+            const auto transform = tfBuffer->lookupTransform(
+                lidarFrame, baselinkFrame, rclcpp::Time(0));
+            tf2::fromMsg(transform, lidar2Baselink);
+            lidar2BaselinkReady = true;
+            RCLCPP_INFO(get_logger(), "Transform %s -> %s is ready; resume IMU odometry fusion.",
+                        lidarFrame.c_str(), baselinkFrame.c_str());
+            return true;
+        } catch (const tf2::TransformException& ex) {
+            RCLCPP_WARN_THROTTLE(get_logger(), *get_clock(), 5000,
+                                 "Waiting for transform %s -> %s before processing IMU odometry: %s",
+                                 lidarFrame.c_str(), baselinkFrame.c_str(), ex.what());
+            return false;
+        }
+        // AI_SHIP_ROBOT_END
+    }
+
+    void trimCachedImuOdometryQueue() {
+        bool dropped = false;
+
+        // AI_SHIP_ROBOT_BEGIN: TF欠落が長引く異常系でもqueueが無制限に増えないようにする。
+        while (imuOdomQueue.size() > kMaxCachedImuOdomMessages) {
+            imuOdomQueue.pop_front();
+            dropped = true;
+        }
+        if (dropped) {
+            RCLCPP_WARN_THROTTLE(get_logger(), *get_clock(), 5000,
+                                 "Dropped old cached IMU odometry while waiting for transform; "
+                                 "queue_size=%zu limit=%zu",
+                                 imuOdomQueue.size(), kMaxCachedImuOdomMessages);
+        }
+        // AI_SHIP_ROBOT_END
+    }
+
     void lidarOdometryHandler(const nav_msgs::msg::Odometry::SharedPtr odomMsg) {
         std::lock_guard<std::mutex> lock(mtx);
 
@@ -88,6 +131,9 @@ class TransformFusion : public ParamServer {
         std::lock_guard<std::mutex> lock(mtx);
 
         imuOdomQueue.push_back(*odomMsg);
+        trimCachedImuOdometryQueue();
+
+        if (!ensureLidarToBaselinkTransformReady()) return;
 
         // get latest odometry (at current IMU stamp)
         if (lidarOdomTime == -1) return;
@@ -118,13 +164,10 @@ class TransformFusion : public ParamServer {
 
         // publish tf
         if (lidarFrame != baselinkFrame) {
-            try {
-                tf2::fromMsg(tfBuffer->lookupTransform(lidarFrame, baselinkFrame, rclcpp::Time(0)), lidar2Baselink);
-            } catch (tf2::TransformException ex) {
-                RCLCPP_ERROR(get_logger(), "%s", ex.what());
-            }
-            tf2::Stamped<tf2::Transform> tb(tCur * lidar2Baselink, tf2_ros::fromMsg(odomMsg->header.stamp),
-                                            odometryFrame);
+            tf2::Stamped<tf2::Transform> tb(
+                tCur * lidar2Baselink,
+                tf2_ros::fromMsg(odomMsg->header.stamp),
+                odometryFrame);
             tCur = tb;
         }
         geometry_msgs::msg::TransformStamped ts;
