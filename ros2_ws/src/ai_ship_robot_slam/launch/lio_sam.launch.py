@@ -41,27 +41,13 @@ def generate_launch_description():
     hybrid_raw_near_leaf_size = LaunchConfiguration("hybrid_raw_near_leaf_size")
     map_global_voxel_leaf_size = LaunchConfiguration("map_global_voxel_leaf_size")
 
-    # 複数LiDAR fusionを常時前段に置き、単体LiDARも同じ入力経路で扱う。
-    fusion = Node(
-        package="ai_ship_robot_slam",
-        executable="multi_lidar_pointcloud_fusion_node",
-        name="multi_lidar_pointcloud_fusion_node",
-        output="screen",
-        parameters=[
-            fusion_config,
-            {
-                "use_sim_time": use_sim_time,
-            },
-        ],
-    )
-
     # LIO-SAMの推定LiDAR frameを実機URDFのLiDAR frameから分離し、TF親子競合を避ける。
     map_frame = "map"
     lidar_init_frame = "lidar_init"
     lidar_odom_frame = "lidar_odom"
     base_frame = "base_footprint"
 
-    # SLAM挙動はparams_file、fusion由来の入力topicはfusion_configで管理する。
+    # SLAM挙動はparams_file、multi-LiDAR入力topicはfusion_configで管理する。
     lio_sam_parameters = [
         params_file,
         fusion_config,
@@ -121,21 +107,6 @@ def generate_launch_description():
         name="lio_sam_mapOptimization",
         output="screen",
         parameters=lio_sam_parameters,
-    )
-
-    # RViz表示時だけ合成CustomMsgをPointCloud2へ展開し、SLAM入力経路はCustomMsg-onlyのまま保つ。
-    fused_points_visualization_bridge = Node(
-        package="ai_ship_robot_slam",
-        executable="livox_custommsg_to_pointcloud2_node",
-        name="fused_livox_custommsg_to_pointcloud2_node",
-        output="screen",
-        condition=IfCondition(use_rviz),
-        parameters=[
-            {
-                "use_sim_time": use_sim_time,
-                "input_topics": ["/fused/livox/lidar"],
-            }
-        ],
     )
 
     rviz = Node(
@@ -221,13 +192,11 @@ def generate_launch_description():
                     [FindPackageShare("ai_ship_robot_slam"), "rviz", "lio_sam.rviz"]
                 ),
             ),
-            fusion,
             slam_reference_lidar_static_tf,
             imu_preintegration,
             image_projection,
             feature_extraction,
             map_optimization,
-            fused_points_visualization_bridge,
             pcd_map_saver,
             rviz,
         ]

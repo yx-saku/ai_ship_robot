@@ -17,6 +17,18 @@ ROSBAG_PID=""
 ROSBAG_PLAY_PID=""
 SLAM_PID=""
 ROSBAG_ROOT="${WORKSPACE_ROOT}/outputs/rosbag2"
+# bag再生ではSLAM入力に必要なLiDAR/IMUと静的TFだけを流し、sim由来の動的/tf競合を避ける。
+DEFAULT_BAG_PLAY_TOPICS=(
+  /tf_static
+  /lidar1/livox/lidar
+  /lidar1/livox/imu
+  /lidar2/livox/lidar
+  /lidar2/livox/imu
+  /lidar3/livox/lidar
+  /lidar3/livox/imu
+  /lidar4/livox/lidar
+  /lidar4/livox/imu
+)
 AUTO_STOP_AFTER_BAG_PLAY_SECONDS="${AUTO_STOP_AFTER_BAG_PLAY_SECONDS:-30}"
 WAIT_FOR_CLOUD_QUEUE_DRAIN_TIMEOUT_SECONDS="${WAIT_FOR_CLOUD_QUEUE_DRAIN_TIMEOUT_SECONDS:-300}"
 WAIT_FOR_CLOUD_QUEUE_DRAIN_POLL_SECONDS="${WAIT_FOR_CLOUD_QUEUE_DRAIN_POLL_SECONDS:-1}"
@@ -36,6 +48,7 @@ Options:
   --bag-topics CSV   Record only the given comma-separated topics. Default records all topics.
   --bag-play [PATH]  Play a recorded rosbag and run LIO-SAM without Gazebo.
                      If PATH is omitted, the latest outputs/rosbag2/sim_* bag is used.
+                     Only LiDAR/IMU topics and /tf_static are replayed.
   --bag-play-rate N  Set rosbag playback rate. Default: 1.0
   --bag-start-delay SEC
                      Delay rosbag playback start by the given seconds.
@@ -78,7 +91,7 @@ reject_slam_behavior_option() {
 reject_fusion_option() {
   local option="$1"
 
-  echo "${option} changes LiDAR fusion wiring and is no longer a run_slam option." >&2
+  echo "${option} changes multi-LiDAR imageProjection wiring and is no longer a run_slam option." >&2
   echo "Move this setting into ros2_ws/src/ai_ship_robot_slam/config/multi_lidar_fusion.yaml." >&2
   exit 2
 }
@@ -87,7 +100,7 @@ reject_pointcloud2_adapter_option() {
   local option="$1"
 
   echo "${option} has been removed because the SLAM input path is CustomMsg-only." >&2
-  echo "Use multi_lidar_fusion.yaml and output_custom_topic for LiDAR input wiring." >&2
+  echo "Use multi_lidar_fusion.yaml and input_custom_topics for LiDAR input wiring." >&2
   exit 2
 }
 
@@ -430,7 +443,6 @@ wait_for_lio_sam_startup() {
   local required_node=""
   local missing_nodes=()
   local required_nodes=(
-    "/multi_lidar_pointcloud_fusion_node"
     "/slam_reference_lidar_static_tf_node"
     "/lio_sam_imuPreintegration"
     "/lio_sam_imageProjection"
@@ -533,7 +545,7 @@ run_slam_launch() {
   local launch_args=()
 
   while [[ $# -gt 0 ]]; do
-    # LiDAR fusion配線はmulti_lidar_fusion.yamlへ集約し、CLIからの上書きを禁止する。
+    # multi-LiDAR入力配線はmulti_lidar_fusion.yamlへ集約し、CLIからの上書きを禁止する。
     if [[ "$1" =~ ^--lidar([0-9]+)-points=(.+)$ ]]; then
       reject_fusion_option "--lidar${BASH_REMATCH[1]}-points"
     fi
@@ -772,7 +784,11 @@ run_bag_play_lio_sam() {
   local bag_output="$7"
   shift 7
   local record_topics=("$@")
-  local play_cmd=(ros2 bag play "${bag_path}" --clock --rate "${bag_rate}" --start-offset "${bag_offset}")
+  local play_topics=("${DEFAULT_BAG_PLAY_TOPICS[@]}")
+  local play_cmd=(
+    ros2 bag play "${bag_path}" --clock --rate "${bag_rate}" --start-offset "${bag_offset}"
+    --topics "${play_topics[@]}"
+  )
   local slam_args=()
 
   mapfile -t slam_args < <(build_passthrough_args)
@@ -794,6 +810,7 @@ run_bag_play_lio_sam() {
   if [[ "${bag_start_delay}" != "0" && "${bag_start_delay}" != "0.0" ]]; then
     sleep "${bag_start_delay}"
   fi
+  echo "Replaying rosbag topics: ${play_topics[*]}" >&2
   "${play_cmd[@]}" &
   ROSBAG_PLAY_PID=$!
   set +e
@@ -833,7 +850,7 @@ run_sim_lio_sam() {
   local bag_topics=()
 
   while [[ $# -gt 0 ]]; do
-    # simulationでもLiDAR fusion配線はmulti_lidar_fusion.yamlからのみ読む。
+    # simulationでもmulti-LiDAR入力配線はmulti_lidar_fusion.yamlからのみ読む。
     if [[ "$1" =~ ^--lidar([0-9]+)-points=(.+)$ ]]; then
       reject_fusion_option "--lidar${BASH_REMATCH[1]}-points"
     fi

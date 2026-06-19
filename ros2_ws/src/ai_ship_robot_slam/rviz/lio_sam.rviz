@@ -232,7 +232,7 @@ Visualization Manager:
       Max Intensity: 0
       Min Color: 0; 0; 0
       Min Intensity: 0
-      Name: Fused Livox Points
+      Name: LIO-SAM Deskewed Points
       Position Transformer: XYZ
       Selectable: true
       Size (Pixels): 2
@@ -243,8 +243,8 @@ Visualization Manager:
         Durability Policy: Volatile
         Filter size: 10
         History Policy: Keep Last
-        Reliability Policy: Best Effort
-        Value: /fused/livox/lidar/points
+        Reliability Policy: Reliable
+        Value: /lio_sam/deskew/cloud_deskewed
       Use Fixed Frame: true
       Use rainbow: true
       Value: false

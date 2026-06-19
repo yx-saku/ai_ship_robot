@@ -148,8 +148,8 @@ LiDAR 本体モデルは `sim/ros2_ws/src/ai_ship_robot_description/urdf/lidar/m
 - `/lidar1/custom`, `/lidar2/custom`: 生 Livox `CustomMsg`
 - `/lidar1/livox/lidar/points`, `/lidar2/livox/lidar/points`: RViz 用 bridge が生成する PointCloud2
 - `/lidar1/imu`, `/lidar2/imu`: LiDAR 搭載 IMU
-- `/lidar1/livox/lidar`, `/lidar1/livox/imu`: `mid360_sim_adapter` で整形したfusion入力
-- `/fused/livox/lidar`: SLAM が購読するfusion後の Livox `CustomMsg`
+- `/lidar1/livox/lidar`, `/lidar2/livox/lidar`: `mid360_sim_adapter` で整形し、SLAM が直接購読する Livox `CustomMsg`
+- `/lidar1/livox/imu`, `/lidar2/livox/imu`: `mid360_sim_adapter` で整形したLiDAR IMU
 
 既定では `simulation.launch.py` が `/lidar1/custom` と `/lidar1/imu` を受けて `/lidar1/livox/lidar` と `/lidar1/livox/imu` を publish します。
 

@@ -1,7 +1,5 @@
 /**:
   ros__parameters:
-    # UV-Lab版LIO-SAMはfusion後のLivox CustomMsgを直接読む。
-    pointCloudTopic: /fused/livox/lidar
     imuTopic: /lidar1/livox/imu
     odomTopic: odometry/imu
     gpsTopic: odometry/gps
@@ -80,13 +78,13 @@
     mappingCornerLeafSize: 0.1
     mappingSurfLeafSize: 0.2
 
-    # 地図保存用に、近傍raw deskew済み点群と遠方feature点群をlocal frameで外部map builderへ渡す。
+    # PCD map作成用に、近傍詳細点群とSLAM用粗点群を合成したcloud_registered_hybridを渡す。
     hybridRegisteredCloudEnabled: true
     hybridRegisteredCloudRawNearRange: 3.0
     hybridRegisteredCloudRawNearLeafSize: 0.01
     hybridRegisteredCloudTopic: /lio_sam/mapping/cloud_registered_hybrid
 
-    # map保存に必要なtopic以外の重い点群publishは既定で止め、全topic録画時のCPU/DDS負荷を抑える。
+    # map保存用cloud_registered_hybrid以外の重い点群publishは既定で止め、全topic録画時のCPU/DDS負荷を抑える。
     publishDeskewedCloud: false
     publishFeatureClouds: false
     publishMapGlobalCloud: false

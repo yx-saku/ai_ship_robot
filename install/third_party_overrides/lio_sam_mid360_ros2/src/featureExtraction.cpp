@@ -50,10 +50,14 @@ public:
         pubLaserCloudInfo = create_publisher<lio_sam::msg::CloudInfo>(
             "lio_sam/feature/cloud_info", cloudInfoQos);
         // AI_SHIP_ROBOT_END
-        pubCornerPoints = create_publisher<sensor_msgs::msg::PointCloud2>(
-            "lio_sam/feature/cloud_corner", 1);
-        pubSurfacePoints = create_publisher<sensor_msgs::msg::PointCloud2>(
-            "lio_sam/feature/cloud_surface", 1);
+        if (publishFeatureClouds)
+        {
+            // feature点群の外部topicは診断用に限定し、SLAM内部はCloudInfoだけで後段へ渡す。
+            pubCornerPoints = create_publisher<sensor_msgs::msg::PointCloud2>(
+                "lio_sam/feature/cloud_corner", 1);
+            pubSurfacePoints = create_publisher<sensor_msgs::msg::PointCloud2>(
+                "lio_sam/feature/cloud_surface", 1);
+        }
 
         initializationValue();
     }
@@ -260,6 +264,8 @@ public:
     {
         // free cloud info memory
         freeCloudInfoMemory();
+        // mapOptimizationのscan matchingにはfeature点群だけを渡すため、全点deskew済み点群だけを落とす。
+        cloudInfo.cloud_deskewed = sensor_msgs::msg::PointCloud2();
         // save newly extracted features
         // mapOptimizationへ渡すCloudInfo点群は常に作り、外部feature topicは診断時だけpublishする。
         pcl::toROSMsg(*cornerCloud, cloudInfo.cloud_corner);
@@ -270,9 +276,9 @@ public:
         cloudInfo.cloud_surface.header.frame_id = lidarFrame;
         if (publishFeatureClouds)
         {
-            if (pubCornerPoints->get_subscription_count() != 0)
+            if (pubCornerPoints != nullptr && pubCornerPoints->get_subscription_count() != 0)
                 pubCornerPoints->publish(cloudInfo.cloud_corner);
-            if (pubSurfacePoints->get_subscription_count() != 0)
+            if (pubSurfacePoints != nullptr && pubSurfacePoints->get_subscription_count() != 0)
                 pubSurfacePoints->publish(cloudInfo.cloud_surface);
         }
         // publish to mapOptimization

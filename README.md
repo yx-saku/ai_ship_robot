@@ -24,7 +24,7 @@
 - Livox `CustomMsg` を前提にした Mid-360 向け SLAM 導線
 - 複数 LiDAR の `CustomMsg` 融合ノード
 - 6 軸 IMU 初期姿勢推定ノード
-- local hybrid 登録点群を使った PCD map saver ノード
+- hybrid登録点群を使った PCD map saver ノード
 - Gazebo Classic 上の LiDAR 配置検証環境
 - rosbag2 の収録と再生補助
 
@@ -78,10 +78,9 @@ bash scripts/run_slam.sh \
 
 主な入力・関連トピックです。
 
-- `/lidar1/livox/lidar`: fusion nodeへ渡す Livox `CustomMsg`
-- `/fused/livox/lidar`: LIO-SAMへ渡すfusion後の Livox `CustomMsg`
+- `/lidar1/livox/lidar`, `/lidar2/livox/lidar`: LIO-SAM `imageProjection` が直接購読する Livox `CustomMsg`
 - `/lidar1/livox/imu`: 生 IMU
-- `/lio_sam/mapping/cloud_registered_hybrid`: map saver 用 local hybrid 登録点群
+- `/lio_sam/mapping/cloud_registered_hybrid`: map saver 用 hybrid 登録点群
 - `/lio_sam/mapping/odometry`: scan matching 後の global odometry
 - `/lio_sam/mapping/path`: keyframe pose 列
 
@@ -94,9 +93,9 @@ bash scripts/run_slam.sh \
 - `--map` による PCD map saver 有効化
 - `--cloud-queue-drain-timeout` による bag 再生後の cloudQueue 待機上限指定
 
-`--map` を付けた場合は、`pcd_map_saver_node` が全 local hybrid 登録点群を odometry pose で keyframe 区間 submap へ合成し、保存時に最新の `/lio_sam/mapping/path` で map frame へ再配置して PCD を書き出します。submap 合成時の voxel leaf size は近傍 raw 点群と同じ既定 `0.01m` です。
+`--map` を付けた場合は、`pcd_map_saver_node` が全hybrid登録点群を odometry pose で keyframe 区間 submap へ合成し、保存時に最新の `/lio_sam/mapping/path` で map frame へ再配置して PCD を書き出します。hybrid点群はCloudInfo内で渡した近傍詳細点群と、SLAMに使用した粗い点群を合成したlocal frame点群です。submap 合成時の voxel leaf size は近傍raw点群と同じ既定 `0.01m` です。
 
-CPU/DDS 負荷を抑えるため、`/lio_sam/deskew/cloud_deskewed`、`/lio_sam/feature/cloud_corner`、`/lio_sam/feature/cloud_surface`、`/lio_sam/mapping/map_global`、`/lio_sam/mapping/map_local`、`/lio_sam/mapping/cloud_registered`、`/lio_sam/mapping/cloud_registered_raw` は既定では publish しません。RViz 確認が必要な場合は `lio_sam_mid360.yaml` の対応する `publish*` パラメータを `true` にしてください。
+CPU/DDS 負荷を抑えるため、`/lio_sam/deskew/cloud_deskewed`、`/lio_sam/feature/cloud_corner`、`/lio_sam/feature/cloud_surface`、`/lio_sam/mapping/map_global`、`/lio_sam/mapping/map_local`、`/lio_sam/mapping/trajectory`、`/lio_sam/mapping/cloud_registered`、`/lio_sam/mapping/cloud_registered_raw` は既定では publish しません。RViz 確認が必要な場合は `lio_sam_mid360.yaml` の対応する `publish*` パラメータを `true` にしてください。
 
 rosbag を記録する例です。
 
@@ -107,6 +106,8 @@ bash scripts/run_slam.sh \
 ```
 
 出力先の既定値は `outputs/rosbag2/slam_<timestamp>` です。
+
+性能検証や通常保存では `/lio_sam/mapping/cloud_registered_hybrid,/lio_sam/mapping/odometry,/lio_sam/mapping/path,/clock,/tf_static` のように必要topicを明示してください。
 
 記録済みシミュレーション bag を再生して LIO-SAM を起動する例です。
 
@@ -142,7 +143,7 @@ bash dev/replay_rosbag.sh slam outputs/rosbag2/slam_20260611_120000
 
 `ros2_ws/src/ai_ship_robot_slam` には次のノードがあります。
 
-- `multi_lidar_pointcloud_fusion_node`
+- `slam_reference_lidar_static_tf_node`
 - `livox_custommsg_to_pointcloud2_node`
 - `pcd_map_saver_node`
 

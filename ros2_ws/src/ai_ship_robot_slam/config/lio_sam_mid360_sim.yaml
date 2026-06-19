@@ -1,7 +1,6 @@
 /**:
   ros__parameters:
-    # simulation live/bagともmid360_sim_adapter出力を受け、実機相当のtopicと単位で扱う。
-    pointCloudTopic: /fused/livox/lidar
+    # simulation live/bagとも各LiDARのCustomMsgをLIO-SAM内で直接同期する。
     imuTopic: /lidar1/livox/imu
     odomTopic: odometry/imu
     gpsTopic: odometry/gps

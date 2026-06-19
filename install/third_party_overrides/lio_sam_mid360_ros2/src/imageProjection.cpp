@@ -1,10 +1,16 @@
 #include "utility.hpp"
 #include "lio_sam/msg/cloud_info.hpp"
 #include "lio_sam/srv/save_map.hpp"
+#include "lidar_transform_cache.hpp"
+#include "livox_ros_driver2/msg/custom_point.hpp"
+#include "multi_lidar_scan_synchronizer.hpp"
 
 // AI_SHIP_ROBOT_BEGIN: LiDAR callbackを軽量化し、timerで複数scan処理と処理時間計測を行う。
 #include <algorithm>
 #include <chrono>
+#include <memory>
+#include <stdexcept>
+#include <unordered_map>
 // AI_SHIP_ROBOT_END
 
 struct VelodynePointXYZIRT
@@ -70,16 +76,29 @@ private:
         Wait,
         Drop,
     };
+
+    struct LidarReceiveStats
+    {
+        uint64_t count = 0;
+        double firstStamp = 0.0;
+        double lastStamp = 0.0;
+        double gapSum = 0.0;
+        double maxGap = 0.0;
+        double lastLoggedStamp = 0.0;
+        uint64_t lastLoggedCount = 0;
+    };
     // AI_SHIP_ROBOT_END
 
-    rclcpp::Subscription<livox_ros_driver2::msg::CustomMsg>::SharedPtr subLaserCloud;
+    std::vector<rclcpp::Subscription<livox_ros_driver2::msg::CustomMsg>::SharedPtr> subLaserClouds;
     rclcpp::CallbackGroup::SharedPtr callbackGroupLidar;
     // AI_SHIP_ROBOT_BEGIN: 点群変換をcallbackから切り離すため、専用callback groupとtimerを使う。
     rclcpp::CallbackGroup::SharedPtr callbackGroupCloudQueue;
     rclcpp::TimerBase::SharedPtr cloudQueueTimer;
+    tf2_ros::Buffer tfBuffer;
+    tf2_ros::TransformListener tfListener;
+    lio_sam::LidarTransformCache lidarTransformCache;
+    std::unique_ptr<lio_sam::MultiLidarScanSynchronizer> multiLidarSynchronizer;
     // AI_SHIP_ROBOT_END
-    rclcpp::Publisher<sensor_msgs::msg::PointCloud2>::SharedPtr pubLaserCloud;
-
     rclcpp::Publisher<sensor_msgs::msg::PointCloud2>::SharedPtr pubExtractedCloud;
     rclcpp::Publisher<lio_sam::msg::CloudInfo>::SharedPtr pubLaserCloudInfo;
     rclcpp::Service<lio_sam::srv::SaveMap>::SharedPtr srvCloudQueueEmpty;
@@ -90,19 +109,19 @@ private:
     // AI_SHIP_ROBOT_BEGIN: 6軸IMU初期姿勢確定前のIMUをrawで保持し、確定後に再変換する。
     std::deque<sensor_msgs::msg::Imu> rawImuQueue;
     bool deferredRawImuConverted = false;
+    bool cloudQueueHeldForInitialImuLogged = false;
+    bool cloudQueueResumedAfterInitialImuLogged = false;
     // AI_SHIP_ROBOT_END
 
     rclcpp::Subscription<nav_msgs::msg::Odometry>::SharedPtr subOdom;
     rclcpp::CallbackGroup::SharedPtr callbackGroupOdom;
     std::deque<nav_msgs::msg::Odometry> odomQueue;
 
-    std::deque<livox_ros_driver2::msg::CustomMsg> cloudQueue;
     livox_ros_driver2::msg::CustomMsg currentCloudMsg;
     string lastDropReason = "none";
-    uint64_t cloudEnqueuedCount = 0;
-    uint64_t cloudProcessedCount = 0;
-    uint64_t cloudDroppedCount = 0;
     std::chrono::steady_clock::time_point lastImageProjectionTimingLogTime = std::chrono::steady_clock::now();
+    std::chrono::steady_clock::time_point lastLidarReceiveStatsLogTime = std::chrono::steady_clock::now();
+    std::unordered_map<std::string, LidarReceiveStats> lidarReceiveStatsByTopic;
     uint64_t imageProjectionTimingScanCount = 0;
     double imageProjectionCacheMsSum = 0.0;
     double imageProjectionDeskewMsSum = 0.0;
@@ -157,7 +176,10 @@ private:
 
 public:
     ImageProjection(const rclcpp::NodeOptions & options) :
-            ParamServer("lio_sam_imageProjection", options), deskewFlag(0)
+            ParamServer("lio_sam_imageProjection", options),
+            tfBuffer(get_clock()),
+            tfListener(tfBuffer, this),
+            deskewFlag(0)
     {
         callbackGroupLidar = create_callback_group(
             rclcpp::CallbackGroupType::MutuallyExclusive);
@@ -183,17 +205,32 @@ public:
             odomTopic + "_incremental", qos_imu,
             std::bind(&ImageProjection::odometryHandler, this, std::placeholders::_1),
             odomOpt);
-        subLaserCloud = create_subscription<livox_ros_driver2::msg::CustomMsg>(
-            pointCloudTopic, qos_lidar,
-            std::bind(&ImageProjection::cloudHandler, this, std::placeholders::_1),
-            lidarOpt);
+        validateMultiLidarInputParameters();
+        multiLidarSynchronizer = std::make_unique<lio_sam::MultiLidarScanSynchronizer>(
+            buildInputLidarSpecs(), referenceCustomTopic, maxStampDeltaSec, queueLength);
+        subLaserClouds.reserve(inputCustomTopics.size());
+        for (const auto& inputTopic : inputCustomTopics)
+        {
+            // 各LiDAR callbackはtopic名とshared_ptrを同期キューへ渡すだけにし、重い処理をtimerへ寄せる。
+            subLaserClouds.push_back(create_subscription<livox_ros_driver2::msg::CustomMsg>(
+                inputTopic, qos_lidar,
+                [this, inputTopic](const livox_ros_driver2::msg::CustomMsg::ConstSharedPtr laserCloudMsg)
+                {
+                    cloudHandler(inputTopic, laserCloudMsg);
+                },
+                lidarOpt));
+        }
         // AI_SHIP_ROBOT_BEGIN: 1回のtimerで1scanだけ処理し、後段queueのburstを避ける。
         cloudQueueTimer = create_wall_timer(
             std::chrono::milliseconds(5), std::bind(&ImageProjection::processCloudQueue, this), callbackGroupCloudQueue);
         // AI_SHIP_ROBOT_END
 
-        pubExtractedCloud = create_publisher<sensor_msgs::msg::PointCloud2>(
-            "lio_sam/deskew/cloud_deskewed", 1);
+        if (publishDeskewedCloud)
+        {
+            // 診断用deskew点群は明示有効化された時だけpublisherを作り、通常運用のtopic数を増やさない。
+            pubExtractedCloud = create_publisher<sensor_msgs::msg::PointCloud2>(
+                "lio_sam/deskew/cloud_deskewed", 1);
+        }
         // rosbag再生や高頻度入力でCloudInfoが欠落しないよう、後段との接続だけreliable高depthにする。
         const auto cloudInfoQos = rclcpp::QoS(rclcpp::KeepLast(200)).reliable().durability_volatile();
         pubLaserCloudInfo = create_publisher<lio_sam::msg::CloudInfo>(
@@ -208,6 +245,11 @@ public:
         resetParameters();
 
         pcl::console::setVerbosityLevel(pcl::console::L_ERROR);
+
+        RCLCPP_INFO(
+            get_logger(),
+            "Direct multi-LiDAR ImageProjection input: topics=%zu reference=%s max_stamp_delta=%.3f tf_timeout=%.3f",
+            inputCustomTopics.size(), referenceCustomTopic.c_str(), maxStampDeltaSec, tfTimeoutSec);
     }
 
     void allocateMemory()
@@ -261,6 +303,52 @@ public:
 
     ~ImageProjection(){}
 
+    void validateMultiLidarInputParameters() const
+    {
+        if (sensor != SensorType::LIVOX)
+            throw std::runtime_error("multi-LiDAR direct imageProjection supports only sensor=livox.");
+        if (inputCustomTopics.empty())
+            throw std::runtime_error("input_custom_topics must not be empty for lio_sam_imageProjection.");
+        if (referenceCustomTopic.empty())
+            throw std::runtime_error("reference_custom_topic must not be empty for lio_sam_imageProjection.");
+        if (std::find(inputCustomTopics.begin(), inputCustomTopics.end(), referenceCustomTopic) == inputCustomTopics.end())
+            throw std::runtime_error("reference_custom_topic must be included in input_custom_topics.");
+        if (!inputRingOffsets.empty() && inputRingOffsets.size() != inputCustomTopics.size())
+            throw std::runtime_error("input_ring_offsets must be empty or match input_custom_topics size.");
+        if (maxStampDeltaSec < 0.0 || tfTimeoutSec < 0.0 || timestampUnitScale <= 0.0)
+            throw std::runtime_error("Invalid multi-LiDAR timing parameter.");
+
+        for (std::size_t i = 0; i < inputCustomTopics.size(); ++i)
+        {
+            if (inputCustomTopics[i].empty())
+                throw std::runtime_error("input_custom_topics must not contain an empty topic.");
+            for (std::size_t j = i + 1; j < inputCustomTopics.size(); ++j)
+            {
+                if (inputCustomTopics[i] == inputCustomTopics[j])
+                    throw std::runtime_error("input_custom_topics must not contain duplicate topics.");
+            }
+        }
+
+        // ring offsetはLiDARごとの行帯域をずらすための値なので、開始行がN_SCAN外なら起動時に止める。
+        for (const auto& ringOffset : inputRingOffsets)
+        {
+            if (ringOffset < 0 || ringOffset >= N_SCAN)
+                throw std::runtime_error("input_ring_offsets must be in the range [0, N_SCAN).");
+        }
+    }
+
+    std::vector<lio_sam::InputLidarSpec> buildInputLidarSpecs() const
+    {
+        std::vector<lio_sam::InputLidarSpec> specs;
+        specs.reserve(inputCustomTopics.size());
+        for (std::size_t i = 0; i < inputCustomTopics.size(); ++i)
+        {
+            const auto ringOffset = inputRingOffsets.empty() ? 0 : static_cast<int>(inputRingOffsets[i]);
+            specs.push_back(lio_sam::InputLidarSpec{inputCustomTopics[i], ringOffset});
+        }
+        return specs;
+    }
+
     void cloudQueueEmptyHandler(
         const std::shared_ptr<rmw_request_id_t> request_header,
         const std::shared_ptr<lio_sam::srv::SaveMap::Request> req,
@@ -269,27 +357,27 @@ public:
         (void)request_header;
         (void)req;
 
-        size_t queueSize = 0;
-        uint64_t enqueuedCount = 0;
-        uint64_t processedCount = 0;
-        uint64_t droppedCount = 0;
+        lio_sam::MultiLidarQueueStats stats;
         {
             std::lock_guard<std::mutex> lock(cloudLock);
-            queueSize = cloudQueue.size();
-            enqueuedCount = cloudEnqueuedCount;
-            processedCount = cloudProcessedCount;
-            droppedCount = cloudDroppedCount;
+            if (multiLidarSynchronizer != nullptr)
+            {
+                stats = multiLidarSynchronizer->stats();
+                if (stats.queued_clouds > 0U)
+                {
+                    multiLidarSynchronizer->requestFlushOldestReference();
+                    stats = multiLidarSynchronizer->stats();
+                }
+            }
         }
 
-        // SaveMap service型をqueue空判定に流用し、success=trueを「未処理scanなし」として返す。
-        res->success = queueSize == 0;
+        // SaveMap service型をqueue空判定に流用し、bag終端の基準scanはflush要求で処理を進める。
+        res->success = stats.queued_clouds == 0U;
         RCLCPP_INFO(
             get_logger(),
-            "Cloud queue drain status: empty=%d queued_clouds=%zu enqueued=%lu processed=%lu dropped=%lu",
-            res->success ? 1 : 0, queueSize,
-            static_cast<unsigned long>(enqueuedCount),
-            static_cast<unsigned long>(processedCount),
-            static_cast<unsigned long>(droppedCount));
+            "Cloud queue drain status: empty=%d queued_clouds=%zu reference_queue=%zu enqueued=%lu processed=%lu dropped=%lu matched=%lu missing=%lu",
+            res->success ? 1 : 0, stats.queued_clouds, stats.reference_queue_size,
+            stats.enqueued, stats.processed, stats.dropped, stats.matched, stats.missing);
     }
 
     void imuHandler(const sensor_msgs::msg::Imu::SharedPtr imuMsg)
@@ -332,13 +420,154 @@ public:
     }
 
     // AI_SHIP_ROBOT_BEGIN: LiDAR callbackはenqueueだけを担当し、重い変換とdeskewはtimer側で行う。
-    void cloudHandler(const livox_ros_driver2::msg::CustomMsg::SharedPtr laserCloudMsg)
+    void cloudHandler(
+        const std::string& topic,
+        const livox_ros_driver2::msg::CustomMsg::ConstSharedPtr laserCloudMsg)
     {
         {
             std::lock_guard<std::mutex> lock(cloudLock);
-            cloudQueue.push_back(*laserCloudMsg);
-            ++cloudEnqueuedCount;
+            if (multiLidarSynchronizer != nullptr)
+                multiLidarSynchronizer->enqueue(topic, laserCloudMsg);
+            recordLidarReceiveStatsLocked(topic, laserCloudMsg);
         }
+    }
+
+    void recordLidarReceiveStatsLocked(
+        const std::string& topic,
+        const livox_ros_driver2::msg::CustomMsg::ConstSharedPtr& laserCloudMsg)
+    {
+        if (laserCloudMsg == nullptr)
+            return;
+
+        // callback到達済みのCustomMsgだけをtopic別に数え、DDS/rosbag由来の受信欠落を処理段より前で切り分ける。
+        auto& stats = lidarReceiveStatsByTopic[topic];
+        const double stampSec = stamp2Sec(laserCloudMsg->header.stamp);
+        if (stats.count == 0)
+        {
+            stats.firstStamp = stampSec;
+            stats.lastStamp = stampSec;
+            stats.lastLoggedStamp = stampSec;
+        }
+        else
+        {
+            const double gapSec = stampSec - stats.lastStamp;
+            if (gapSec > 0.0)
+            {
+                stats.gapSum += gapSec;
+                stats.maxGap = std::max(stats.maxGap, gapSec);
+            }
+            stats.lastStamp = stampSec;
+        }
+        ++stats.count;
+
+        maybeLogLidarReceiveStatsLocked();
+    }
+
+    void maybeLogLidarReceiveStatsLocked()
+    {
+        if (processingTimeLogIntervalSec <= 0.0)
+            return;
+
+        const auto now = std::chrono::steady_clock::now();
+        const double elapsedSec = std::chrono::duration<double>(now - lastLidarReceiveStatsLogTime).count();
+        if (elapsedSec < processingTimeLogIntervalSec)
+            return;
+
+        // 各LiDAR topicの累計と直近区間を同時に出し、初期未接続と再生中dropを見分けられるようにする。
+        for (const auto& inputTopic : inputCustomTopics)
+        {
+            const auto iterator = lidarReceiveStatsByTopic.find(inputTopic);
+            if (iterator == lidarReceiveStatsByTopic.end())
+            {
+                RCLCPP_WARN(
+                    get_logger(),
+                    "LiDAR receive stats: topic=%s count=0 no messages reached imageProjection callback yet",
+                    inputTopic.c_str());
+                continue;
+            }
+
+            const auto& stats = iterator->second;
+            const uint64_t intervalCount = stats.count - stats.lastLoggedCount;
+            const double intervalStampSpan = stats.lastStamp - stats.lastLoggedStamp;
+            const double totalStampSpan = stats.lastStamp - stats.firstStamp;
+            const double avgGap = stats.count > 1 ? stats.gapSum / static_cast<double>(stats.count - 1) : 0.0;
+            const double expectedCountAt10Hz = totalStampSpan > 0.0 ? totalStampSpan / 0.1 + 1.0 : static_cast<double>(stats.count);
+            const double missingEstimateAt10Hz = std::max(0.0, expectedCountAt10Hz - static_cast<double>(stats.count));
+            RCLCPP_INFO(
+                get_logger(),
+                "LiDAR receive stats: topic=%s count=%lu interval_count=%lu stamp=%.6f->%.6f interval_span=%.3f total_span=%.3f avg_gap=%.3f max_gap=%.3f expected_10hz=%.1f missing_est_10hz=%.1f",
+                inputTopic.c_str(),
+                static_cast<unsigned long>(stats.count),
+                static_cast<unsigned long>(intervalCount),
+                stats.firstStamp,
+                stats.lastStamp,
+                intervalStampSpan,
+                totalStampSpan,
+                avgGap,
+                stats.maxGap,
+                expectedCountAt10Hz,
+                missingEstimateAt10Hz);
+        }
+
+        for (auto& [topic, stats] : lidarReceiveStatsByTopic)
+        {
+            stats.lastLoggedCount = stats.count;
+            stats.lastLoggedStamp = stats.lastStamp;
+        }
+        lastLidarReceiveStatsLogTime = now;
+    }
+
+    bool shouldHoldCloudQueueForInitialImu()
+    {
+        std::lock_guard<std::mutex> lock(imuLock);
+        return usingSixAxisImu() && waitForImuInitialization && !deferredRawImuConverted;
+    }
+
+    lio_sam::MultiLidarQueueStats currentCloudQueueStats()
+    {
+        std::lock_guard<std::mutex> lock(cloudLock);
+        if (multiLidarSynchronizer == nullptr)
+            return lio_sam::MultiLidarQueueStats();
+        return multiLidarSynchronizer->stats();
+    }
+
+    bool holdCloudQueueUntilInitialImuReady()
+    {
+        if (!shouldHoldCloudQueueForInitialImu())
+            return false;
+
+        // LiDAR callbackは止めず、初期姿勢確定までscan処理だけ止めてqueue先頭から再開できるようにする。
+        const auto stats = currentCloudQueueStats();
+        if (!cloudQueueHeldForInitialImuLogged)
+        {
+            RCLCPP_INFO(
+                get_logger(),
+                "Hold LiDAR cloudQueue until IMU initialization completes: queued_clouds=%zu reference_queue=%zu enqueued=%lu",
+                stats.queued_clouds, stats.reference_queue_size, stats.enqueued);
+            cloudQueueHeldForInitialImuLogged = true;
+        }
+        else
+        {
+            RCLCPP_INFO_THROTTLE(
+                get_logger(), *get_clock(), 2000,
+                "Holding LiDAR cloudQueue until IMU initialization completes: queued_clouds=%zu reference_queue=%zu enqueued=%lu",
+                stats.queued_clouds, stats.reference_queue_size, stats.enqueued);
+        }
+        return true;
+    }
+
+    void logCloudQueueResumeAfterInitialImu()
+    {
+        if (!cloudQueueHeldForInitialImuLogged || cloudQueueResumedAfterInitialImuLogged)
+            return;
+
+        // 初期化中に蓄積したLiDAR scanを、ここからtimer側で古い順に処理することを明示する。
+        const auto stats = currentCloudQueueStats();
+        RCLCPP_INFO(
+            get_logger(),
+            "Resume LiDAR cloudQueue after IMU initialization: queued_clouds=%zu reference_queue=%zu enqueued=%lu",
+            stats.queued_clouds, stats.reference_queue_size, stats.enqueued);
+        cloudQueueResumedAfterInitialImuLogged = true;
     }
 
     double elapsedMilliseconds(
@@ -427,7 +656,8 @@ public:
         size_t remainingCloudCount = 0;
         {
             std::lock_guard<std::mutex> lock(cloudLock);
-            remainingCloudCount = cloudQueue.size();
+            if (multiLidarSynchronizer != nullptr)
+                remainingCloudCount = multiLidarSynchronizer->stats().queued_clouds;
         }
         if (processedInThisTimer >= imageProjectionMaxScansPerTimer && remainingCloudCount > 0)
         {
@@ -442,34 +672,33 @@ public:
     {
         if (!rclcpp::ok())
             return false;
+        if (holdCloudQueueUntilInitialImuReady())
+            return false;
+        logCloudQueueResumeAfterInitialImu();
 
         size_t queuedCloudCount = 0;
+        lio_sam::MatchedLidarScanGroup scanGroup;
         const auto totalStartTime = std::chrono::steady_clock::now();
         {
             std::lock_guard<std::mutex> lock(cloudLock);
-            if (cloudQueue.empty())
+            if (multiLidarSynchronizer == nullptr || !multiLidarSynchronizer->buildNextGroup(&scanGroup))
                 return false;
-            queuedCloudCount = cloudQueue.size();
-            // 点群変換中はlockを解放し、rosbag再生中のLiDAR callback取りこぼしを避ける。
-            currentCloudMsg = cloudQueue.front();
+            queuedCloudCount = multiLidarSynchronizer->stats().queued_clouds;
         }
 
         const auto cacheStartTime = std::chrono::steady_clock::now();
-        if (!cachePointCloud())
+        if (!cacheMultiLidarScanGroup(scanGroup))
         {
             // 変換不能scanを捨てる瞬間に、入力stampとqueue長を残してdrop原因を追跡できるようにする。
             RCLCPP_WARN(
                 get_logger(),
-                "Drop LiDAR scan before deskew: reason=%s stamp=%.6f point_num=%u queued_clouds=%zu",
-                lastDropReason.c_str(), stamp2Sec(currentCloudMsg.header.stamp),
-                currentCloudMsg.point_num, queuedCloudCount);
+                "Drop LiDAR scan before deskew: reason=%s stamp=%.6f matched_scans=%zu point_count=%zu queued_clouds=%zu",
+                lastDropReason.c_str(), stamp2Sec(scanGroup.header.stamp),
+                scanGroup.scans.size(), scanGroup.point_count, queuedCloudCount);
             // 空scanなど変換不能な入力はここで破棄し、queue操作の責務をtimer側へ集約する。
             std::lock_guard<std::mutex> lock(cloudLock);
-            if (!cloudQueue.empty())
-            {
-                cloudQueue.pop_front();
-                ++cloudDroppedCount;
-            }
+            if (multiLidarSynchronizer != nullptr)
+                multiLidarSynchronizer->markDropped(scanGroup);
             resetParameters();
             return true;
         }
@@ -500,18 +729,15 @@ public:
                 imuQueueSize, odomQueueSize);
             // 必要な時刻のIMUやodomが既に失われたscanだけを破棄し、後続scanの処理を止めない。
             std::lock_guard<std::mutex> lock(cloudLock);
-            if (!cloudQueue.empty())
-            {
-                cloudQueue.pop_front();
-                ++cloudDroppedCount;
-            }
+            if (multiLidarSynchronizer != nullptr)
+                multiLidarSynchronizer->markDropped(scanGroup);
             resetParameters();
             return true;
         }
 
         // 1回のtimerで1scanだけ処理し、後段featureExtraction/mapOptimizationの入力queueをburstで溢れさせない。
         const auto projectStartTime = std::chrono::steady_clock::now();
-        projectPointCloud();
+        projectMultiLidarCustomMsgs(scanGroup);
         const auto projectEndTime = std::chrono::steady_clock::now();
         const auto extractionStartTime = std::chrono::steady_clock::now();
         cloudExtraction();
@@ -523,12 +749,11 @@ public:
         size_t remainingCloudCount = 0;
         {
             std::lock_guard<std::mutex> lock(cloudLock);
-            if (!cloudQueue.empty())
+            if (multiLidarSynchronizer != nullptr)
             {
-                cloudQueue.pop_front();
-                ++cloudProcessedCount;
+                multiLidarSynchronizer->markProcessed(scanGroup);
+                remainingCloudCount = multiLidarSynchronizer->stats().queued_clouds;
             }
-            remainingCloudCount = cloudQueue.size();
         }
         recordImageProjectionTiming(
             elapsedMilliseconds(cacheStartTime, cacheEndTime),
@@ -543,6 +768,176 @@ public:
         return true;
     }
     // AI_SHIP_ROBOT_END
+
+    double pointRelativeTimeSec(
+        const lio_sam::MatchedLidarScan& scan,
+        const livox_ros_driver2::msg::CustomPoint& point) const
+    {
+        return scan.stamp_delta_sec + static_cast<double>(point.offset_time) * timestampUnitScale;
+    }
+
+    bool transformLivoxPointToReference(
+        const livox_ros_driver2::msg::CustomPoint& inputPoint,
+        const lio_sam::RigidTransform& transform,
+        PointType* outputPoint) const
+    {
+        if (outputPoint == nullptr)
+            return false;
+
+        // non-reference LiDARだけを基準LiDAR frameへ変換し、reference LiDARはidentityで分岐を最小化する。
+        const float x = transform.identity ? inputPoint.x :
+            transform.r00 * inputPoint.x + transform.r01 * inputPoint.y + transform.r02 * inputPoint.z + transform.tx;
+        const float y = transform.identity ? inputPoint.y :
+            transform.r10 * inputPoint.x + transform.r11 * inputPoint.y + transform.r12 * inputPoint.z + transform.ty;
+        const float z = transform.identity ? inputPoint.z :
+            transform.r20 * inputPoint.x + transform.r21 * inputPoint.y + transform.r22 * inputPoint.z + transform.tz;
+        if (!std::isfinite(x) || !std::isfinite(y) || !std::isfinite(z))
+            return false;
+
+        outputPoint->x = x;
+        outputPoint->y = y;
+        outputPoint->z = z;
+        outputPoint->intensity = inputPoint.reflectivity;
+        return true;
+    }
+
+    bool cacheMultiLidarScanGroup(const lio_sam::MatchedLidarScanGroup& scanGroup)
+    {
+        cloudHeader = scanGroup.header;
+        timeScanCur = stamp2Sec(cloudHeader.stamp);
+        if (cloudHeader.frame_id.empty())
+        {
+            lastDropReason = "empty_reference_frame_id";
+            return false;
+        }
+        if (scanGroup.point_count == 0U)
+        {
+            lastDropReason = "empty_multi_lidar_scan_group";
+            RCLCPP_WARN(get_logger(), "Received an empty multi-LiDAR scan group; skip this scan.");
+            return false;
+        }
+
+        double maxRelativeTimeSec = 0.0;
+        bool unexpectedOffsetTime = false;
+        for (const auto& scan : scanGroup.scans)
+        {
+            if (scan.cloud == nullptr)
+                continue;
+            for (const auto& point : scan.cloud->points)
+            {
+                const double relativeTimeSec = pointRelativeTimeSec(scan, point);
+                if (!std::isfinite(relativeTimeSec))
+                {
+                    unexpectedOffsetTime = true;
+                    continue;
+                }
+                if (relativeTimeSec < 0.0 || relativeTimeSec > maxPointOffsetTimeSec)
+                    unexpectedOffsetTime = true;
+                maxRelativeTimeSec = std::max(maxRelativeTimeSec, relativeTimeSec);
+            }
+        }
+        timeScanEnd = timeScanCur + std::max(0.0, maxRelativeTimeSec);
+
+        // LiDAR間stamp差を含めた相対時刻がdeskew範囲外なら、時刻設定の不整合をログで追えるようにする。
+        if (unexpectedOffsetTime)
+        {
+            RCLCPP_WARN_THROTTLE(
+                get_logger(), *get_clock(), 2000,
+                "Unexpected multi-LiDAR relative point time: scan_start=%.6f scan_end=%.6f max_allowed=%.6f",
+                timeScanCur, timeScanEnd, maxPointOffsetTimeSec);
+        }
+
+        return true;
+    }
+
+    bool shouldPrepareHybridRawNearCloud() const
+    {
+        return hybridRegisteredCloudEnabled;
+    }
+
+    void projectMultiLidarCustomMsgs(const lio_sam::MatchedLidarScanGroup& scanGroup)
+    {
+        const bool prepareHybridRawNearCloud = shouldPrepareHybridRawNearCloud();
+        if (prepareHybridRawNearCloud)
+        {
+            // hybrid点群の近傍詳細成分は点数が多いため、入力scan規模に合わせてcapacityを先に確保する。
+            rawNearCloud->points.reserve(scanGroup.point_count);
+        }
+
+        for (const auto& scan : scanGroup.scans)
+        {
+            if (scan.cloud == nullptr)
+                continue;
+            if (!scan.is_reference && scan.cloud->header.frame_id.empty())
+            {
+                RCLCPP_WARN_THROTTLE(
+                    get_logger(), *get_clock(), 2000,
+                    "Skip non-reference LiDAR topic %s because frame_id is empty.",
+                    scan.spec.topic.c_str());
+                continue;
+            }
+
+            const auto transform = lidarTransformCache.lookup(
+                scanGroup.header.frame_id, scan.cloud->header.frame_id, scan.cloud->header.stamp,
+                tfTimeoutSec, tfBuffer, get_logger(), *get_clock());
+            if (!transform.has_value())
+            {
+                if (scan.is_reference)
+                    return;
+                continue;
+            }
+
+            for (const auto& livoxPoint : scan.cloud->points)
+            {
+                const int rowIdn = static_cast<int>(livoxPoint.line) + scan.spec.ring_offset;
+                if (rowIdn < 0 || rowIdn >= N_SCAN)
+                    continue;
+
+                PointType thisPoint;
+                if (!transformLivoxPointToReference(livoxPoint, transform.value(), &thisPoint))
+                    continue;
+
+                const float range = pointDistance(thisPoint);
+                if (range < lidarMinRange || range > lidarMaxRange)
+                    continue;
+
+                const double relativeTimeSec = pointRelativeTimeSec(scan, livoxPoint);
+                bool pointDeskewedForRawNear = false;
+                // hybrid点群の近傍詳細成分はSLAM用downsampleとは独立にdeskew済みで保持する。
+                if (prepareHybridRawNearCloud && range <= hybridRegisteredCloudRawNearRange)
+                {
+                    thisPoint = deskewPoint(&thisPoint, relativeTimeSec);
+                    rawNearCloud->push_back(thisPoint);
+                    pointDeskewedForRawNear = true;
+                }
+
+                if (rowIdn % downsampleRate != 0)
+                    continue;
+
+                int columnIdn = -1;
+                if (sensor == SensorType::LIVOX)
+                {
+                    columnIdn = columnIdnCountVec[rowIdn];
+                    columnIdnCountVec[rowIdn] += 1;
+                }
+
+                if (columnIdn < 0 || columnIdn >= Horizon_SCAN)
+                    continue;
+                if (rangeMat.at<float>(rowIdn, columnIdn) != FLT_MAX)
+                    continue;
+
+                if (!pointDeskewedForRawNear)
+                    thisPoint = deskewPoint(&thisPoint, relativeTimeSec);
+
+                rangeMat.at<float>(rowIdn, columnIdn) = range;
+
+                const int index = columnIdn + rowIdn * Horizon_SCAN;
+                fullCloud->points[index] = thisPoint;
+            }
+        }
+    }
+
+    // 旧単一CustomMsg経路は直接multi-LiDAR投影へ置換済み。下記は未使用の既存変換処理として残す。
 
     // AI_SHIP_ROBOT_BEGIN: Livox CustomMsgを全点変換し、offset_time異常をdeskew品質の診断ログに出す。
     void moveFromCustomMsg(livox_ros_driver2::msg::CustomMsg &Msg, pcl::PointCloud<PointXYZIRT> & cloud)
@@ -650,11 +1045,16 @@ public:
         }
 
         const bool needImuAngular = deskewMode == "imu_angular";
-        if (needImuAngular)
+        const bool needStartImuForInitialPose = usingSixAxisImu() || useImuPreintegrationInitialGuess || needImuAngular;
+        if (needStartImuForInitialPose)
         {
-            if (imuQueue.empty() || stamp2Sec(imuQueue.back().header.stamp) < timeScanEnd)
+            // 初回keyframeの姿勢基準を揃えるため、scan開始以前のIMUがないLiDAR scanは処理しない。
+            if (imuQueue.empty())
             {
-                RCLCPP_INFO_THROTTLE(get_logger(), *get_clock(), 1000, "Waiting for IMU data ...");
+                RCLCPP_INFO_THROTTLE(
+                    get_logger(), *get_clock(), 1000,
+                    "Waiting for IMU data before scan publish: scan_start=%.6f",
+                    timeScanCur);
                 return DeskewStatus::Wait;
             }
             if (stamp2Sec(imuQueue.front().header.stamp) > timeScanCur)
@@ -665,6 +1065,14 @@ public:
                     "Drop scan because required start IMU is unavailable: scan_start=%.6f first_imu=%.6f imu_queue=%zu",
                     timeScanCur, stamp2Sec(imuQueue.front().header.stamp), imuQueue.size());
                 return DeskewStatus::Drop;
+            }
+        }
+        if (needImuAngular)
+        {
+            if (imuQueue.empty() || stamp2Sec(imuQueue.back().header.stamp) < timeScanEnd)
+            {
+                RCLCPP_INFO_THROTTLE(get_logger(), *get_clock(), 1000, "Waiting for IMU data ...");
+                return DeskewStatus::Wait;
             }
         }
 
@@ -972,10 +1380,11 @@ public:
 
     void projectPointCloud()
     {
+        const bool prepareHybridRawNearCloud = shouldPrepareHybridRawNearCloud();
         int cloudSize = laserCloudIn->points.size();
-        if (hybridRegisteredCloudEnabled)
+        if (prepareHybridRawNearCloud)
         {
-            // 近傍raw抽出はpush_backが多いため、入力scan規模に合わせてcapacityを先に確保する。
+            // hybrid点群の近傍詳細成分は点数が多いため、入力scan規模に合わせてcapacityを先に確保する。
             rawNearCloud->points.reserve(cloudSize);
         }
         // range image projection
@@ -997,7 +1406,7 @@ public:
 
             bool pointDeskewedForRawNear = false;
             // downsampleRateでSLAM用点群を落としても、近傍地形保存用のdeskew済みraw点は先に確保する。
-            if (hybridRegisteredCloudEnabled && range <= hybridRegisteredCloudRawNearRange)
+            if (prepareHybridRawNearCloud && range <= hybridRegisteredCloudRawNearRange)
             {
                 thisPoint = deskewPoint(&thisPoint, laserCloudIn->points[i].time);
                 rawNearCloud->push_back(thisPoint);
@@ -1064,22 +1473,18 @@ public:
         }
     }
 
-    void publishClouds()
+    void populateHybridRawNearCloudInfo()
     {
-        sensor_msgs::msg::PointCloud2 rawNearCloudMsg;
-        pcl::PointCloud<PointType>::Ptr rawNearCloudToPublish = rawNearCloud;
+        // hybrid点群の近傍詳細成分をCloudInfoに同梱し、後段でfeature点群と同一stampとして扱う。
         lastRawNearVoxelMs = 0.0;
         lastRawNearVoxelInputSize = rawNearCloud->size();
         lastRawNearVoxelOutputSize = rawNearCloud->size();
-        cloudInfo.header = cloudHeader;
-        // CloudInfo内部ではdeskew済み点群が必須だが、外部diagnostic topicは必要時だけpublishする。
-        pcl::toROSMsg(*extractedCloud, cloudInfo.cloud_deskewed);
-        cloudInfo.cloud_deskewed.header.stamp = cloudHeader.stamp;
-        cloudInfo.cloud_deskewed.header.frame_id = lidarFrame;
-        if (publishDeskewedCloud && pubExtractedCloud->get_subscription_count() != 0)
-            pubExtractedCloud->publish(cloudInfo.cloud_deskewed);
-        // 近傍rawは密度過多になりやすいため、地形検知に必要な粒度だけ残してCloudInfoへ載せる。
-        if (hybridRegisteredCloudEnabled && hybridRegisteredCloudRawNearLeafSize > 0.0 && rawNearCloud->size() > 1)
+        cloudInfo.cloud_deskewed_raw_near = sensor_msgs::msg::PointCloud2();
+        if (!shouldPrepareHybridRawNearCloud())
+            return;
+
+        pcl::PointCloud<PointType>::Ptr rawNearCloudToPublish = rawNearCloud;
+        if (hybridRegisteredCloudRawNearLeafSize > 0.0 && rawNearCloud->size() > 1)
         {
             const auto voxelStartTime = std::chrono::steady_clock::now();
             rawNearCloudDS->clear();
@@ -1090,11 +1495,26 @@ public:
             lastRawNearVoxelMs = elapsedMilliseconds(voxelStartTime, voxelEndTime);
             lastRawNearVoxelOutputSize = rawNearCloudDS->size();
         }
-        // CloudInfo内だけで近傍raw点群を渡し、既存のdeskew済み点群topicは従来どおり維持する。
-        pcl::toROSMsg(*rawNearCloudToPublish, rawNearCloudMsg);
-        rawNearCloudMsg.header.stamp = cloudHeader.stamp;
-        rawNearCloudMsg.header.frame_id = lidarFrame;
-        cloudInfo.cloud_deskewed_raw_near = rawNearCloudMsg;
+
+        pcl::toROSMsg(*rawNearCloudToPublish, cloudInfo.cloud_deskewed_raw_near);
+        cloudInfo.cloud_deskewed_raw_near.header.stamp = cloudHeader.stamp;
+        cloudInfo.cloud_deskewed_raw_near.header.frame_id = lidarFrame;
+    }
+
+    void publishClouds()
+    {
+        lastRawNearVoxelMs = 0.0;
+        lastRawNearVoxelInputSize = rawNearCloud->size();
+        lastRawNearVoxelOutputSize = rawNearCloud->size();
+        cloudInfo.header = cloudHeader;
+        // CloudInfo内部ではdeskew済み点群が必須だが、外部diagnostic topicは必要時だけpublishする。
+        pcl::toROSMsg(*extractedCloud, cloudInfo.cloud_deskewed);
+        cloudInfo.cloud_deskewed.header.stamp = cloudHeader.stamp;
+        cloudInfo.cloud_deskewed.header.frame_id = lidarFrame;
+        if (publishDeskewedCloud && pubExtractedCloud != nullptr && pubExtractedCloud->get_subscription_count() != 0)
+            pubExtractedCloud->publish(cloudInfo.cloud_deskewed);
+        // PCD map用hybrid点群の近傍詳細成分もCloudInfoに入れ、feature点群と同じmessageで渡す。
+        populateHybridRawNearCloudInfo();
         pubLaserCloudInfo->publish(cloudInfo);
     }
 };
@@ -1104,7 +1524,7 @@ int main(int argc, char** argv)
     rclcpp::init(argc, argv);
 
     rclcpp::NodeOptions options;
-    options.use_intra_process_comms(true);
+    options.use_intra_process_comms(false);
     rclcpp::executors::MultiThreadedExecutor exec;
 
     auto IP = std::make_shared<ImageProjection>(options);

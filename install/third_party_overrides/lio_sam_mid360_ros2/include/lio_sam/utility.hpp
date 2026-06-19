@@ -50,6 +50,7 @@
 #include <fstream>
 #include <ctime>
 #include <cfloat>
+#include <cstdint>
 #include <iterator>
 #include <sstream>
 #include <string>
@@ -72,6 +73,14 @@ public:
 
     //Topics
     string pointCloudTopic;
+    // AI_SHIP_ROBOT_BEGIN: imageProjectionが複数Livox CustomMsgを直接同期するための入力設定。
+    vector<string> inputCustomTopics;
+    vector<int64_t> inputRingOffsets;
+    string referenceCustomTopic;
+    double maxStampDeltaSec;
+    double tfTimeoutSec;
+    double timestampUnitScale;
+    // AI_SHIP_ROBOT_END
     string imuTopic;
     string odomTopic;
     string gpsTopic;
@@ -153,7 +162,7 @@ public:
     float odometrySurfLeafSize;
     float mappingCornerLeafSize;
     float mappingSurfLeafSize ;
-    // AI_SHIP_ROBOT_BEGIN: 地図保存用hybrid点群をlocal frameで出すための最小parameterを追加する。
+    // AI_SHIP_ROBOT_BEGIN: PCD map保存用hybrid点群をlocal frameで出すためのparameterを追加する。
     bool hybridRegisteredCloudEnabled;
     float hybridRegisteredCloudRawNearRange;
     float hybridRegisteredCloudRawNearLeafSize;
@@ -204,6 +213,20 @@ public:
     {
         declare_parameter("pointCloudTopic", "points");
         get_parameter("pointCloudTopic", pointCloudTopic);
+        // AI_SHIP_ROBOT_BEGIN: 旧fusion topicではなく、各LiDARのCustomMsg topicをimageProjectionへ渡す。
+        declare_parameter("input_custom_topics", std::vector<std::string>{});
+        get_parameter("input_custom_topics", inputCustomTopics);
+        declare_parameter("input_ring_offsets", std::vector<int64_t>{});
+        get_parameter("input_ring_offsets", inputRingOffsets);
+        declare_parameter("reference_custom_topic", "");
+        get_parameter("reference_custom_topic", referenceCustomTopic);
+        declare_parameter("max_stamp_delta_sec", 0.07);
+        get_parameter("max_stamp_delta_sec", maxStampDeltaSec);
+        declare_parameter("tf_timeout_sec", 0.1);
+        get_parameter("tf_timeout_sec", tfTimeoutSec);
+        declare_parameter("timestamp_unit_scale", 1.0e-9);
+        get_parameter("timestamp_unit_scale", timestampUnitScale);
+        // AI_SHIP_ROBOT_END
         declare_parameter("imuTopic", "imu/data");
         get_parameter("imuTopic", imuTopic);
         declare_parameter("odomTopic", "lio_sam/odometry/imu");
@@ -370,10 +393,10 @@ public:
         get_parameter("mappingCornerLeafSize", mappingCornerLeafSize);
         declare_parameter("mappingSurfLeafSize", 0.4);
         get_parameter("mappingSurfLeafSize", mappingSurfLeafSize);
-        // AI_SHIP_ROBOT_BEGIN: 近傍raw点群と遠方feature点群を外部map builderへ渡す設定を読む。
+        // AI_SHIP_ROBOT_BEGIN: 近傍詳細点群とSLAM用粗点群を合成したPCD map保存用hybrid点群の設定を読む。
         declare_parameter("hybridRegisteredCloudEnabled", true);
         get_parameter("hybridRegisteredCloudEnabled", hybridRegisteredCloudEnabled);
-        declare_parameter("hybridRegisteredCloudRawNearRange", 2.0);
+        declare_parameter("hybridRegisteredCloudRawNearRange", 3.0);
         get_parameter("hybridRegisteredCloudRawNearRange", hybridRegisteredCloudRawNearRange);
         declare_parameter("hybridRegisteredCloudRawNearLeafSize", 0.01);
         get_parameter("hybridRegisteredCloudRawNearLeafSize", hybridRegisteredCloudRawNearLeafSize);
@@ -742,11 +765,11 @@ auto qos_imu = rclcpp::QoS(
     ),
     qos_profile_imu);
 
-// AI_SHIP_ROBOT_BEGIN: rosbag再生時のLiDAR burstを吸収するためLiDAR QoS depthを増やす。
+// AI_SHIP_ROBOT_BEGIN: rosbag再生時のLiDAR欠落を避けるため、LIO-SAM側のLiDAR購読をreliable高depthにする。
 rmw_qos_profile_t qos_profile_lidar{
     RMW_QOS_POLICY_HISTORY_KEEP_LAST,
     200,
-    RMW_QOS_POLICY_RELIABILITY_BEST_EFFORT,
+    RMW_QOS_POLICY_RELIABILITY_RELIABLE,
     RMW_QOS_POLICY_DURABILITY_VOLATILE,
     RMW_QOS_DEADLINE_DEFAULT,
     RMW_QOS_LIFESPAN_DEFAULT,

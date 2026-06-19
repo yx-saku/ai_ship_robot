@@ -6,7 +6,6 @@ if(CMAKE_COMPILER_IS_GNUCXX OR CMAKE_CXX_COMPILER_ID MATCHES "Clang")
 endif()
 
 find_package(ament_cmake REQUIRED)
-find_package(ament_index_cpp REQUIRED)
 find_package(livox_ros_driver2 REQUIRED)
 find_package(geometry_msgs REQUIRED)
 find_package(nav_msgs REQUIRED)
@@ -24,17 +23,6 @@ ament_target_dependencies(
   livox_ros_driver2
   rclcpp
   sensor_msgs
-)
-
-add_executable(multi_lidar_pointcloud_fusion_node src/multi_lidar_pointcloud_fusion_node.cpp)
-target_compile_features(multi_lidar_pointcloud_fusion_node PUBLIC cxx_std_17)
-ament_target_dependencies(
-  multi_lidar_pointcloud_fusion_node
-  ament_index_cpp
-  livox_ros_driver2
-  rclcpp
-  tf2
-  tf2_ros
 )
 
 add_executable(slam_reference_lidar_static_tf_node src/slam_reference_lidar_static_tf_node.cpp)
@@ -65,7 +53,6 @@ ament_target_dependencies(
 install(
   TARGETS
     livox_custommsg_to_pointcloud2_node
-    multi_lidar_pointcloud_fusion_node
     pcd_map_saver_node
     slam_reference_lidar_static_tf_node
   DESTINATION lib/${PROJECT_NAME}

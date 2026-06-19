@@ -1,12 +1,11 @@
 /**:
   ros__parameters:
-    # LIO-SAMと基準TF生成が、fusion設定と同じCustomMsg入力を参照する。
-    pointCloudTopic: /fused/livox/lidar
+    # 基準TF生成は、LIO-SAM imageProjectionと同じ基準LiDAR topicを参照する。
     reference_custom_topic: /lidar1/livox/lidar
 
-multi_lidar_pointcloud_fusion_node:
+lio_sam_imageProjection:
   ros__parameters:
-    # fusion出力はLivox CustomMsgだけに限定し、PointCloud2はpublishしない。
+    # LIO-SAM内で各LiDARのCustomMsgを直接同期し、中間fusion topicは生成しない。
     input_custom_topics:
       - /lidar1/livox/lidar
       - /lidar2/livox/lidar
@@ -14,14 +13,7 @@ multi_lidar_pointcloud_fusion_node:
     input_ring_offsets:
       - 0
       - 4
-    output_custom_topic: /fused/livox/lidar
     reference_custom_topic: /lidar1/livox/lidar
-    cache_size_limit: 0
     max_stamp_delta_sec: 0.07
     tf_timeout_sec: 0.1
     timestamp_unit_scale: 1.0e-9
-    max_relative_time_sec: 0.2
-    scan_pattern_csv_file: /opt/ai_ship_robot/ros_underlay/humble/third_party_ws/install/ros2_livox_simulation/share/ros2_livox_simulation/scan_mode/mid360.csv
-    synthesize_ring_from_pattern: false
-    scan_pattern_physical_line_count: 4
-    synthetic_ring_count: 4

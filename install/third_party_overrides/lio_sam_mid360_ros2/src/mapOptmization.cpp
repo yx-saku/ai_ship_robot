@@ -18,6 +18,8 @@
 
 #include <algorithm>
 #include <chrono>
+#include <cstdint>
+#include <map>
 
 using namespace gtsam;
 
@@ -171,8 +173,10 @@ public:
         parameters.relinearizeSkip = 1;
         isam = new ISAM2(parameters);
 
-        pubKeyPoses = create_publisher<sensor_msgs::msg::PointCloud2>("lio_sam/mapping/trajectory", 1);
-        pubLaserCloudSurround = create_publisher<sensor_msgs::msg::PointCloud2>("lio_sam/mapping/map_global", 1);
+        if (publishTrajectoryCloud)
+            pubKeyPoses = create_publisher<sensor_msgs::msg::PointCloud2>("lio_sam/mapping/trajectory", 1);
+        if (publishMapGlobalCloud)
+            pubLaserCloudSurround = create_publisher<sensor_msgs::msg::PointCloud2>("lio_sam/mapping/map_global", 1);
         pubLaserOdometryGlobal = create_publisher<nav_msgs::msg::Odometry>("lio_sam/mapping/odometry", qos);
         pubLaserOdometryIncremental = create_publisher<nav_msgs::msg::Odometry>(
             "lio_sam/mapping/odometry_incremental", qos);
@@ -253,14 +257,22 @@ public:
         };
 
         srvSaveMap = create_service<lio_sam::srv::SaveMap>("lio_sam/save_map", saveMapService);
-        pubHistoryKeyFrames = create_publisher<sensor_msgs::msg::PointCloud2>("lio_sam/mapping/icp_loop_closure_history_cloud", 1);
-        pubIcpKeyFrames = create_publisher<sensor_msgs::msg::PointCloud2>("lio_sam/mapping/icp_loop_closure_history_cloud", 1);
-        pubLoopConstraintEdge = create_publisher<visualization_msgs::msg::MarkerArray>("/lio_sam/mapping/loop_closure_constraints", 1);
+        if (publishLoopClosureClouds)
+        {
+            // loop closure可視化topicは通常運用では不要なため、診断時だけpublisherを作る。
+            pubHistoryKeyFrames = create_publisher<sensor_msgs::msg::PointCloud2>("lio_sam/mapping/icp_loop_closure_history_cloud", 1);
+            pubIcpKeyFrames = create_publisher<sensor_msgs::msg::PointCloud2>("lio_sam/mapping/icp_loop_closure_history_cloud", 1);
+            pubLoopConstraintEdge = create_publisher<visualization_msgs::msg::MarkerArray>("/lio_sam/mapping/loop_closure_constraints", 1);
+        }
 
-        pubRecentKeyFrames = create_publisher<sensor_msgs::msg::PointCloud2>("lio_sam/mapping/map_local", 1);
-        pubRecentKeyFrame = create_publisher<sensor_msgs::msg::PointCloud2>("lio_sam/mapping/cloud_registered", 1);
-        pubCloudRegisteredRaw = create_publisher<sensor_msgs::msg::PointCloud2>("lio_sam/mapping/cloud_registered_raw", 1);
-        pubRecentKeyFrameHybrid = create_publisher<sensor_msgs::msg::PointCloud2>(hybridRegisteredCloudTopic, 1);
+        if (publishMapLocalCloud)
+            pubRecentKeyFrames = create_publisher<sensor_msgs::msg::PointCloud2>("lio_sam/mapping/map_local", 1);
+        if (publishCloudRegistered)
+            pubRecentKeyFrame = create_publisher<sensor_msgs::msg::PointCloud2>("lio_sam/mapping/cloud_registered", 1);
+        if (publishCloudRegisteredRaw)
+            pubCloudRegisteredRaw = create_publisher<sensor_msgs::msg::PointCloud2>("lio_sam/mapping/cloud_registered_raw", 1);
+        if (hybridRegisteredCloudEnabled)
+            pubRecentKeyFrameHybrid = create_publisher<sensor_msgs::msg::PointCloud2>(hybridRegisteredCloudTopic, 1);
 
         downSizeFilterCorner.setLeafSize(mappingCornerLeafSize, mappingCornerLeafSize, mappingCornerLeafSize);
         downSizeFilterSurf.setLeafSize(mappingSurfLeafSize, mappingSurfLeafSize, mappingSurfLeafSize);
@@ -488,7 +500,7 @@ public:
         if (!publishMapGlobalCloud)
             return;
 
-        if (pubLaserCloudSurround->get_subscription_count() == 0)
+        if (pubLaserCloudSurround == nullptr || pubLaserCloudSurround->get_subscription_count() == 0)
             return;
 
         if (cloudKeyPoses3D->points.empty() == true)
@@ -600,7 +612,7 @@ public:
             loopFindNearKeyframes(prevKeyframeCloud, loopKeyPre, historyKeyframeSearchNum);
             if (cureKeyframeCloud->size() < 300 || prevKeyframeCloud->size() < 1000)
                 return;
-            if (publishLoopClosureClouds && pubHistoryKeyFrames->get_subscription_count() != 0)
+            if (publishLoopClosureClouds && pubHistoryKeyFrames != nullptr && pubHistoryKeyFrames->get_subscription_count() != 0)
                 publishCloud(pubHistoryKeyFrames, prevKeyframeCloud, timeLaserInfoStamp, odometryFrame);
         }
 
@@ -622,7 +634,7 @@ public:
             return;
 
         // publish corrected cloud
-        if (publishLoopClosureClouds && pubIcpKeyFrames->get_subscription_count() != 0)
+        if (publishLoopClosureClouds && pubIcpKeyFrames != nullptr && pubIcpKeyFrames->get_subscription_count() != 0)
         {
             pcl::PointCloud<PointType>::Ptr closed_cloud(new pcl::PointCloud<PointType>());
             pcl::transformPointCloud(*cureKeyframeCloud, *closed_cloud, icp.getFinalTransformation());
@@ -771,7 +783,7 @@ public:
 
     void visualizeLoopClosure()
     {
-        if (!publishLoopClosureClouds || pubLoopConstraintEdge->get_subscription_count() == 0)
+        if (!publishLoopClosureClouds || pubLoopConstraintEdge == nullptr || pubLoopConstraintEdge->get_subscription_count() == 0)
             return;
 
         if (loopIndexContainer.empty())
@@ -1781,7 +1793,7 @@ public:
     {
         size_t appendedCount = 0;
         const float nearRangeSquared = hybridRegisteredCloudRawNearRange * hybridRegisteredCloudRawNearRange;
-        // 近傍はdeskew済みraw点群を優先し、feature点群は遠方だけ残して重複と密度偏りを避ける。
+        // 近傍はraw詳細点群を優先し、粗いfeature点群は遠方側だけ補って密度偏りを避ける。
         for (const auto &point : cloudIn->points)
         {
             const float rangeSquared = point.x * point.x + point.y * point.y + point.z * point.z;
@@ -1862,13 +1874,13 @@ public:
         if (cloudKeyPoses3D->points.empty())
             return;
         // publish key poses
-        if (publishTrajectoryCloud && pubKeyPoses->get_subscription_count() != 0)
+        if (publishTrajectoryCloud && pubKeyPoses != nullptr && pubKeyPoses->get_subscription_count() != 0)
             publishCloud(pubKeyPoses, cloudKeyPoses3D, timeLaserInfoStamp, odometryFrame);
         // Publish surrounding key frames
-        if (publishMapLocalCloud && pubRecentKeyFrames->get_subscription_count() != 0)
+        if (publishMapLocalCloud && pubRecentKeyFrames != nullptr && pubRecentKeyFrames->get_subscription_count() != 0)
             publishCloud(pubRecentKeyFrames, laserCloudSurfFromMapDS, timeLaserInfoStamp, odometryFrame);
         // publish registered key frame
-        if (publishCloudRegistered && pubRecentKeyFrame->get_subscription_count() != 0)
+        if (publishCloudRegistered && pubRecentKeyFrame != nullptr && pubRecentKeyFrame->get_subscription_count() != 0)
         {
             pcl::PointCloud<PointType>::Ptr cloudOut(new pcl::PointCloud<PointType>());
             // 蓄積ノード側でpose変換できるよう、登録済みfeature点群はscan local frameのままpublishする。
@@ -1877,35 +1889,43 @@ public:
             publishCloud(pubRecentKeyFrame, cloudOut, timeLaserInfoStamp, lidarFrame);
         }
         // publish registered high-res raw cloud
-        if (publishCloudRegisteredRaw && pubCloudRegisteredRaw->get_subscription_count() != 0)
+        if (publishCloudRegisteredRaw && pubCloudRegisteredRaw != nullptr && pubCloudRegisteredRaw->get_subscription_count() != 0)
         {
             pcl::PointCloud<PointType>::Ptr cloudOut(new pcl::PointCloud<PointType>());
             pcl::fromROSMsg(cloudInfo.cloud_deskewed, *cloudOut);
             publishCloud(pubCloudRegisteredRaw, cloudOut, timeLaserInfoStamp, lidarFrame);
         }
-        // publish registered hybrid cloud for external map builder
-        if (hybridRegisteredCloudEnabled && pubRecentKeyFrameHybrid->get_subscription_count() != 0)
+        // PCD map用hybrid点群は近傍raw詳細点群と遠方のSLAM用feature点群をscan local frameで合成する。
+        if (hybridRegisteredCloudEnabled && pubRecentKeyFrameHybrid != nullptr && pubRecentKeyFrameHybrid->get_subscription_count() != 0)
         {
-            const auto hybridStartTime = std::chrono::steady_clock::now();
-            pcl::PointCloud<PointType>::Ptr cloudOut(new pcl::PointCloud<PointType>());
+            const auto totalStartTime = std::chrono::steady_clock::now();
             pcl::PointCloud<PointType>::Ptr rawNearCloud(new pcl::PointCloud<PointType>());
-            pcl::fromROSMsg(cloudInfo.cloud_deskewed_raw_near, *rawNearCloud);
+            pcl::PointCloud<PointType>::Ptr cloudOut(new pcl::PointCloud<PointType>());
+
+            const auto fromRosStartTime = std::chrono::steady_clock::now();
+            if (cloudInfo.cloud_deskewed_raw_near.width * cloudInfo.cloud_deskewed_raw_near.height > 0U)
+                pcl::fromROSMsg(cloudInfo.cloud_deskewed_raw_near, *rawNearCloud);
             const auto fromRosEndTime = std::chrono::steady_clock::now();
-            cloudOut->points.reserve(rawNearCloud->size() + laserCloudCornerLastDS->size() + laserCloudSurfLastDS->size());
-            // 近傍rawを優先してから遠方featureを足し、外部map builderへlocal frame点群として渡す。
+
+            const auto appendStartTime = std::chrono::steady_clock::now();
+            // 近傍詳細点を先に入れ、同じ近傍範囲の粗いfeature点は重複させない。
             *cloudOut += *rawNearCloud;
-            const size_t farCornerCount = appendFarFeaturePoints(cloudOut, laserCloudCornerLastDS);
-            const size_t farSurfCount = appendFarFeaturePoints(cloudOut, laserCloudSurfLastDS);
+            const size_t farCornerPoints = appendFarFeaturePoints(cloudOut, laserCloudCornerLastDS);
+            const size_t farSurfPoints = appendFarFeaturePoints(cloudOut, laserCloudSurfLastDS);
+            const size_t featurePoints = farCornerPoints + farSurfPoints;
             const auto appendEndTime = std::chrono::steady_clock::now();
+
+            const auto publishStartTime = std::chrono::steady_clock::now();
             publishCloud(pubRecentKeyFrameHybrid, cloudOut, timeLaserInfoStamp, lidarFrame);
             const auto publishEndTime = std::chrono::steady_clock::now();
+
             recordHybridCloudTiming(
-                elapsedMilliseconds(hybridStartTime, fromRosEndTime),
-                elapsedMilliseconds(fromRosEndTime, appendEndTime),
-                elapsedMilliseconds(appendEndTime, publishEndTime),
-                elapsedMilliseconds(hybridStartTime, publishEndTime),
+                elapsedMilliseconds(fromRosStartTime, fromRosEndTime),
+                elapsedMilliseconds(appendStartTime, appendEndTime),
+                elapsedMilliseconds(publishStartTime, publishEndTime),
+                elapsedMilliseconds(totalStartTime, publishEndTime),
                 rawNearCloud->size(),
-                farCornerCount + farSurfCount,
+                featurePoints,
                 cloudOut->size());
         }
         // publish path
