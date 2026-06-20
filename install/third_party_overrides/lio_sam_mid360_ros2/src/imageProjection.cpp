@@ -860,10 +860,9 @@ public:
         const bool prepareHybridRawNearCloud = shouldPrepareHybridRawNearCloud();
         if (prepareHybridRawNearCloud)
         {
-            // hybrid点群の近傍詳細成分は点数が多いため、入力scan規模に合わせてcapacityを先に確保する。
+            // hybrid点群のraw詳細成分は点数が多いため、入力scan規模に合わせてcapacityを先に確保する。
             rawNearCloud->points.reserve(scanGroup.point_count);
         }
-
         for (const auto& scan : scanGroup.scans)
         {
             if (scan.cloud == nullptr)
@@ -903,7 +902,7 @@ public:
 
                 const double relativeTimeSec = pointRelativeTimeSec(scan, livoxPoint);
                 bool pointDeskewedForRawNear = false;
-                // hybrid点群の近傍詳細成分はSLAM用downsampleとは独立にdeskew済みで保持する。
+                // hybrid点群のraw詳細成分はSLAM用downsampleとは独立にdeskew済みで保持する。
                 if (prepareHybridRawNearCloud && range <= hybridRegisteredCloudRawNearRange)
                 {
                     thisPoint = deskewPoint(&thisPoint, relativeTimeSec);
@@ -1384,7 +1383,7 @@ public:
         int cloudSize = laserCloudIn->points.size();
         if (prepareHybridRawNearCloud)
         {
-            // hybrid点群の近傍詳細成分は点数が多いため、入力scan規模に合わせてcapacityを先に確保する。
+            // hybrid点群のraw詳細成分は点数が多いため、入力scan規模に合わせてcapacityを先に確保する。
             rawNearCloud->points.reserve(cloudSize);
         }
         // range image projection
@@ -1405,7 +1404,7 @@ public:
                 continue;
 
             bool pointDeskewedForRawNear = false;
-            // downsampleRateでSLAM用点群を落としても、近傍地形保存用のdeskew済みraw点は先に確保する。
+            // downsampleRateでSLAM用点群を落としても、地形保存用のdeskew済みraw点は先に確保する。
             if (prepareHybridRawNearCloud && range <= hybridRegisteredCloudRawNearRange)
             {
                 thisPoint = deskewPoint(&thisPoint, laserCloudIn->points[i].time);
@@ -1475,7 +1474,7 @@ public:
 
     void populateHybridRawNearCloudInfo()
     {
-        // hybrid点群の近傍詳細成分をCloudInfoに同梱し、後段でfeature点群と同一stampとして扱う。
+        // hybrid点群のraw詳細成分をCloudInfoに同梱し、後段でfeature点群と同一stampとして扱う。
         lastRawNearVoxelMs = 0.0;
         lastRawNearVoxelInputSize = rawNearCloud->size();
         lastRawNearVoxelOutputSize = rawNearCloud->size();
@@ -1513,7 +1512,7 @@ public:
         cloudInfo.cloud_deskewed.header.frame_id = lidarFrame;
         if (publishDeskewedCloud && pubExtractedCloud != nullptr && pubExtractedCloud->get_subscription_count() != 0)
             pubExtractedCloud->publish(cloudInfo.cloud_deskewed);
-        // PCD map用hybrid点群の近傍詳細成分もCloudInfoに入れ、feature点群と同じmessageで渡す。
+        // PCD map用hybrid点群のraw詳細成分もCloudInfoに入れ、feature点群と同じmessageで渡す。
         populateHybridRawNearCloudInfo();
         pubLaserCloudInfo->publish(cloudInfo);
     }

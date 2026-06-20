@@ -93,7 +93,7 @@ bash scripts/run_slam.sh \
 - `--map` による PCD map saver 有効化
 - `--cloud-queue-drain-timeout` による bag 再生後の cloudQueue 待機上限指定
 
-`--map` を付けた場合は、`pcd_map_saver_node` が全hybrid登録点群を odometry pose で keyframe 区間 submap へ合成し、保存時に最新の `/lio_sam/mapping/path` で map frame へ再配置して PCD を書き出します。hybrid点群はCloudInfo内で渡した近傍詳細点群と、SLAMに使用した粗い点群を合成したlocal frame点群です。submap 合成時の voxel leaf size は近傍raw点群と同じ既定 `0.01m` です。
+`--map` を付けた場合は、`pcd_map_saver_node` が全hybrid登録点群を odometry pose で keyframe 区間 submap へ合成し、保存時に最新の `/lio_sam/mapping/path` で map frame へ再配置して PCD を書き出します。hybrid点群はCloudInfo内で渡したLiDAR距離 `hybridRegisteredCloudRawNearRange` 以内のraw詳細点群と、SLAMに使用した粗い点群を合成したlocal frame点群です。raw詳細点群は `mapFrame` Z上限 `hybridRegisteredCloudRawUpperMapZMax` より高い点だけを追加除外できます。submap 合成時の voxel leaf size はraw詳細点群と同じ既定 `0.01m` です。
 
 CPU/DDS 負荷を抑えるため、`/lio_sam/deskew/cloud_deskewed`、`/lio_sam/feature/cloud_corner`、`/lio_sam/feature/cloud_surface`、`/lio_sam/mapping/map_global`、`/lio_sam/mapping/map_local`、`/lio_sam/mapping/trajectory`、`/lio_sam/mapping/cloud_registered`、`/lio_sam/mapping/cloud_registered_raw` は既定では publish しません。RViz 確認が必要な場合は `lio_sam_mid360.yaml` の対応する `publish*` パラメータを `true` にしてください。
 

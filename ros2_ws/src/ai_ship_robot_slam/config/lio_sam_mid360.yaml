@@ -78,10 +78,13 @@
     mappingCornerLeafSize: 0.1
     mappingSurfLeafSize: 0.2
 
-    # PCD map作成用に、近傍詳細点群とSLAM用粗点群を合成したcloud_registered_hybridを渡す。
+    # PCD map作成用に、LiDAR近傍raw詳細点群とSLAM用粗点群を合成して渡す。
+    # 近傍raw詳細点群はmapFrameの高さ上限で天井側だけ追加除外できるようにする。
     hybridRegisteredCloudEnabled: true
     hybridRegisteredCloudRawNearRange: 3.0
     hybridRegisteredCloudRawNearLeafSize: 0.01
+    hybridRegisteredCloudRawUpperMapZLimitEnabled: true
+    hybridRegisteredCloudRawUpperMapZMax: 1.5
     hybridRegisteredCloudTopic: /lio_sam/mapping/cloud_registered_hybrid
 
     # map保存用cloud_registered_hybrid以外の重い点群publishは既定で止め、全topic録画時のCPU/DDS負荷を抑える。

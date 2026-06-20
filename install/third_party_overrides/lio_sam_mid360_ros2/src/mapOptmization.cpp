@@ -16,6 +16,9 @@
 
 #include <gtsam/nonlinear/ISAM2.h>
 
+#include <tf2/LinearMath/Matrix3x3.h>
+#include <tf2/time.h>
+
 #include <algorithm>
 #include <chrono>
 #include <cstdint>
@@ -84,7 +87,7 @@ public:
     double hybridCloudPublishMsSum = 0.0;
     double hybridCloudTotalMsSum = 0.0;
     size_t hybridCloudRawNearPointsSum = 0;
-    size_t hybridCloudFarFeaturePointsSum = 0;
+    size_t hybridCloudFeaturePointsSum = 0;
     size_t hybridCloudOutputPointsSum = 0;
 
     rclcpp::Service<lio_sam::srv::SaveMap>::SharedPtr srvSaveMap;
@@ -164,9 +167,14 @@ public:
     Eigen::Affine3f incrementalOdometryAffineFront;
     Eigen::Affine3f incrementalOdometryAffineBack;
 
+    tf2_ros::Buffer tfBuffer;
+    tf2_ros::TransformListener tfListener;
     std::unique_ptr<tf2_ros::TransformBroadcaster> br;
 
-    mapOptimization(const rclcpp::NodeOptions & options) : ParamServer("lio_sam_mapOptimization", options)
+    mapOptimization(const rclcpp::NodeOptions & options) :
+        ParamServer("lio_sam_mapOptimization", options),
+        tfBuffer(get_clock()),
+        tfListener(tfBuffer, this)
     {
         ISAM2Params parameters;
         parameters.relinearizeThreshold = 0.1;
@@ -1740,7 +1748,7 @@ public:
         hybridCloudPublishMsSum = 0.0;
         hybridCloudTotalMsSum = 0.0;
         hybridCloudRawNearPointsSum = 0;
-        hybridCloudFarFeaturePointsSum = 0;
+        hybridCloudFeaturePointsSum = 0;
         hybridCloudOutputPointsSum = 0;
     }
 
@@ -1750,7 +1758,7 @@ public:
         const double publishMs,
         const double totalMs,
         const size_t rawNearPoints,
-        const size_t farFeaturePoints,
+        const size_t featurePoints,
         const size_t outputPoints)
     {
         if (processingTimeLogIntervalSec <= 0.0)
@@ -1763,7 +1771,7 @@ public:
         hybridCloudPublishMsSum += publishMs;
         hybridCloudTotalMsSum += totalMs;
         hybridCloudRawNearPointsSum += rawNearPoints;
-        hybridCloudFarFeaturePointsSum += farFeaturePoints;
+        hybridCloudFeaturePointsSum += featurePoints;
         hybridCloudOutputPointsSum += outputPoints;
 
         const auto now = std::chrono::steady_clock::now();
@@ -1774,34 +1782,118 @@ public:
         const double count = static_cast<double>(std::max<uint64_t>(hybridCloudTimingCount, 1));
         RCLCPP_INFO(
             get_logger(),
-            "Hybrid cloud timing: scans=%lu avg_ms total=%.3f from_ros=%.3f append=%.3f publish=%.3f points raw_near=%.1f far_feature=%.1f output=%.1f",
+            "Hybrid cloud timing: scans=%lu avg_ms total=%.3f from_ros=%.3f append=%.3f publish=%.3f points raw_near=%.1f feature=%.1f output=%.1f",
             static_cast<unsigned long>(hybridCloudTimingCount),
             hybridCloudTotalMsSum / count,
             hybridCloudFromRosMsSum / count,
             hybridCloudAppendMsSum / count,
             hybridCloudPublishMsSum / count,
             static_cast<double>(hybridCloudRawNearPointsSum) / count,
-            static_cast<double>(hybridCloudFarFeaturePointsSum) / count,
+            static_cast<double>(hybridCloudFeaturePointsSum) / count,
             static_cast<double>(hybridCloudOutputPointsSum) / count);
         lastHybridCloudTimingLogTime = now;
         resetHybridCloudTimingAccumulator();
     }
 
-    size_t appendFarFeaturePoints(
+    Eigen::Affine3f transformStampedToAffine3f(const geometry_msgs::msg::TransformStamped& stampedTransform) const
+    {
+        // TF messageを点ごとの高さ判定で使いやすいfloat affineへ変換する。
+        const auto& translation = stampedTransform.transform.translation;
+        const auto& rotation = stampedTransform.transform.rotation;
+        tf2::Quaternion quaternion(rotation.x, rotation.y, rotation.z, rotation.w);
+        quaternion.normalize();
+        tf2::Matrix3x3 matrix(quaternion);
+
+        Eigen::Affine3f affine = Eigen::Affine3f::Identity();
+        affine(0, 0) = static_cast<float>(matrix[0][0]);
+        affine(0, 1) = static_cast<float>(matrix[0][1]);
+        affine(0, 2) = static_cast<float>(matrix[0][2]);
+        affine(1, 0) = static_cast<float>(matrix[1][0]);
+        affine(1, 1) = static_cast<float>(matrix[1][1]);
+        affine(1, 2) = static_cast<float>(matrix[1][2]);
+        affine(2, 0) = static_cast<float>(matrix[2][0]);
+        affine(2, 1) = static_cast<float>(matrix[2][1]);
+        affine(2, 2) = static_cast<float>(matrix[2][2]);
+        affine(0, 3) = static_cast<float>(translation.x);
+        affine(1, 3) = static_cast<float>(translation.y);
+        affine(2, 3) = static_cast<float>(translation.z);
+        return affine;
+    }
+
+    bool lookupMapFromOdometryTransform(Eigen::Affine3f* mapFromOdometry)
+    {
+        if (mapFromOdometry == nullptr)
+            return false;
+        if (mapFrame == odometryFrame)
+        {
+            *mapFromOdometry = Eigen::Affine3f::Identity();
+            return true;
+        }
+
+        try
+        {
+            // mapFrame上限はTF未接続時に旧挙動を壊さないため、取得失敗時は呼び出し側でfail-openにする。
+            const auto stampedTransform = tfBuffer.lookupTransform(
+                mapFrame, odometryFrame, tf2_ros::fromRclcpp(timeLaserInfoStamp), tf2::durationFromSec(tfTimeoutSec));
+            *mapFromOdometry = transformStampedToAffine3f(stampedTransform);
+            return true;
+        }
+        catch (const tf2::TransformException& ex)
+        {
+            RCLCPP_WARN_THROTTLE(
+                get_logger(), *get_clock(), 5000,
+                "Failed to lookup transform %s <- %s for hybrid raw near map Z limit; publish without height filter: %s",
+                mapFrame.c_str(), odometryFrame.c_str(), ex.what());
+            return false;
+        }
+    }
+
+    bool buildHybridRawNearLocalToMapTransform(Eigen::Affine3f* rawNearLocalToMap)
+    {
+        if (rawNearLocalToMap == nullptr)
+            return false;
+
+        Eigen::Affine3f mapFromOdometry;
+        if (!lookupMapFromOdometryTransform(&mapFromOdometry))
+            return false;
+
+        // raw近傍点群はlidarFrame localなので、現在推定pose経由でmapFrame高さへ写す。
+        *rawNearLocalToMap = mapFromOdometry * trans2Affine3f(transformTobeMapped);
+        return true;
+    }
+
+    size_t appendHeightFilteredRawNearPoints(
+        pcl::PointCloud<PointType>::Ptr cloudOut,
+        const pcl::PointCloud<PointType>::Ptr cloudIn,
+        const Eigen::Affine3f* rawNearLocalToMap)
+    {
+        size_t appendedCount = 0;
+        // 高さ制限が有効な時だけmapFrame Zを評価し、publishする点の座標系自体はlocal frameのまま残す。
+        for (const auto &point : cloudIn->points)
+        {
+            if (rawNearLocalToMap != nullptr)
+            {
+                const Eigen::Vector3f mapPoint = (*rawNearLocalToMap) * Eigen::Vector3f(point.x, point.y, point.z);
+                if (mapPoint.z() > hybridRegisteredCloudRawUpperMapZMax)
+                    continue;
+            }
+
+            cloudOut->push_back(point);
+            ++appendedCount;
+        }
+        return appendedCount;
+    }
+
+    size_t appendFeaturePoints(
         pcl::PointCloud<PointType>::Ptr cloudOut,
         const pcl::PointCloud<PointType>::Ptr cloudIn)
     {
         size_t appendedCount = 0;
-        const float nearRangeSquared = hybridRegisteredCloudRawNearRange * hybridRegisteredCloudRawNearRange;
-        // 近傍はraw詳細点群を優先し、粗いfeature点群は遠方側だけ補って密度偏りを避ける。
+        // 上側高さ制限はraw近傍詳細点だけに適用し、SLAM用の粗いfeature点群は全体形状として保持する。
         for (const auto &point : cloudIn->points)
         {
-            const float rangeSquared = point.x * point.x + point.y * point.y + point.z * point.z;
-            if (rangeSquared > nearRangeSquared)
-            {
-                cloudOut->push_back(point);
-                ++appendedCount;
-            }
+            cloudOut->push_back(point);
+            ++appendedCount;
         }
         return appendedCount;
     }
@@ -1895,7 +1987,7 @@ public:
             pcl::fromROSMsg(cloudInfo.cloud_deskewed, *cloudOut);
             publishCloud(pubCloudRegisteredRaw, cloudOut, timeLaserInfoStamp, lidarFrame);
         }
-        // PCD map用hybrid点群は近傍raw詳細点群と遠方のSLAM用feature点群をscan local frameで合成する。
+        // PCD map用hybrid点群は高さ制限後の近傍raw詳細点群とSLAM用feature点群全体をscan local frameで合成する。
         if (hybridRegisteredCloudEnabled && pubRecentKeyFrameHybrid != nullptr && pubRecentKeyFrameHybrid->get_subscription_count() != 0)
         {
             const auto totalStartTime = std::chrono::steady_clock::now();
@@ -1908,11 +2000,18 @@ public:
             const auto fromRosEndTime = std::chrono::steady_clock::now();
 
             const auto appendStartTime = std::chrono::steady_clock::now();
-            // 近傍詳細点を先に入れ、同じ近傍範囲の粗いfeature点は重複させない。
-            *cloudOut += *rawNearCloud;
-            const size_t farCornerPoints = appendFarFeaturePoints(cloudOut, laserCloudCornerLastDS);
-            const size_t farSurfPoints = appendFarFeaturePoints(cloudOut, laserCloudSurfLastDS);
-            const size_t featurePoints = farCornerPoints + farSurfPoints;
+            Eigen::Affine3f rawNearLocalToMap;
+            const Eigen::Affine3f* rawNearLocalToMapPtr = nullptr;
+            if (hybridRegisteredCloudRawUpperMapZLimitEnabled && !rawNearCloud->empty() &&
+                buildHybridRawNearLocalToMapTransform(&rawNearLocalToMap))
+            {
+                rawNearLocalToMapPtr = &rawNearLocalToMap;
+            }
+            // 高さ制限はraw近傍だけに掛け、粗いfeature点群は近傍/遠方を問わず残す。
+            const size_t rawNearPoints = appendHeightFilteredRawNearPoints(cloudOut, rawNearCloud, rawNearLocalToMapPtr);
+            const size_t cornerFeaturePoints = appendFeaturePoints(cloudOut, laserCloudCornerLastDS);
+            const size_t surfFeaturePoints = appendFeaturePoints(cloudOut, laserCloudSurfLastDS);
+            const size_t featurePoints = cornerFeaturePoints + surfFeaturePoints;
             const auto appendEndTime = std::chrono::steady_clock::now();
 
             const auto publishStartTime = std::chrono::steady_clock::now();
@@ -1924,7 +2023,7 @@ public:
                 elapsedMilliseconds(appendStartTime, appendEndTime),
                 elapsedMilliseconds(publishStartTime, publishEndTime),
                 elapsedMilliseconds(totalStartTime, publishEndTime),
-                rawNearCloud->size(),
+                rawNearPoints,
                 featurePoints,
                 cloudOut->size());
         }
@@ -1944,7 +2043,8 @@ int main(int argc, char** argv)
     rclcpp::init(argc, argv);
 
     rclcpp::NodeOptions options;
-    options.use_intra_process_comms(true);
+    // TransformListenerが購読する/tf_staticはtransient local QoSなので、intra-processとは併用しない。
+    options.use_intra_process_comms(false);
     rclcpp::executors::SingleThreadedExecutor exec;
 
     auto MO = std::make_shared<mapOptimization>(options);

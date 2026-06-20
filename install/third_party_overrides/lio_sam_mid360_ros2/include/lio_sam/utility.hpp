@@ -166,6 +166,8 @@ public:
     bool hybridRegisteredCloudEnabled;
     float hybridRegisteredCloudRawNearRange;
     float hybridRegisteredCloudRawNearLeafSize;
+    bool hybridRegisteredCloudRawUpperMapZLimitEnabled;
+    float hybridRegisteredCloudRawUpperMapZMax;
     string hybridRegisteredCloudTopic;
     bool publishDeskewedCloud;
     bool publishFeatureClouds;
@@ -393,13 +395,17 @@ public:
         get_parameter("mappingCornerLeafSize", mappingCornerLeafSize);
         declare_parameter("mappingSurfLeafSize", 0.4);
         get_parameter("mappingSurfLeafSize", mappingSurfLeafSize);
-        // AI_SHIP_ROBOT_BEGIN: 近傍詳細点群とSLAM用粗点群を合成したPCD map保存用hybrid点群の設定を読む。
+        // AI_SHIP_ROBOT_BEGIN: 近傍raw詳細点群とSLAM用粗点群を合成したPCD map保存用hybrid点群の設定を読む。
         declare_parameter("hybridRegisteredCloudEnabled", true);
         get_parameter("hybridRegisteredCloudEnabled", hybridRegisteredCloudEnabled);
         declare_parameter("hybridRegisteredCloudRawNearRange", 3.0);
         get_parameter("hybridRegisteredCloudRawNearRange", hybridRegisteredCloudRawNearRange);
         declare_parameter("hybridRegisteredCloudRawNearLeafSize", 0.01);
         get_parameter("hybridRegisteredCloudRawNearLeafSize", hybridRegisteredCloudRawNearLeafSize);
+        declare_parameter("hybridRegisteredCloudRawUpperMapZLimitEnabled", true);
+        get_parameter("hybridRegisteredCloudRawUpperMapZLimitEnabled", hybridRegisteredCloudRawUpperMapZLimitEnabled);
+        declare_parameter("hybridRegisteredCloudRawUpperMapZMax", 1.5);
+        get_parameter("hybridRegisteredCloudRawUpperMapZMax", hybridRegisteredCloudRawUpperMapZMax);
         declare_parameter("hybridRegisteredCloudTopic", "/lio_sam/mapping/cloud_registered_hybrid");
         get_parameter("hybridRegisteredCloudTopic", hybridRegisteredCloudTopic);
         declare_parameter("publishDeskewedCloud", false);
@@ -421,6 +427,11 @@ public:
         if (hybridRegisteredCloudRawNearRange < 0.0 || hybridRegisteredCloudRawNearLeafSize < 0.0)
         {
             RCLCPP_ERROR(get_logger(), "Invalid hybrid registered cloud range or leaf size: must be non-negative.");
+            rclcpp::shutdown();
+        }
+        if (!std::isfinite(hybridRegisteredCloudRawUpperMapZMax))
+        {
+            RCLCPP_ERROR(get_logger(), "Invalid hybrid raw upper map Z max: must be finite.");
             rclcpp::shutdown();
         }
         // AI_SHIP_ROBOT_END

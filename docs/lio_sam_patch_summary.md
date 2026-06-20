@@ -74,7 +74,7 @@
 | deskew切替 | `imu_angular`, `odom_interpolation`, `off` を選択可能化 | `utility.hpp`, `imageProjection.cpp`, config |
 | QoS強化 | LiDARとCloudInfoのqueue depthを増やし、CloudInfoをreliable化 | `utility.hpp`, `imageProjection.cpp`, `featureExtraction.cpp`, `mapOptmization.cpp` |
 | TF/frame整理 | `odometryFrame -> lidarFrame` をLIO-SAM推定TFにし、base接続はproject側static TFに分離 | `mapOptmization.cpp`, `imuPreintegration.cpp`, launch/config |
-| hybrid map保存 | 近傍詳細点群を内部topicで直接渡し、SLAM用粗点群とcloud_registered_hybridとして外部map builderへ渡す | `CloudInfo.msg`, `imageProjection.cpp`, `mapOptmization.cpp`, `pcd_map_saver_node.cpp` |
+| hybrid map保存 | 近傍raw詳細点群だけにmapFrame上側高さ制限を適用し、SLAM用粗点群全体とcloud_registered_hybridとして外部map builderへ渡す | `CloudInfo.msg`, `imageProjection.cpp`, `mapOptmization.cpp`, `pcd_map_saver_node.cpp` |
 
 ## 追加パラメータ
 
@@ -97,8 +97,10 @@
 | `deskewMode` | scan内deskew方式 | `imu_angular` | `odom_interpolation` | `off` |
 | `maxPointOffsetTimeSec` | Livox `offset_time` 異常診断の上限秒 | `0.2` | `0.2` | `0.2` |
 | `hybridRegisteredCloudEnabled` | PCD map作成用hybrid local点群のpublish有効化 | `true` | `true` | `true` |
-| `hybridRegisteredCloudRawNearRange` | hybrid点群でraw deskew済み近傍点を優先する距離 | `3.0` | `3.0` | `3.0` |
-| `hybridRegisteredCloudRawNearLeafSize` | hybrid点群の近傍raw成分に適用するVoxelGrid leaf size。`0.0`で無効 | `0.01` | `0.01` | `0.01` |
+| `hybridRegisteredCloudRawNearRange` | hybrid点群でraw deskew済み近傍点を優先するLiDAR距離 | `3.0` | `3.0` | `3.0` |
+| `hybridRegisteredCloudRawNearLeafSize` | hybrid点群のraw詳細成分に適用するVoxelGrid leaf size。`0.0`で無効 | `0.01` | `0.01` | `0.01` |
+| `hybridRegisteredCloudRawUpperMapZLimitEnabled` | 近傍raw詳細点群にmapFrame Z上限を適用するか | `true` | `true` | `true` |
+| `hybridRegisteredCloudRawUpperMapZMax` | 近傍raw詳細点群から除外するmapFrame Z上限 | `1.5` | `1.5` | `1.5` |
 | `hybridRegisteredCloudTopic` | PCD map作成用hybrid点群のpublish topic | `/lio_sam/mapping/cloud_registered_hybrid` | 同左 | 同左 |
 | `imageProjectionMaxScansPerTimer` | backlog時に1 timer callback内で処理する最大scan数 | `5` | `5` | `5` |
 | `imageProjectionBacklogLogThreshold` | backlog警告と早期処理時間ログを出すqueue長 | `10` | `10` | `10` |
@@ -265,17 +267,17 @@ scan開始時刻の補間poseは、`CloudInfo.initial_guess_*` に格納してma
 
 点群本体のsensor入力はbest effortのまま維持しつつ、LIO-SAM内部pipelineの制御情報であるCloudInfoは欠落しにくくする方針である。
 
-### 近傍raw deskew済み点群
+### 近傍raw deskew済み点群とmapFrame高さ制限
 
-`imageProjection.cpp` では `downsampleRate` 判定より前に `hybridRegisteredCloudRawNearRange` 内の点をdeskewし、SLAM用間引きとは別にhybrid点群の近傍詳細成分を保持する。
+`imageProjection.cpp` では `downsampleRate` 判定より前に `hybridRegisteredCloudRawNearRange` 以内のraw詳細点をdeskewし、SLAM用間引きとは別にhybrid点群の詳細成分を保持する。下側点を `lidarMaxRange` まで広げる処理は行わず、raw詳細成分の候補は従来通りLiDAR近傍だけに限定する。
 
-近傍raw成分は `CloudInfo.cloud_deskewed_raw_near` に格納し、`featureExtraction` を経由して `mapOptmization.cpp` へ渡す。密度が高くなりやすいため、`hybridRegisteredCloudRawNearLeafSize` のVoxelGridをCloudInfo格納前に適用する。既定は `0.01m` で、`0.0` を指定すると無効化できる。
+raw詳細成分は `CloudInfo.cloud_deskewed_raw_near` に格納し、`featureExtraction` を経由して `mapOptmization.cpp` へ渡す。密度が高くなりやすいため、`hybridRegisteredCloudRawNearLeafSize` のVoxelGridをCloudInfo格納前に適用する。既定は `0.01m` で、`0.0` を指定すると無効化できる。
 
-`lio_sam.launch.py` では同じ値を `pcd_map_saver_node` の `submap_voxel_leaf_size` に渡し、全scanをkeyframe区間submapへ合成するときも近傍点群の厚さを消しすぎない粒度で重複点を間引く。
+`lio_sam.launch.py` では同じ値を `pcd_map_saver_node` の `submap_voxel_leaf_size` に渡し、全scanをkeyframe区間submapへ合成するときもraw詳細点群の厚さを消しすぎない粒度で重複点を間引く。
 
-`mapOptmization.cpp` では近傍raw成分に、SLAMで使ったdownsample済みcorner/surface feature点群の遠方成分を合成し、`cloud_registered_hybrid` としてpublishする。
+`mapOptmization.cpp` ではraw詳細成分を `transformTobeMapped` と `mapFrame <- odometryFrame` TFでmapFrameへ写し、`hybridRegisteredCloudRawUpperMapZMax` を超える近傍raw点だけを追加除外する。その後、SLAMで使ったdownsample済みcorner/surface feature点群は近傍/遠方を問わず全体を合成し、`cloud_registered_hybrid` としてpublishする。
 
-`CloudInfo` 内で近傍raw成分とfeature点群を同じstampのmessageとして渡すため、別topic間の到着順に依存せず `cloud_registered_hybrid` を生成できる。
+`CloudInfo` 内でraw詳細成分とfeature点群を同じstampのmessageとして渡すため、別topic間の到着順に依存せず `cloud_registered_hybrid` を生成できる。
 
 `cloud_registered_hybrid`、`mapping/odometry`、`mapping/path` はmap saverに必要なため維持する。一方で、`map_global`、`map_local`、`trajectory`、`cloud_registered`、`cloud_registered_raw`、loop closure可視化topicは既定で外部publishしない。RViz確認が必要な場合だけ対応する `publish*` パラメータを `true` にする。
 
@@ -287,7 +289,7 @@ scan開始時刻の補間poseは、`CloudInfo.initial_guess_*` に格納してma
 
 特徴抽出アルゴリズム自体は大きく変更していない。主な目的は、rosbag再生や高頻度入力時にCloudInfoだけが欠落し、後段のmapOptimizationがscanを受け取れなくなる状態を避けることである。
 
-`publishFeatureCloud()` では全点deskew済み点群 `cloud_deskewed` だけを空にしてからpublishする。近傍詳細点群 `cloud_deskewed_raw_near` は保持し、corner/surface feature点群と同じCloudInfoでmapOptimizationへ渡す。
+`publishFeatureCloud()` では全点deskew済み点群 `cloud_deskewed` だけを空にしてからpublishする。近傍raw詳細点群 `cloud_deskewed_raw_near` は保持し、corner/surface feature点群と同じCloudInfoでmapOptimizationへ渡す。
 
 ## `mapOptmization.cpp`
 
@@ -484,7 +486,7 @@ simulationでは理想LiDAR点群や低速検証を前提に、既定の `deskew
 | `lio_sam_transformFusion` | `odometry/imu` | 外部可視化/利用先 | LiDAR補正を反映したIMU odometry |
 | `lio_sam_mapOptimization` | `lio_sam/mapping/odometry` | 外部可視化/利用先 | scan matching後のglobal odometry |
 | `lio_sam_mapOptimization` | `lio_sam/mapping/cloud_registered` | RViz / 外部利用先 | local frameのdownsample済みfeature点群 |
-| `lio_sam_mapOptimization` | `lio_sam/mapping/cloud_registered_hybrid` | `pcd_map_saver_node` | local frameの近傍詳細点群 + SLAM用粗点群 |
+| `lio_sam_mapOptimization` | `lio_sam/mapping/cloud_registered_hybrid` | `pcd_map_saver_node` | local frameのmapFrame高さ制限後近傍raw詳細点群 + SLAM用粗点群全体 |
 | `lio_sam_mapOptimization` | `lio_sam/mapping/odometry` | `pcd_map_saver_node` | 各scan点群をkeyframe local submapへ合成するためのscan pose |
 | `lio_sam_mapOptimization` | `lio_sam/mapping/path` | `pcd_map_saver_node` | keyframe pose列。loop closure後は補正済みpose列として再publishされる |
 

@@ -68,9 +68,12 @@
     mappingCornerLeafSize: 0.1
     mappingSurfLeafSize: 0.2
 
+    # LiDAR近傍raw詳細点群はmapFrameの高さ上限で天井側だけ追加除外できるようにする。
     hybridRegisteredCloudEnabled: true
     hybridRegisteredCloudRawNearRange: 3.0
     hybridRegisteredCloudRawNearLeafSize: 0.01
+    hybridRegisteredCloudRawUpperMapZLimitEnabled: true
+    hybridRegisteredCloudRawUpperMapZMax: 1.5
     hybridRegisteredCloudTopic: /lio_sam/mapping/cloud_registered_hybrid
 
     publishDeskewedCloud: false
