@@ -159,6 +159,7 @@ private:
     bool odomDeskewFlag;
     // AI_SHIP_ROBOT_BEGIN: odom補間deskewと初回scan publish待機を明示的な状態で管理する。
     bool odomStartAvailable;
+    bool odomInterpolationInitialized = false;
     bool initialCloudWithoutOdomPublished = false;
     Eigen::Affine3f transStartOdom;
     // AI_SHIP_ROBOT_END
@@ -804,6 +805,7 @@ public:
     bool cacheMultiLidarScanGroup(const lio_sam::MatchedLidarScanGroup& scanGroup)
     {
         cloudHeader = scanGroup.header;
+        // multi-LiDAR groupのheader.stampは最古scan stampで、点時刻はこのgroup開始基準に揃える。
         timeScanCur = stamp2Sec(cloudHeader.stamp);
         if (cloudHeader.frame_id.empty())
         {
@@ -838,12 +840,12 @@ public:
         }
         timeScanEnd = timeScanCur + std::max(0.0, maxRelativeTimeSec);
 
-        // LiDAR間stamp差を含めた相対時刻がdeskew範囲外なら、時刻設定の不整合をログで追えるようにする。
+        // group開始基準の相対時刻がdeskew範囲外なら、時刻設定の不整合をログで追えるようにする。
         if (unexpectedOffsetTime)
         {
             RCLCPP_WARN_THROTTLE(
                 get_logger(), *get_clock(), 2000,
-                "Unexpected multi-LiDAR relative point time: scan_start=%.6f scan_end=%.6f max_allowed=%.6f",
+                "Unexpected multi-LiDAR relative point time from group start: scan_start=%.6f scan_end=%.6f max_allowed=%.6f",
                 timeScanCur, timeScanEnd, maxPointOffsetTimeSec);
         }
 
@@ -1085,17 +1087,28 @@ public:
 
         if (deskewMode != "off" && useImuPreintegrationInitialGuess && !cloudInfo.odom_available)
         {
-            if (!initialCloudWithoutOdomPublished)
+            if (odomQueue.empty())
             {
-                initialCloudWithoutOdomPublished = true;
-                RCLCPP_INFO(
-                    get_logger(),
-                    "Publish initial scan without IMU preintegration odometry to initialize mapping: scan_start=%.6f",
-                    timeScanCur);
+                // IMU preintegration odometryはmapping補正後に始まるため、初期化中だけodomなしscanを通す。
+                if (!initialCloudWithoutOdomPublished)
+                {
+                    initialCloudWithoutOdomPublished = true;
+                    RCLCPP_INFO(
+                        get_logger(),
+                        "Publish initial scan without IMU preintegration odometry to initialize mapping: scan_start=%.6f",
+                        timeScanCur);
+                }
+                else
+                {
+                    RCLCPP_INFO_THROTTLE(
+                        get_logger(), *get_clock(), 1000,
+                        "Publish scan without IMU preintegration odometry while waiting for first odometry: scan_start=%.6f",
+                        timeScanCur);
+                }
                 return DeskewStatus::Ready;
             }
 
-            if (odomQueue.empty() || stamp2Sec(odomQueue.back().header.stamp) < timeScanCur)
+            if (stamp2Sec(odomQueue.back().header.stamp) < timeScanCur)
             {
                 RCLCPP_INFO_THROTTLE(
                     get_logger(), *get_clock(), 1000,
@@ -1105,6 +1118,15 @@ public:
             }
             if (stamp2Sec(odomQueue.front().header.stamp) > timeScanCur)
             {
+                // 起動直後はodom生成開始前のscanがqueueに残るため、補間成立まではdropせずmappingへ流す。
+                if (!odomInterpolationInitialized)
+                {
+                    RCLCPP_INFO_THROTTLE(
+                        get_logger(), *get_clock(), 1000,
+                        "Publish scan without IMU preintegration odometry until odometry catches up: scan_start=%.6f first_odom=%.6f",
+                        timeScanCur, stamp2Sec(odomQueue.front().header.stamp));
+                    return DeskewStatus::Ready;
+                }
                 lastDropReason = "start_odometry_unavailable";
                 RCLCPP_WARN(
                     get_logger(),
@@ -1269,6 +1291,7 @@ public:
         cloudInfo.initial_guess_yaw = yaw;
         cloudInfo.odom_available = true;
         odomStartAvailable = true;
+        odomInterpolationInitialized = true;
         transStartOdom = odomMsgToAffine(startOdomMsg);
 
         nav_msgs::msg::Odometry endOdomMsg;

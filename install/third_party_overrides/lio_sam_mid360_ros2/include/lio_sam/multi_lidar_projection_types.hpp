@@ -48,6 +48,7 @@ struct MatchedLidarScanGroup
 {
     std_msgs::msg::Header header;
     rclcpp::Time reference_stamp;
+    rclcpp::Time start_stamp;
     std::vector<MatchedLidarScan> scans;
     std::size_t point_count{0U};
 };

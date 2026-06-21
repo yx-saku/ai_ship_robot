@@ -79,6 +79,15 @@ def generate_launch_description():
         ],
     )
 
+    # 自己点群はSLAM投入前に除去し、LIO-SAM本体にはフィルタ後CustomMsgだけを入力する。
+    livox_custommsg_self_filter = Node(
+        package="ai_ship_robot_slam",
+        executable="livox_custommsg_self_filter_node",
+        name="livox_custommsg_self_filter_node",
+        output="screen",
+        parameters=[fusion_config, {"use_sim_time": use_sim_time}],
+    )
+
     # LIO-SAM本体はthird_party underlayのpackageを直接起動し、設定だけをこのproject packageで管理する。
     imu_preintegration = Node(
         package=lio_sam_package,
@@ -192,6 +201,7 @@ def generate_launch_description():
                     [FindPackageShare("ai_ship_robot_slam"), "rviz", "lio_sam.rviz"]
                 ),
             ),
+            livox_custommsg_self_filter,
             slam_reference_lidar_static_tf,
             imu_preintegration,
             image_projection,

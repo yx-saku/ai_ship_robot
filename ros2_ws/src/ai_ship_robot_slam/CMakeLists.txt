@@ -25,6 +25,17 @@ ament_target_dependencies(
   sensor_msgs
 )
 
+add_executable(livox_custommsg_self_filter_node src/livox_custommsg_self_filter_node.cpp)
+target_compile_features(livox_custommsg_self_filter_node PUBLIC cxx_std_17)
+ament_target_dependencies(
+  livox_custommsg_self_filter_node
+  geometry_msgs
+  livox_ros_driver2
+  rclcpp
+  tf2
+  tf2_ros
+)
+
 add_executable(slam_reference_lidar_static_tf_node src/slam_reference_lidar_static_tf_node.cpp)
 target_compile_features(slam_reference_lidar_static_tf_node PUBLIC cxx_std_17)
 ament_target_dependencies(
@@ -52,6 +63,7 @@ ament_target_dependencies(
 
 install(
   TARGETS
+    livox_custommsg_self_filter_node
     livox_custommsg_to_pointcloud2_node
     pcd_map_saver_node
     slam_reference_lidar_static_tf_node

@@ -62,8 +62,7 @@ public:
             return false;
 
         // 基準scanのstampで各LiDARの最近傍scanを選び、欠落LiDARは今回だけ外す。
-        group->header = reference_cloud->header;
-        group->reference_stamp = rclcpp::Time(reference_cloud->header.stamp);
+        const rclcpp::Time reference_stamp(reference_cloud->header.stamp);
         group->scans.clear();
         group->point_count = 0U;
         group->scans.reserve(specs_.size());
@@ -76,17 +75,41 @@ public:
                 continue;
             }
 
-            const auto matched_cloud = findBestMatchingCloud(spec.topic, group->reference_stamp);
+            const auto matched_cloud = findBestMatchingCloud(spec.topic, reference_stamp);
             if (!matched_cloud.has_value())
                 continue;
 
-            const auto stamp_delta_sec =
-                (rclcpp::Time(matched_cloud.value()->header.stamp) - group->reference_stamp).seconds();
-            group->scans.push_back(MatchedLidarScan{spec, matched_cloud.value(), stamp_delta_sec, false});
+            group->scans.push_back(MatchedLidarScan{spec, matched_cloud.value(), 0.0, false});
             group->point_count += matched_cloud.value()->points.size();
         }
 
-        return !group->scans.empty();
+        if (group->scans.empty())
+            return false;
+
+        // scan group開始はマッチ済みLiDAR群の最古stampにし、負の点相対時刻を発生させない。
+        rclcpp::Time group_start_stamp(group->scans.front().cloud->header.stamp);
+        for (const auto& scan : group->scans)
+        {
+            if (scan.cloud == nullptr)
+                continue;
+            const rclcpp::Time scan_stamp(scan.cloud->header.stamp);
+            if (scan_stamp < group_start_stamp)
+                group_start_stamp = scan_stamp;
+        }
+
+        // headerのframeは基準LiDARのまま維持し、stampだけをgroup開始基準へ切り替える。
+        group->header = reference_cloud->header;
+        group->header.stamp = group_start_stamp;
+        group->reference_stamp = reference_stamp;
+        group->start_stamp = group_start_stamp;
+        for (auto& scan : group->scans)
+        {
+            if (scan.cloud == nullptr)
+                continue;
+            scan.stamp_delta_sec = (rclcpp::Time(scan.cloud->header.stamp) - group_start_stamp).seconds();
+        }
+
+        return true;
     }
 
     void markProcessed(const MatchedLidarScanGroup& group)

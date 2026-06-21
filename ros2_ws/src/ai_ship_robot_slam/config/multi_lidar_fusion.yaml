@@ -1,19 +1,66 @@
 /**:
   ros__parameters:
-    # 基準TF生成は、LIO-SAM imageProjectionと同じ基準LiDAR topicを参照する。
-    reference_custom_topic: /lidar1/livox/lidar
+    # 基準TF生成は、LIO-SAM imageProjectionと同じフィルタ後の基準LiDAR topicを参照する。
+    reference_custom_topic: /lidar1/livox/lidar_filtered
+
+livox_custommsg_self_filter_node:
+  ros__parameters:
+    # Raw Livox CustomMsgを購読し、自己点群除去後のCustomMsgをSLAM入力へ渡す。
+    input_topics:
+      - /lidar1/livox/lidar
+      - /lidar2/livox/lidar
+    output_topics:
+      - /lidar1/livox/lidar_filtered
+      - /lidar2/livox/lidar_filtered
+    filter_frame: base_footprint
+    margin: 0.03
+    tf_timeout_sec: 0.1
+    drop_on_tf_failure: true
+    # boxesは6値で1boxを表す: [x_min, x_max, y_min, y_max, z_min, z_max]
+    boxes:
+      # 台車ロボット本体（車輪なども含む）
+      - -0.360
+      - 0.360
+      - -0.420
+      - 0.420
+      - 0.000
+      - 0.400
+
+      # LiDAR 1
+      - 0.350
+      - 0.430
+      - -0.045
+      - 0.045
+      - 0.235
+      - 0.330
+
+      # LiDAR 2
+      - 0.350
+      - 0.430
+      - -0.045
+      - 0.045
+      - 0.165
+      - 0.260
+
+      # 溶接ロボット（アーム含む全体）
+      - -0.310
+      - 1.250
+      - -0.310
+      - 0.310
+      - 0.400
+      - 1.250
 
 lio_sam_imageProjection:
   ros__parameters:
-    # LIO-SAM内で各LiDARのCustomMsgを直接同期し、中間fusion topicは生成しない。
+    # 自己点群除去済みのCustomMsgをLIO-SAM内で直接同期し、中間fusion topicは生成しない。
     input_custom_topics:
-      - /lidar1/livox/lidar
-      - /lidar2/livox/lidar
+      - /lidar1/livox/lidar_filtered
+      - /lidar2/livox/lidar_filtered
     # 各LiDARをLIO-SAMのrange image上で別ring帯域に載せ、後続LiDARの遠方点欠落を防ぐ。
     input_ring_offsets:
       - 0
       - 4
-    reference_custom_topic: /lidar1/livox/lidar
+    reference_custom_topic: /lidar1/livox/lidar_filtered
     max_stamp_delta_sec: 0.07
     tf_timeout_sec: 0.1
     timestamp_unit_scale: 1.0e-9

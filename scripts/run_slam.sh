@@ -29,6 +29,14 @@ DEFAULT_BAG_PLAY_TOPICS=(
   /lidar4/livox/lidar
   /lidar4/livox/imu
 )
+# SLAM収録の既定topicは後段解析に必要な出力に絞り、rosbag肥大化とDDS負荷を抑える。
+DEFAULT_RECORD_BAG_TOPICS=(
+  /lio_sam/mapping/cloud_registered_hybrid
+  /lio_sam/mapping/odometry
+  /lio_sam/mapping/path
+  /clock
+  /tf_static
+)
 AUTO_STOP_AFTER_BAG_PLAY_SECONDS="${AUTO_STOP_AFTER_BAG_PLAY_SECONDS:-30}"
 WAIT_FOR_CLOUD_QUEUE_DRAIN_TIMEOUT_SECONDS="${WAIT_FOR_CLOUD_QUEUE_DRAIN_TIMEOUT_SECONDS:-300}"
 WAIT_FOR_CLOUD_QUEUE_DRAIN_POLL_SECONDS="${WAIT_FOR_CLOUD_QUEUE_DRAIN_POLL_SECONDS:-1}"
@@ -43,9 +51,10 @@ Usage: bash scripts/run_slam.sh [OPTIONS]
 
 Options:
   --sim              Launch Gazebo simulation and LIO-SAM together.
-  --record-bag       Record all topics during SLAM execution.
+  --record-bag       Record default SLAM output topics during SLAM execution.
   --bag-output PATH  Set rosbag output directory or prefix.
-  --bag-topics CSV   Record only the given comma-separated topics. Default records all topics.
+  --bag-topics CSV   Record only the given comma-separated topics.
+                     Default: /lio_sam/mapping/cloud_registered_hybrid,/lio_sam/mapping/odometry,/lio_sam/mapping/path,/clock,/tf_static
   --bag-play [PATH]  Play a recorded rosbag and run LIO-SAM without Gazebo.
                      If PATH is omitted, the latest outputs/rosbag2/sim_* bag is used.
                      Only LiDAR/IMU topics and /tf_static are replayed.
@@ -297,18 +306,13 @@ start_rosbag_record() {
     record_cmd+=(--use-sim-time)
   fi
 
-  # topic無指定時は明示的に全topic記録へ切り替え、入力topicの後追い発見もrecord対象にする。
+  # topic無指定時は既定のSLAM出力だけを記録し、不要な入力topicや大容量debug topicを避ける。
   if [[ "${#topics[@]}" -eq 0 ]]; then
-    record_cmd+=(--all)
-  else
-    record_cmd+=("${topics[@]}")
+    topics=("${DEFAULT_RECORD_BAG_TOPICS[@]}")
   fi
+  record_cmd+=("${topics[@]}")
   echo "Rosbag output: ${output_path}" >&2
-  if [[ "${#topics[@]}" -eq 0 ]]; then
-    echo "Recording rosbag topics: all topics" >&2
-  else
-    echo "Recording rosbag topics: ${topics[*]}" >&2
-  fi
+  echo "Recording rosbag topics: ${topics[*]}" >&2
   "${record_cmd[@]}" &
   ROSBAG_PID=$!
 }
@@ -768,7 +772,7 @@ run_recorded_lio_sam() {
   local bag_output="$1"
   local slam_args=()
 
-  # 単体SLAM収録では入力推定に依存せず、観測できるtopicを全て保存する。
+  # 単体SLAM収録では既定topicを中央のrecord処理に委ね、CLI指定時だけ上書きする。
   start_rosbag_record "${bag_output}" false
   mapfile -t slam_args < <(build_passthrough_args)
   run_slam_launch "${slam_args[@]}"
@@ -1132,7 +1136,7 @@ run_sim_lio_sam() {
   fi
   if [[ "${record_bag}" == "true" ]]; then
     ros2 launch ai_ship_robot_gazebo sim_lio_sam.launch.py "${launch_args[@]}" &
-    # 明示指定があればそのtopicだけを記録し、未指定時は全topicを記録する。
+    # 明示指定があればそのtopicだけを記録し、未指定時は既定topicを記録する。
     start_rosbag_record "${bag_output}" true "${bag_topics[@]}"
     wait
     return $?

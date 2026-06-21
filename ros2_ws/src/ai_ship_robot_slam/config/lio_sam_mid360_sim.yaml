@@ -48,7 +48,7 @@
     useImuTranslationInitialGuess: false
     useImuRotationInitialGuess: true
 
-    deskewMode: "off"
+    deskewMode: "odom_interpolation"
     maxPointOffsetTimeSec: 0.2
 
     extrinsicTrans: [0.011, 0.02329, -0.04412]

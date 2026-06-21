@@ -107,7 +107,7 @@ bash scripts/run_slam.sh \
 
 出力先の既定値は `outputs/rosbag2/slam_<timestamp>` です。
 
-性能検証や通常保存では `/lio_sam/mapping/cloud_registered_hybrid,/lio_sam/mapping/odometry,/lio_sam/mapping/path,/clock,/tf_static` のように必要topicを明示してください。
+`--record-bag` のtopic未指定時は、既定で `/lio_sam/mapping/cloud_registered_hybrid,/lio_sam/mapping/odometry,/lio_sam/mapping/path,/clock,/tf_static` だけを記録します。記録対象を変える場合は `--bag-topics` で明示してください。
 
 記録済みシミュレーション bag を再生して LIO-SAM を起動する例です。
 
