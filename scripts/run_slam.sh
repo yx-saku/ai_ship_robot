@@ -138,6 +138,17 @@ has_config_arg() {
   return 1
 }
 
+map_saver_requested() {
+  local arg=""
+
+  for arg in "${FORWARD_ARGS[@]}"; do
+    if [[ "${arg}" == "--map" ]]; then
+      return 0
+    fi
+  done
+  return 1
+}
+
 require_value() {
   local option="$1"
   local value="${2:-}"

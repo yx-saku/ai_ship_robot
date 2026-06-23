@@ -182,7 +182,7 @@ def generate_launch_description():
             DeclareLaunchArgument("gui", default_value="true"),
             DeclareLaunchArgument("verbose", default_value="false"),
             DeclareLaunchArgument("lite", default_value="false"),
-            DeclareLaunchArgument("lidar_pattern_file", default_value="lidar_pattern_dual_front_updown.urdf.xacro"),
+            DeclareLaunchArgument("lidar_pattern_file", default_value="lidar_pattern_dual_opposit.urdf.xacro"),
             DeclareLaunchArgument("half_lidar_resolution", default_value="false"),
             DeclareLaunchArgument("quarter_lidar_resolution", default_value="false"),
             DeclareLaunchArgument("publish_odom_tf", default_value="true"),

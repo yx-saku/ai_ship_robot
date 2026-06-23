@@ -20,6 +20,7 @@ PROCESS_STOP_GRACE_SECONDS="15"
 PROCESS_STOP_TERM_SECONDS="5"
 ROSBAG_STOP_GRACE_SECONDS="60"
 TEMP_WORLD_FILE=""
+GAZEBO_MODEL_DIR="${SIM_ROOT}/ros2_ws/install/ai_ship_robot_description/share/gazebo_models"
 
 print_available_lidar_patterns() {
   local indent="${1:-}"
@@ -233,6 +234,20 @@ source_workspace_environment() {
   if [[ "${had_nounset}" -eq 1 ]]; then
     set -u
   fi
+}
+
+append_gazebo_model_path() {
+  local model_dir="$1"
+
+  if [[ ! -d "${model_dir}" ]]; then
+    return 0
+  fi
+
+  # Gazebo Classic が model://ai_ship_robot_description を解決できるよう起動直前の環境にも反映する。
+  case ":${GAZEBO_MODEL_PATH:-}:" in
+    *":${model_dir}:"*) ;;
+    *) export GAZEBO_MODEL_PATH="${model_dir}${GAZEBO_MODEL_PATH:+:${GAZEBO_MODEL_PATH}}" ;;
+  esac
 }
 
 source_overlay_if_current() {
@@ -834,6 +849,7 @@ if [[ ! -f "${SIM_ROOT}/ros2_ws/install/setup.bash" ]]; then
 fi
 
 source_workspace_environment
+append_gazebo_model_path "${GAZEBO_MODEL_DIR}"
 
 if [[ "${RECORD_BAG}" == "true" ]]; then
   if [[ -z "${BAG_OUTPUT}" ]]; then
@@ -922,4 +938,5 @@ if [[ "${USE_RVIZ}" == "true" ]]; then
   exit "${simulation_status}"
 fi
 
+append_gazebo_model_path "${GAZEBO_MODEL_DIR}"
 ros2 launch ai_ship_robot_gazebo simulation.launch.py "${LAUNCH_ARGS[@]}"
