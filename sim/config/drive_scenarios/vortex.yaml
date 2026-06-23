@@ -1,7 +1,8 @@
 vars:
   pi: 3.14159265359
-  stride: 1.0
-  forward_speed: 1.0
+  stride: 2.0
+  yaw_duration: 2.0
+  forward_speed: 0.5
   turn_speed: ${pi / 2}
 
 steps:
@@ -10,14 +11,14 @@ steps:
       - type: stop
 
   - repeat:
-      count: 10
+      count: 5
       steps:
         - duration_sec: ${stride}
           commands:
             - type: forward
               speed: ${forward_speed}
 
-        - duration_sec: 1.0
+        - duration_sec: ${yaw_duration}
           commands:
             - type: yaw_left
               speed: ${turn_speed}
@@ -27,13 +28,13 @@ steps:
             - type: forward
               speed: ${forward_speed}
 
-        - duration_sec: 1.0
+        - duration_sec: ${yaw_duration}
           commands:
             - type: yaw_left
               speed: ${turn_speed}
 
         - set:
-            stride: ${stride + 1.0}
+            stride: ${stride + 2.0}
         
   - duration_sec: 5.0
     commands:

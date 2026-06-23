@@ -28,6 +28,15 @@
 - 有名で実績のあるライブラリがある場合は、積極的に採用を検討する
 - 少しずつ検証しながら開発を進める
 - 調査等で必要になる場合、調査用のツールやスクリプトをdev/agent_toolsディレクトリ内に作成してよい。その際、使用目的をdev/agent_tools/README.mdに記載すること
+- ros2 daemonがエラーを出しやすい、下記のようなgraph確認系のros2コマンドを実行する際は--no-daemonオプションを付加すること
+  - topic list
+  - node list
+  - service list
+  - action list
+  - topic info
+  - node info
+  - service info
+  - action info
 
 ### フォルダ構成の概要
 - `ros2_ws/`: ros2パッケージのワークスペース
