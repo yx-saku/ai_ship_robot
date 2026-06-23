@@ -25,6 +25,7 @@
 #include <exception>
 #include <limits>
 #include <memory>
+#include <map>
 #include <optional>
 #include <stdexcept>
 #include <string>
@@ -35,6 +36,8 @@
 #include <geometry_msgs/msg/transform_stamped.hpp>
 #include <livox_ros_driver2/msg/custom_msg.hpp>
 #include <rclcpp/rclcpp.hpp>
+
+#include <algorithm>
 
 namespace ai_ship_robot_slam
 {
@@ -74,20 +77,21 @@ tf2::Transform transform_from_message(const geometry_msgs::msg::Transform & mess
 class LivoxCustomMsgSelfFilterNode : public rclcpp::Node
 {
 public:
-  LivoxCustomMsgSelfFilterNode()
-  : Node("livox_custommsg_self_filter_node"),
+  explicit LivoxCustomMsgSelfFilterNode(const rclcpp::NodeOptions & options = rclcpp::NodeOptions())
+  : Node("livox_custommsg_self_filter_node", options),
     tf_buffer_(get_clock()),
     tf_listener_(tf_buffer_, this)
   {
-    input_topics_ = declare_parameter<std::vector<std::string>>(
+    // override済みなら既存値を優先し、未指定時だけ既定値を宣言して使う。
+    input_topics_ = get_or_declare_parameter<std::vector<std::string>>(
       "input_topics", std::vector<std::string>{"/lidar1/livox/lidar", "/lidar2/livox/lidar"});
-    output_topics_ = declare_parameter<std::vector<std::string>>(
+    output_topics_ = get_or_declare_parameter<std::vector<std::string>>(
       "output_topics",
       std::vector<std::string>{"/lidar1/livox/lidar_filtered", "/lidar2/livox/lidar_filtered"});
-    filter_frame_ = declare_parameter<std::string>("filter_frame", "base_footprint");
-    margin_ = declare_parameter<double>("margin", 0.03);
-    tf_timeout_sec_ = declare_parameter<double>("tf_timeout_sec", 0.1);
-    drop_on_tf_failure_ = declare_parameter<bool>("drop_on_tf_failure", true);
+    filter_frame_ = get_or_declare_parameter<std::string>("filter_frame", "base_footprint");
+    margin_ = get_or_declare_parameter<double>("margin", 0.03);
+    tf_timeout_sec_ = get_or_declare_parameter<double>("tf_timeout_sec", 0.1);
+    drop_on_tf_failure_ = get_or_declare_parameter<bool>("drop_on_tf_failure", true);
 
     validate_common_parameters();
     boxes_ = load_boxes();
@@ -105,6 +109,16 @@ public:
 
 private:
   using CustomMsg = livox_ros_driver2::msg::CustomMsg;
+
+  template<typename T>
+  T get_or_declare_parameter(const std::string & name, const T & default_value)
+  {
+    T value{};
+    if (this->has_parameter(name) && this->get_parameter(name, value)) {
+      return value;
+    }
+    return this->declare_parameter<T>(name, default_value);
+  }
 
   struct Range
   {
@@ -162,24 +176,71 @@ private:
   std::vector<Box> load_boxes()
   {
     constexpr std::size_t values_per_box = 6;
-    const auto values = declare_parameter<std::vector<double>>("boxes", std::vector<double>{});
-    if (values.size() % values_per_box != 0) {
-      throw std::invalid_argument("boxes must have 6 values per box");
+    std::vector<std::pair<std::string, std::vector<double>>> named_values;
+    const auto listed = this->list_parameters({"boxes"}, 2U);
+
+    // YAMLのboxesネストを自動宣言済みパラメータとして受け取り、子要素だけを抽出する。
+    for (const auto & parameter_name : listed.names) {
+      if (parameter_name.rfind("boxes.", 0) != 0) {
+        continue;
+      }
+
+      rclcpp::Parameter parameter;
+      if (!this->get_parameter(parameter_name, parameter)) {
+        continue;
+      }
+
+      const auto box_name = parameter_name.substr(std::string("boxes.").size());
+      if (box_name.empty()) {
+        throw std::invalid_argument("boxes child parameter name must not be empty");
+      }
+
+      named_values.emplace_back(box_name, load_box_values(parameter));
     }
 
     std::vector<Box> boxes;
-    boxes.reserve(values.size() / values_per_box);
+    boxes.reserve(named_values.size());
 
-    // ROS 2標準パラメータで扱える1次元配列を、6値ごとにboxへ復元する。
-    for (std::size_t index = 0; index < values.size(); index += values_per_box) {
+    // 名前順に固定しておくと、設定ファイル編集後も起動ログと実処理順の追跡がしやすい。
+    std::sort(
+      named_values.begin(), named_values.end(),
+      [](const auto & lhs, const auto & rhs) { return lhs.first < rhs.first; });
+
+    // 各子パラメータの6値配列を既存のBox表現へ落とし込み、判定ロジックはそのまま再利用する。
+    for (const auto & [box_name, values] : named_values) {
+      if (values.size() != values_per_box) {
+        throw std::invalid_argument(
+                "boxes." + box_name + " must have 6 values: [x_min, x_max, y_min, y_max, z_min, z_max]");
+      }
       boxes.push_back(
         Box{
-          load_range(values[index + 0], values[index + 1], "x"),
-          load_range(values[index + 2], values[index + 3], "y"),
-          load_range(values[index + 4], values[index + 5], "z"),
+          load_range(values[0], values[1], "x"),
+          load_range(values[2], values[3], "y"),
+          load_range(values[4], values[5], "z"),
         });
     }
     return boxes;
+  }
+
+  std::vector<double> load_box_values(const rclcpp::Parameter & parameter) const
+  {
+    if (parameter.get_type() == rclcpp::ParameterType::PARAMETER_DOUBLE_ARRAY) {
+      return parameter.as_double_array();
+    }
+    if (parameter.get_type() == rclcpp::ParameterType::PARAMETER_INTEGER_ARRAY) {
+      std::vector<double> values;
+      const auto integer_values = parameter.as_integer_array();
+      values.reserve(integer_values.size());
+
+      // YAMLで整数だけを書いた場合も受け入れ、設定表現の自由度を保つ。
+      for (const auto integer_value : integer_values) {
+        values.push_back(static_cast<double>(integer_value));
+      }
+      return values;
+    }
+
+    throw std::invalid_argument(
+            parameter.get_name() + " must be an array of 6 numeric values");
   }
 
   Range load_range(const double min, const double max, const std::string & axis) const
@@ -321,7 +382,10 @@ int main(int argc, char ** argv)
 {
   rclcpp::init(argc, argv);
   try {
-    rclcpp::spin(std::make_shared<ai_ship_robot_slam::LivoxCustomMsgSelfFilterNode>());
+    rclcpp::NodeOptions options;
+    // multi_lidar_fusion.yamlのboxesネストを通常パラメータとして列挙できるようにする。
+    options.automatically_declare_parameters_from_overrides(true);
+    rclcpp::spin(std::make_shared<ai_ship_robot_slam::LivoxCustomMsgSelfFilterNode>(options));
   } catch (const std::exception & exc) {
     fprintf(stderr, "livox_custommsg_self_filter_node failed: %s\n", exc.what());
     rclcpp::shutdown();

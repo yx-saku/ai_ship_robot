@@ -174,7 +174,7 @@ def generate_launch_description():
             DeclareLaunchArgument("map_odometry_sync_tolerance_sec", default_value="0.25"),
             DeclareLaunchArgument("map_cloud_buffer_duration_sec", default_value="5.0"),
             DeclareLaunchArgument("hybrid_raw_near_leaf_size", default_value="0.01"),
-            DeclareLaunchArgument("map_global_voxel_leaf_size", default_value="0.0"),
+            DeclareLaunchArgument("map_global_voxel_leaf_size", default_value="0.01"),
             DeclareLaunchArgument(
                 "cloud_map_directory",
                 default_value=os.path.join(

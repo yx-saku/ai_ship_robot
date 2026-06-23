@@ -20,6 +20,7 @@ PROCESS_STOP_GRACE_SECONDS="15"
 PROCESS_STOP_TERM_SECONDS="5"
 ROSBAG_STOP_GRACE_SECONDS="60"
 TEMP_WORLD_FILE=""
+GAZEBO_MODEL_DIR="${SIM_ROOT}/ros2_ws/install/ai_ship_robot_description/share/gazebo_models"
 
 print_available_lidar_patterns() {
   local indent="${1:-}"
@@ -233,6 +234,20 @@ source_workspace_environment() {
   fi
 }
 
+append_gazebo_model_path() {
+  local model_dir="$1"
+
+  if [[ ! -d "${model_dir}" ]]; then
+    return 0
+  fi
+
+  # Gazebo Classic が model://ai_ship_robot_description を解決できるよう起動直前の環境にも反映する。
+  case ":${GAZEBO_MODEL_PATH:-}:" in
+    *":${model_dir}:"*) ;;
+    *) export GAZEBO_MODEL_PATH="${model_dir}${GAZEBO_MODEL_PATH:+:${GAZEBO_MODEL_PATH}}" ;;
+  esac
+}
+
 source_overlay_if_current() {
   local setup_file="$1"
 
@@ -348,6 +363,8 @@ wait_for_topic_subscribers() {
   local min_subscribers="$2"
   local timeout_seconds="$3"
   local start_seconds=${SECONDS}
+  local elapsed_seconds=0
+  local last_log_seconds=0
   local topic_info=""
   local subscription_count=""
 
@@ -356,13 +373,19 @@ wait_for_topic_subscribers() {
     ensure_simulation_process_running
 
     # 走行pluginの購読開始を確認し、シナリオ先頭のcmd_velがGazebo側で捨てられないようにする。
-    if topic_info="$(ros2 topic info "${topic}" 2>/dev/null)"; then
+    if topic_info="$(timeout 5s ros2 topic info --no-daemon --spin-time 2 "${topic}" 2>/dev/null)"; then
       subscription_count="$(awk '/Subscription count:/ { print $3; exit }' <<< "${topic_info}")"
       if [[ "${subscription_count}" =~ ^[0-9]+$ && "${subscription_count}" -ge "${min_subscribers}" ]]; then
         return 0
       fi
     fi
-    if awk -v elapsed="$((SECONDS - start_seconds))" -v timeout="${timeout_seconds}" 'BEGIN { exit(elapsed >= timeout ? 0 : 1) }'; then
+    elapsed_seconds=$((SECONDS - start_seconds))
+    # direct discoveryの取りこぼしと実subscriber不足を切り分けやすくするため、一定間隔で観測値を出す。
+    if [[ "${elapsed_seconds}" -ge $((last_log_seconds + 5)) ]]; then
+      echo "Still waiting for simulation topic subscriber: ${topic} observed=${subscription_count:-unknown} required=${min_subscribers}" >&2
+      last_log_seconds=${elapsed_seconds}
+    fi
+    if awk -v elapsed="${elapsed_seconds}" -v timeout="${timeout_seconds}" 'BEGIN { exit(elapsed >= timeout ? 0 : 1) }'; then
       echo "Timed out waiting for simulation topic subscriber: ${topic}" >&2
       exit 1
     fi
@@ -817,6 +840,7 @@ if [[ ! -f "${SIM_ROOT}/ros2_ws/install/setup.bash" ]]; then
 fi
 
 source_workspace_environment
+append_gazebo_model_path "${GAZEBO_MODEL_DIR}"
 
 if [[ "${RECORD_BAG}" == "true" ]]; then
   if [[ -z "${BAG_OUTPUT}" ]]; then
@@ -905,4 +929,5 @@ if [[ "${USE_RVIZ}" == "true" ]]; then
   exit "${simulation_status}"
 fi
 
+append_gazebo_model_path "${GAZEBO_MODEL_DIR}"
 ros2 launch ai_ship_robot_gazebo simulation.launch.py "${LAUNCH_ARGS[@]}"

@@ -3,9 +3,9 @@
   <xacro:arg name="half_lidar_resolution" default="false" />
   <xacro:arg name="quarter_lidar_resolution" default="false" />
 
-  <xacro:property name="mid360_depth" value="0.060" />
+  <xacro:property name="mid360_depth" value="0.065" />
   <xacro:property name="mid360_width" value="0.065" />
-  <xacro:property name="mid360_height" value="0.065" />
+  <xacro:property name="mid360_height" value="0.060" />
   <xacro:property name="mid360_samples" value="40000" />
   <xacro:property name="mid360_downsample" value="1" />
   <xacro:property name="mid360_half_downsample" value="2" />
@@ -94,9 +94,11 @@
   <xacro:macro name="mid360_lidar" params="prefix x y z roll pitch yaw enable_imu:=false imu_topic:=/imu/data">
     <link name="${prefix}_link">
       <visual>
-        <origin xyz="0 0 0" rpy="0 0 0" />
+        <!-- LiDAR配置用joint姿勢を変えずに済むよう、見た目の差し替えはvisual側だけで閉じ込める。 -->
+        <origin xyz="0 ${-mid360_width / 2.0} ${-mid360_height / 2.0}" rpy="${pi / 2.0} 0 ${pi / 2.0}" />
         <geometry>
-          <box size="${mid360_depth} ${mid360_width} ${mid360_height}" />
+          <mesh filename="package://ai_ship_robot_description/mesh/mid360.stl" 
+                scale="0.001 0.001 0.001" />
         </geometry>
         <material name="sensor_black">
           <color rgba="0.0 0.0 0.0 1.0" />

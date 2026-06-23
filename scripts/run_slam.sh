@@ -41,6 +41,8 @@ AUTO_STOP_AFTER_BAG_PLAY_SECONDS="${AUTO_STOP_AFTER_BAG_PLAY_SECONDS:-30}"
 WAIT_FOR_CLOUD_QUEUE_DRAIN_TIMEOUT_SECONDS="${WAIT_FOR_CLOUD_QUEUE_DRAIN_TIMEOUT_SECONDS:-300}"
 WAIT_FOR_CLOUD_QUEUE_DRAIN_POLL_SECONDS="${WAIT_FOR_CLOUD_QUEUE_DRAIN_POLL_SECONDS:-1}"
 WAIT_FOR_SLAM_STARTUP_TIMEOUT_SECONDS="${WAIT_FOR_SLAM_STARTUP_TIMEOUT_SECONDS:-30}"
+WAIT_FOR_MAP_SAVE_SERVICE_TIMEOUT_SECONDS="${WAIT_FOR_MAP_SAVE_SERVICE_TIMEOUT_SECONDS:-30}"
+SAVE_PCD_MAP_TIMEOUT_SECONDS="${SAVE_PCD_MAP_TIMEOUT_SECONDS:-300}"
 PROCESS_STOP_GRACE_SECONDS="15"
 PROCESS_STOP_TERM_SECONDS="5"
 ROSBAG_STOP_GRACE_SECONDS="60"
@@ -70,7 +72,7 @@ Options:
                        Default: 300. Use 0 to wait without timeout.
   --no-auto-exit     Keep SLAM and recording running after rosbag playback finishes.
   --rviz-config PATH Use a workspace RViz config file for LIO-SAM.
-  --map              Enable PCD map saver service (/save_pcd_map).
+  --map              Enable PCD map saver and auto-save after --bag-play drain.
   --config PATH      Use a LIO-SAM parameter YAML. SLAM behavior/performance settings live there.
   --force-zero-offset-time
                      Force simulated Livox point offset_time to zero. Default for --sim.
@@ -122,6 +124,17 @@ has_config_arg() {
         return 0
         ;;
     esac
+  done
+  return 1
+}
+
+map_saver_requested() {
+  local arg=""
+
+  for arg in "${FORWARD_ARGS[@]}"; do
+    if [[ "${arg}" == "--map" ]]; then
+      return 0
+    fi
   done
   return 1
 }
@@ -462,7 +475,7 @@ wait_for_lio_sam_startup() {
     fi
 
     # ROS graphに必須ノードが全て見えてからbagを流し、起動直後のIMU/topic取りこぼしを避ける。
-    node_list="$(ros2 node list 2>/dev/null || true)"
+    node_list="$(timeout 5s ros2 node list --no-daemon --spin-time 2 2>/dev/null || true)"
     missing_nodes=()
     for required_node in "${required_nodes[@]}"; do
       if ! grep -Fxq "${required_node}" <<< "${node_list}"; then
@@ -542,6 +555,81 @@ wait_for_lio_sam_cloud_queue_empty() {
 
     sleep "${WAIT_FOR_CLOUD_QUEUE_DRAIN_POLL_SECONDS}"
   done
+}
+
+wait_for_save_pcd_map_service() {
+  local service_name="/save_pcd_map"
+  local started_seconds=${SECONDS}
+  local elapsed_seconds=0
+  local last_log_seconds=0
+  local service_list=""
+
+  echo "Waiting for PCD map saver service ${service_name}..." >&2
+  while true; do
+    if [[ -n "${SLAM_PID}" ]] && ! kill -0 "${SLAM_PID}" 2>/dev/null; then
+      echo "LIO-SAM exited before PCD map saver service became available." >&2
+      return 1
+    fi
+
+    # ROS graph上でmap saver serviceの起動を確認してから保存要求を出す。
+    service_list="$(timeout 5s ros2 service list --no-daemon 2>/dev/null || true)"
+    if grep -Fxq "${service_name}" <<< "${service_list}"; then
+      return 0
+    fi
+
+    elapsed_seconds=$((SECONDS - started_seconds))
+    if [[ "${WAIT_FOR_MAP_SAVE_SERVICE_TIMEOUT_SECONDS}" != "0" &&
+          "${WAIT_FOR_MAP_SAVE_SERVICE_TIMEOUT_SECONDS}" != "0.0" &&
+          "${elapsed_seconds}" -ge "${WAIT_FOR_MAP_SAVE_SERVICE_TIMEOUT_SECONDS}" ]]; then
+      echo "Timed out waiting for PCD map saver service after ${elapsed_seconds}s." >&2
+      return 1
+    fi
+
+    if (( SECONDS - last_log_seconds >= 5 )); then
+      echo "Still waiting for PCD map saver service ${service_name}." >&2
+      last_log_seconds=${SECONDS}
+    fi
+    sleep 0.5
+  done
+}
+
+save_pcd_map_if_requested() {
+  local service_name="/save_pcd_map"
+  local service_type="std_srvs/srv/Trigger"
+  local service_request="{}"
+  local call_output=""
+  local call_status=0
+  local call_cmd=(ros2 service call "${service_name}" "${service_type}" "${service_request}")
+
+  if ! map_saver_requested; then
+    return 0
+  fi
+  if ! wait_for_save_pcd_map_service; then
+    return 1
+  fi
+
+  echo "Saving PCD map before stopping SLAM..." >&2
+  set +e
+  if [[ "${SAVE_PCD_MAP_TIMEOUT_SECONDS}" == "0" || "${SAVE_PCD_MAP_TIMEOUT_SECONDS}" == "0.0" ]]; then
+    call_output="$("${call_cmd[@]}" 2>&1)"
+    call_status=$?
+  else
+    call_output="$(timeout "${SAVE_PCD_MAP_TIMEOUT_SECONDS}s" "${call_cmd[@]}" 2>&1)"
+    call_status=$?
+  fi
+  set -e
+
+  # service callはsuccess=falseでも終了コード0になり得るため、応答本文も確認する。
+  if [[ "${call_status}" -eq 0 &&
+        ( "${call_output}" == *"success=True"* ||
+         "${call_output}" == *"success: true"* ||
+         "${call_output}" == *"success: True"* ) ]]; then
+    echo "Saved PCD map: ${call_output//$'\n'/ }" >&2
+    return 0
+  fi
+
+  echo "Failed to save PCD map: ${call_output//$'\n'/ }" >&2
+  return 1
 }
 
 run_slam_launch() {
@@ -794,6 +882,7 @@ run_bag_play_lio_sam() {
     --topics "${play_topics[@]}"
   )
   local slam_args=()
+  local map_save_status=0
 
   mapfile -t slam_args < <(build_passthrough_args)
   if ! has_config_arg; then
@@ -829,9 +918,14 @@ run_bag_play_lio_sam() {
         echo "Proceeding to auto-stop after cloudQueue drain wait failed." >&2
       fi
       if [[ "${AUTO_STOP_AFTER_BAG_PLAY_SECONDS}" != "0" && "${AUTO_STOP_AFTER_BAG_PLAY_SECONDS}" != "0.0" ]]; then
-        echo "Stopping SLAM after ${AUTO_STOP_AFTER_BAG_PLAY_SECONDS}s post-drain grace..." >&2
+        echo "Waiting ${AUTO_STOP_AFTER_BAG_PLAY_SECONDS}s post-drain grace before map save and SLAM stop..." >&2
         sleep "${AUTO_STOP_AFTER_BAG_PLAY_SECONDS}"
       fi
+      # SLAM停止時のdestructor保存に頼らず、map saver serviceでPCD生成完了を確認する。
+      set +e
+      save_pcd_map_if_requested
+      map_save_status=$?
+      set -e
     else
       set +e
       wait "${SLAM_PID}"
@@ -841,6 +935,9 @@ run_bag_play_lio_sam() {
     fi
   fi
 
+  if [[ "${play_status}" -eq 0 && "${map_save_status}" -ne 0 ]]; then
+    return "${map_save_status}"
+  fi
   return "${play_status}"
 }
 

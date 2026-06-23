@@ -1,62 +1,41 @@
 /**:
   ros__parameters:
+    # --------------------------------------------------------------------------
+    # 上流LIO-SAM設定（元設定ファイルベース）
+    # --------------------------------------------------------------------------
+    # 上流LIO-SAMに元からある項目を先に並べ、値だけMid-360/台車ロボット向けに調整する。
+    # このプロジェクトで追加した項目は末尾の「AI_SHIP_ROBOT追加設定」に集約する。
     imuTopic: /lidar1/livox/imu
     odomTopic: odometry/imu
     gpsTopic: odometry/gps
 
-    # LIO-SAMの動的LiDAR frameをURDFの実LiDAR frameから分離し、base_footprintへ静的TFで接続する。
+    # LIO-SAMの推定LiDAR frameをURDFの実LiDAR frameから分離し、TF親子競合を避ける。
     lidarFrame: lidar_odom
     baselinkFrame: base_footprint
     odometryFrame: lidar_init
     mapFrame: map
 
-    # GPSは初期検証対象外のため無効寄りにし、IMU/LiDARだけで起動確認できるようにする。
+    # GPSとPCD保存は初期検証で不要な依存・副作用を避ける設定にする。
     useImuHeadingInitialization: false
     useGpsElevation: false
     gpsCovThreshold: 2.0
     poseCovThreshold: 25.0
-
-    # map保存は明示操作時だけ有効化し、検証起動でHOME配下を破壊しないようにする。
     savePCD: false
     savePCDDirectory: /tmp/ai_ship_robot_lio_sam/
 
-    # Mid-360はLivox系として扱い、simulation時はsim側adapterがline/IMU単位を補正する。
+    # Mid-360のLivox入力と内蔵IMUに合わせる。IMU noiseは実機静止ログで再調整する前提。
     sensor: livox
     N_SCAN: 8
     Horizon_SCAN: 10000
     downsampleRate: 1
     lidarMinRange: 0.1
     lidarMaxRange: 200.0
-
-    # Mid-360内蔵IMUの初期値。実機では静止ログから再調整する前提の安全側設定にする。
     imuAccNoise: 0.05
     imuGyrNoise: 0.02
     imuAccBiasN: 0.001
     imuGyrBiasN: 0.00001
     imuGravity: 9.80511
     imuRPYWeight: 0.0
-    imuType: six_axis
-    imuAccelerationUnit: g
-    imuAccelerationScale: 1.0
-    imuFrequency: 500.0
-    imuDebug: false
-
-    # 6軸IMUでは開始静止区間からroll/pitchとgyro biasだけを推定し、yawは相対値として扱う。
-    waitForImuInitialization: true
-    initialImuExpectedAccelerationNorm: 1.0
-    initialImuAccelerationNormTolerance: 0.35
-    initialImuMaxAngularVelocity: 0.2
-    initialImuMinSamples: 50
-    initialImuMinDuration: 0.5
-
-    # 6軸IMU preintegrationの並進driftを初期値へ直接入れず、回転だけをscan matching初期値へ使う。
-    useImuPreintegrationInitialGuess: true
-    useImuTranslationInitialGuess: false
-    useImuRotationInitialGuess: true
-
-    # IMU preintegration odometryで補間し、再生速度差によるIMU角速度deskew待ちを避ける。
-    deskewMode: "odom_interpolation"
-    maxPointOffsetTimeSec: 0.2
 
     # 現状既定の基準系は左LiDARと左IMUの組み合わせで、IMU->LiDAR相対回転はidentityになる。
     extrinsicTrans: [0.011, 0.02329, -0.04412]
@@ -67,35 +46,14 @@
                    0.0, 1.0, 0.0,
                    0.0, 0.0, 1.0]
 
-    # 屋内・低速台車で特徴点不足になりにくいよう、公式既定値から大きく外さずに開始する。
+    # 屋内低速走行の特徴点不足とCPU負荷のバランスを取る。
     edgeThreshold: 1.0
     surfThreshold: 0.1
     edgeFeatureMinValidNum: 10
     surfFeatureMinValidNum: 100
-
-    # CPU負荷を抑えつつ凹凸検証用の局所形状を残す粒度にする。
     odometrySurfLeafSize: 0.2
     mappingCornerLeafSize: 0.1
     mappingSurfLeafSize: 0.2
-
-    # PCD map作成用に、LiDAR近傍raw詳細点群とSLAM用粗点群を合成して渡す。
-    # 近傍raw詳細点群はmapFrameの高さ上限で天井側だけ追加除外できるようにする。
-    hybridRegisteredCloudEnabled: true
-    hybridRegisteredCloudRawNearRange: 3.0
-    hybridRegisteredCloudRawNearLeafSize: 0.01
-    hybridRegisteredCloudRawUpperMapZLimitEnabled: true
-    hybridRegisteredCloudRawUpperMapZMax: 1.5
-    hybridRegisteredCloudTopic: /lio_sam/mapping/cloud_registered_hybrid
-
-    # map保存用cloud_registered_hybrid以外の重い点群publishは既定で止め、全topic録画時のCPU/DDS負荷を抑える。
-    publishDeskewedCloud: false
-    publishFeatureClouds: false
-    publishMapGlobalCloud: false
-    publishMapLocalCloud: false
-    publishTrajectoryCloud: false
-    publishCloudRegistered: false
-    publishCloudRegisteredRaw: false
-    publishLoopClosureClouds: false
 
     # 坂道を含む3D走行を想定し、LIO-SAM側の2D拘束は無効相当にする。
     z_tollerance: 1000.0
@@ -104,17 +62,12 @@
     # 10Hz LiDARの各scanをmapOptimizationへ渡し、公開odometry/TFの更新頻度を保つ。
     numberOfCores: 4
     mappingProcessInterval: 0.0
-    imageProjectionMaxScansPerTimer: 5
-    imageProjectionBacklogLogThreshold: 10
-    processingTimeLogIntervalSec: 5.0
 
-    # キーフレーム密度は低速走行で過剰に増えない値から開始する。
+    # キーフレームとloop closureは初期検証で過剰追加・誤閉ループを避ける設定にする。
     surroundingkeyframeAddingDistThreshold: 1.0
     surroundingkeyframeAddingAngleThreshold: 0.2
     surroundingKeyframeDensity: 2.0
     surroundingKeyframeSearchRadius: 50.0
-
-    # 初期検証ではCPU負荷と誤閉ループを避け、必要になった時点で有効化する。
     loopClosureEnableFlag: false
     loopClosureFrequency: 1.0
     surroundingKeyframeSize: 50
@@ -127,3 +80,48 @@
     globalMapVisualizationSearchRadius: 1000.0
     globalMapVisualizationPoseDensity: 10.0
     globalMapVisualizationLeafSize: 1.0
+
+    # --------------------------------------------------------------------------
+    # AI_SHIP_ROBOT追加設定
+    # --------------------------------------------------------------------------
+    # 上流LIO-SAMにない拡張項目。移植・差分確認時はこのブロックを中心に確認する。
+    # 6軸IMU用に入力単位と静止初期化条件を定義する。
+    imuType: six_axis
+    imuAccelerationUnit: g
+    imuAccelerationScale: 1.0
+    imuFrequency: 500.0
+    imuDebug: false
+    waitForImuInitialization: true
+    initialImuExpectedAccelerationNorm: 1.0
+    initialImuAccelerationNormTolerance: 0.35
+    initialImuMaxAngularVelocity: 0.2
+    initialImuMinSamples: 50
+    initialImuMinDuration: 0.5
+
+    # 6軸IMU preintegrationの使い方とdeskew動作を明示する。
+    useImuPreintegrationInitialGuess: true
+    useImuTranslationInitialGuess: false
+    useImuRotationInitialGuess: true
+    deskewMode: "odom_interpolation"
+    maxPointOffsetTimeSec: 0.2
+
+    # PCD map作成向けにhybrid登録点群と補助点群publishを制御する。
+    hybridRegisteredCloudEnabled: true
+    hybridRegisteredCloudRawNearRange: 3.0
+    hybridRegisteredCloudRawNearLeafSize: 0.01
+    hybridRegisteredCloudRawUpperMapZLimitEnabled: true
+    hybridRegisteredCloudRawUpperMapZMax: 1.5
+    hybridRegisteredCloudTopic: /lio_sam/mapping/cloud_registered_hybrid
+    publishDeskewedCloud: false
+    publishFeatureClouds: false
+    publishMapGlobalCloud: false
+    publishMapLocalCloud: false
+    publishTrajectoryCloud: false
+    publishCloudRegistered: false
+    publishCloudRegisteredRaw: false
+    publishLoopClosureClouds: false
+
+    # 高負荷時のimageProjection処理数と処理時間ログを制御する。
+    imageProjectionMaxScansPerTimer: 5
+    imageProjectionBacklogLogThreshold: 10
+    processingTimeLogIntervalSec: 5.0
