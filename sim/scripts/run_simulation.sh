@@ -49,6 +49,8 @@ Options:
   --no-gui            Disable Gazebo Classic GUI.
   --rviz              Enable RViz2.
   --no-rviz           Disable RViz2.
+  --odom-tf           Publish Gazebo odom -> base_footprint TF. Default: enabled.
+  --no-odom-tf        Do not publish Gazebo odom -> base_footprint TF.
   -4, --quarter-resolution
                       Use quarter LiDAR sample density.
   -2, --half-resolution
@@ -348,6 +350,8 @@ wait_for_topic_subscribers() {
   local min_subscribers="$2"
   local timeout_seconds="$3"
   local start_seconds=${SECONDS}
+  local elapsed_seconds=0
+  local last_log_seconds=0
   local topic_info=""
   local subscription_count=""
 
@@ -356,13 +360,19 @@ wait_for_topic_subscribers() {
     ensure_simulation_process_running
 
     # 走行pluginの購読開始を確認し、シナリオ先頭のcmd_velがGazebo側で捨てられないようにする。
-    if topic_info="$(ros2 topic info "${topic}" 2>/dev/null)"; then
+    if topic_info="$(timeout 5s ros2 topic info --no-daemon --spin-time 2 "${topic}" 2>/dev/null)"; then
       subscription_count="$(awk '/Subscription count:/ { print $3; exit }' <<< "${topic_info}")"
       if [[ "${subscription_count}" =~ ^[0-9]+$ && "${subscription_count}" -ge "${min_subscribers}" ]]; then
         return 0
       fi
     fi
-    if awk -v elapsed="$((SECONDS - start_seconds))" -v timeout="${timeout_seconds}" 'BEGIN { exit(elapsed >= timeout ? 0 : 1) }'; then
+    elapsed_seconds=$((SECONDS - start_seconds))
+    # direct discoveryの取りこぼしと実subscriber不足を切り分けやすくするため、一定間隔で観測値を出す。
+    if [[ "${elapsed_seconds}" -ge $((last_log_seconds + 5)) ]]; then
+      echo "Still waiting for simulation topic subscriber: ${topic} observed=${subscription_count:-unknown} required=${min_subscribers}" >&2
+      last_log_seconds=${elapsed_seconds}
+    fi
+    if awk -v elapsed="${elapsed_seconds}" -v timeout="${timeout_seconds}" 'BEGIN { exit(elapsed >= timeout ? 0 : 1) }'; then
       echo "Timed out waiting for simulation topic subscriber: ${topic}" >&2
       exit 1
     fi
@@ -615,6 +625,7 @@ DRIVE_START_DELAY="0.0"
 AUTO_EXIT_AFTER_DRIVE=true
 DRIVE_OPTION_REQUESTED=false
 USE_RVIZ=true
+PUBLISH_ODOM_TF=true
 
 trap cleanup_background_processes EXIT
 
@@ -643,6 +654,12 @@ while [[ $# -gt 0 ]]; do
     --no-rviz)
       LAUNCH_ARGS+=("use_rviz:=false")
       USE_RVIZ=false
+      ;;
+    --odom-tf)
+      PUBLISH_ODOM_TF=true
+      ;;
+    --no-odom-tf)
+      PUBLISH_ODOM_TF=false
       ;;
     -4|--quarter-resolution)
       LIDAR_RESOLUTION_MODE="quarter"
@@ -765,8 +782,8 @@ if [[ -n "${DRIVE_SCENARIO}" && ! -f "${DRIVE_SCENARIO}" ]]; then
   exit 2
 fi
 
-# 単体シミュレーションとして自己完結するTF木を出すため、Gazeboのodom TFは常に有効にする。
-LAUNCH_ARGS+=("publish_odom_tf:=true")
+# SLAM/localizationと併用する場合は、Gazebo由来のodom TFを止めてTF競合を避けられるようにする。
+LAUNCH_ARGS+=("publish_odom_tf:=${PUBLISH_ODOM_TF}")
 
 if [[ -n "${REAL_TIME_FACTOR}" ]]; then
   validate_positive_double --real-time-factor "${REAL_TIME_FACTOR}"

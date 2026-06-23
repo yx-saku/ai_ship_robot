@@ -11,12 +11,15 @@ LIDAR_PATTERN_DIR="${SIM_ROOT}/ros2_ws/src/ai_ship_robot_description/urdf/lidar/
 SYSTEM_INSTALL_ROOT="/opt/ai_ship_robot"
 THIRD_PARTY_UNDERLAY_SETUP="${SYSTEM_INSTALL_ROOT}/ros_underlay/${ROS_DISTRO}/third_party_ws/install/setup.bash"
 FORWARD_ARGS=()
+RUN_MODE=""
+PCD_MAP_PATH=""
 SIM_MODE=false
 DEFAULT_SIM_PARAMS_FILE="${WORKSPACE_ROOT}/ros2_ws/src/ai_ship_robot_slam/config/lio_sam_mid360_sim.yaml"
 ROSBAG_PID=""
 ROSBAG_PLAY_PID=""
 SLAM_PID=""
 ROSBAG_ROOT="${WORKSPACE_ROOT}/outputs/rosbag2"
+CLOUD_MAP_ROOT="${WORKSPACE_ROOT}/outputs/cloud_map"
 # bag再生ではSLAM入力に必要なLiDAR/IMUと静的TFだけを流し、sim由来の動的/tf競合を避ける。
 DEFAULT_BAG_PLAY_TOPICS=(
   /tf_static
@@ -41,16 +44,23 @@ AUTO_STOP_AFTER_BAG_PLAY_SECONDS="${AUTO_STOP_AFTER_BAG_PLAY_SECONDS:-30}"
 WAIT_FOR_CLOUD_QUEUE_DRAIN_TIMEOUT_SECONDS="${WAIT_FOR_CLOUD_QUEUE_DRAIN_TIMEOUT_SECONDS:-300}"
 WAIT_FOR_CLOUD_QUEUE_DRAIN_POLL_SECONDS="${WAIT_FOR_CLOUD_QUEUE_DRAIN_POLL_SECONDS:-1}"
 WAIT_FOR_SLAM_STARTUP_TIMEOUT_SECONDS="${WAIT_FOR_SLAM_STARTUP_TIMEOUT_SECONDS:-30}"
+WAIT_FOR_MAP_SAVE_SERVICE_TIMEOUT_SECONDS="${WAIT_FOR_MAP_SAVE_SERVICE_TIMEOUT_SECONDS:-30}"
+SAVE_PCD_MAP_TIMEOUT_SECONDS="${SAVE_PCD_MAP_TIMEOUT_SECONDS:-300}"
 PROCESS_STOP_GRACE_SECONDS="15"
 PROCESS_STOP_TERM_SECONDS="5"
 ROSBAG_STOP_GRACE_SECONDS="60"
 
 usage() {
   cat <<'EOF'
-Usage: bash scripts/run_slam.sh [OPTIONS]
+Usage: bash scripts/run_slam.sh {map|loc} [OPTIONS]
+
+Modes:
+  map               Build and save a PCD map.
+  loc               Localize against a fixed PCD map.
 
 Options:
   --sim              Launch Gazebo simulation and LIO-SAM together.
+                     Supported only in map mode.
   --record-bag       Record default SLAM output topics during SLAM execution.
   --bag-output PATH  Set rosbag output directory or prefix.
   --bag-topics CSV   Record only the given comma-separated topics.
@@ -70,7 +80,8 @@ Options:
                        Default: 300. Use 0 to wait without timeout.
   --no-auto-exit     Keep SLAM and recording running after rosbag playback finishes.
   --rviz-config PATH Use a workspace RViz config file for LIO-SAM.
-  --map              Enable PCD map saver service (/save_pcd_map).
+  --pcd [PATH]       Fixed PCD map path for loc mode.
+                     If PATH is omitted, the latest outputs/cloud_map/*.pcd is used.
   --config PATH      Use a LIO-SAM parameter YAML. SLAM behavior/performance settings live there.
   --force-zero-offset-time
                      Force simulated Livox point offset_time to zero. Default for --sim.
@@ -79,10 +90,11 @@ Options:
   -h, --help         Show this help.
 
 Examples:
-  bash scripts/run_slam.sh --no-rviz
-  bash scripts/run_slam.sh --sim --lite --no-gui
-  bash scripts/run_slam.sh --imu /lidar1/livox/imu
-  bash scripts/run_slam.sh --config ros2_ws/src/ai_ship_robot_slam/config/lio_sam_mid360.yaml
+  bash scripts/run_slam.sh map --no-rviz
+  bash scripts/run_slam.sh map --sim --lite --no-gui
+  bash scripts/run_slam.sh loc --no-rviz
+  bash scripts/run_slam.sh loc --pcd outputs/cloud_map/map.pcd --no-rviz
+  bash scripts/run_slam.sh map --config ros2_ws/src/ai_ship_robot_slam/config/lio_sam_mid360.yaml
 EOF
 }
 
@@ -191,7 +203,7 @@ source_overlay_if_current() {
     || grep -Fq "${WORKSPACE_ROOT}/third_party_ws" "${setup_file}" \
     || grep -Fq "${WORKSPACE_ROOT}/third_party_vendor" "${setup_file}"; then
     echo "Stale workspace setup detected: ${setup_file}" >&2
-    echo "Run bash install/install_third_party.sh && bash scripts/run_slam.sh --sim --build." >&2
+    echo "Run bash install/install_third_party.sh && bash scripts/run_slam.sh map --sim --build." >&2
     return 1
   fi
 
@@ -346,6 +358,27 @@ latest_bag_for_prefix() {
   printf '%s' "${newest_dir}"
 }
 
+latest_pcd_map() {
+  local candidate_file=""
+  local newest_file=""
+
+  shopt -s nullglob
+  for candidate_file in "${CLOUD_MAP_ROOT}"/*.pcd; do
+    if [[ -z "${newest_file}" || "${candidate_file}" -nt "${newest_file}" ]]; then
+      newest_file="${candidate_file}"
+    fi
+  done
+  shopt -u nullglob
+
+  # 保存済みPCDだけを候補にし、locモードで明示指定が無い場合の既定mapを決める。
+  if [[ -z "${newest_file}" ]]; then
+    echo "No PCD map found in ${CLOUD_MAP_ROOT}." >&2
+    exit 1
+  fi
+
+  printf '%s' "${newest_file}"
+}
+
 collect_child_pids() {
   local parent_pid="$1"
   local child_pid=""
@@ -454,6 +487,11 @@ wait_for_lio_sam_startup() {
     "/lio_sam_mapOptimization"
   )
 
+  # localizationでは固定PCD読み込み完了後のlocalizerも待ち、bag先頭のscan取りこぼしを避ける。
+  if [[ "${RUN_MODE}" == "loc" ]]; then
+    required_nodes+=("/pcd_localization_node")
+  fi
+
   echo "Waiting for LIO-SAM startup before rosbag playback..." >&2
   while true; do
     if [[ -n "${SLAM_PID}" ]] && ! kill -0 "${SLAM_PID}" 2>/dev/null; then
@@ -462,7 +500,7 @@ wait_for_lio_sam_startup() {
     fi
 
     # ROS graphに必須ノードが全て見えてからbagを流し、起動直後のIMU/topic取りこぼしを避ける。
-    node_list="$(ros2 node list 2>/dev/null || true)"
+    node_list="$(timeout 5s ros2 node list --no-daemon --spin-time 2 2>/dev/null || true)"
     missing_nodes=()
     for required_node in "${required_nodes[@]}"; do
       if ! grep -Fxq "${required_node}" <<< "${node_list}"; then
@@ -544,8 +582,84 @@ wait_for_lio_sam_cloud_queue_empty() {
   done
 }
 
+wait_for_save_pcd_map_service() {
+  local service_name="/save_pcd_map"
+  local started_seconds=${SECONDS}
+  local elapsed_seconds=0
+  local last_log_seconds=0
+  local service_list=""
+
+  echo "Waiting for PCD map saver service ${service_name}..." >&2
+  while true; do
+    if [[ -n "${SLAM_PID}" ]] && ! kill -0 "${SLAM_PID}" 2>/dev/null; then
+      echo "LIO-SAM exited before PCD map saver service became available." >&2
+      return 1
+    fi
+
+    # ROS graph上でmap saver serviceの起動を確認してから保存要求を出す。
+    service_list="$(timeout 5s ros2 service list --no-daemon 2>/dev/null || true)"
+    if grep -Fxq "${service_name}" <<< "${service_list}"; then
+      return 0
+    fi
+
+    elapsed_seconds=$((SECONDS - started_seconds))
+    if [[ "${WAIT_FOR_MAP_SAVE_SERVICE_TIMEOUT_SECONDS}" != "0" &&
+          "${WAIT_FOR_MAP_SAVE_SERVICE_TIMEOUT_SECONDS}" != "0.0" &&
+          "${elapsed_seconds}" -ge "${WAIT_FOR_MAP_SAVE_SERVICE_TIMEOUT_SECONDS}" ]]; then
+      echo "Timed out waiting for PCD map saver service after ${elapsed_seconds}s." >&2
+      return 1
+    fi
+
+    if (( SECONDS - last_log_seconds >= 5 )); then
+      echo "Still waiting for PCD map saver service ${service_name}." >&2
+      last_log_seconds=${SECONDS}
+    fi
+    sleep 0.5
+  done
+}
+
+save_pcd_map_if_requested() {
+  local service_name="/save_pcd_map"
+  local service_type="std_srvs/srv/Trigger"
+  local service_request="{}"
+  local call_output=""
+  local call_status=0
+  local call_cmd=(ros2 service call "${service_name}" "${service_type}" "${service_request}")
+
+  if [[ "${RUN_MODE}" != "map" ]]; then
+    return 0
+  fi
+  if ! wait_for_save_pcd_map_service; then
+    return 1
+  fi
+
+  echo "Saving PCD map before stopping SLAM..." >&2
+  set +e
+  if [[ "${SAVE_PCD_MAP_TIMEOUT_SECONDS}" == "0" || "${SAVE_PCD_MAP_TIMEOUT_SECONDS}" == "0.0" ]]; then
+    call_output="$("${call_cmd[@]}" 2>&1)"
+    call_status=$?
+  else
+    call_output="$(timeout "${SAVE_PCD_MAP_TIMEOUT_SECONDS}s" "${call_cmd[@]}" 2>&1)"
+    call_status=$?
+  fi
+  set -e
+
+  # service callはsuccess=falseでも終了コード0になり得るため、応答本文も確認する。
+  if [[ "${call_status}" -eq 0 &&
+        ( "${call_output}" == *"success=True"* ||
+         "${call_output}" == *"success: true"* ||
+         "${call_output}" == *"success: True"* ) ]]; then
+    echo "Saved PCD map: ${call_output//$'\n'/ }" >&2
+    return 0
+  fi
+
+  echo "Failed to save PCD map: ${call_output//$'\n'/ }" >&2
+  return 1
+}
+
 run_slam_launch() {
   local build_workspace=false
+  local launch_file="lio_sam.launch.py"
   local launch_args=()
 
   while [[ $# -gt 0 ]]; do
@@ -724,9 +838,6 @@ run_slam_launch() {
         shift
         launch_args+=("rviz_config:=$(require_value --rviz-config "${1:-}")")
         ;;
-      --map)
-        launch_args+=("use_map_saver:=true")
-        ;;
       --lio-sam-package=*)
         launch_args+=("lio_sam_package:=${1#*=}")
         ;;
@@ -765,7 +876,19 @@ run_slam_launch() {
   source_sim_slam_environment
   export AI_SHIP_ROBOT_WORKSPACE_ROOT="${WORKSPACE_ROOT}"
 
-  ros2 launch ai_ship_robot_slam lio_sam.launch.py "${launch_args[@]}"
+  # 実行モードごとに起動launchを固定し、map作成と固定PCD localizationの責務を分ける。
+  case "${RUN_MODE}" in
+    map)
+      launch_file="lio_sam.launch.py"
+      launch_args+=("use_map_saver:=true")
+      ;;
+    loc)
+      launch_file="lio_sam_localization.launch.py"
+      launch_args+=("pcd_map_path:=${PCD_MAP_PATH}")
+      ;;
+  esac
+
+  ros2 launch ai_ship_robot_slam "${launch_file}" "${launch_args[@]}"
 }
 
 run_recorded_lio_sam() {
@@ -794,6 +917,7 @@ run_bag_play_lio_sam() {
     --topics "${play_topics[@]}"
   )
   local slam_args=()
+  local map_save_status=0
 
   mapfile -t slam_args < <(build_passthrough_args)
   if ! has_config_arg; then
@@ -829,9 +953,14 @@ run_bag_play_lio_sam() {
         echo "Proceeding to auto-stop after cloudQueue drain wait failed." >&2
       fi
       if [[ "${AUTO_STOP_AFTER_BAG_PLAY_SECONDS}" != "0" && "${AUTO_STOP_AFTER_BAG_PLAY_SECONDS}" != "0.0" ]]; then
-        echo "Stopping SLAM after ${AUTO_STOP_AFTER_BAG_PLAY_SECONDS}s post-drain grace..." >&2
+        echo "Waiting ${AUTO_STOP_AFTER_BAG_PLAY_SECONDS}s post-drain grace before SLAM stop..." >&2
         sleep "${AUTO_STOP_AFTER_BAG_PLAY_SECONDS}"
       fi
+      # map作成時は停止前に明示保存し、destructor保存だけに依存しない。
+      set +e
+      save_pcd_map_if_requested
+      map_save_status=$?
+      set -e
     else
       set +e
       wait "${SLAM_PID}"
@@ -841,6 +970,9 @@ run_bag_play_lio_sam() {
     fi
   fi
 
+  if [[ "${play_status}" -eq 0 && "${map_save_status}" -ne 0 ]]; then
+    return "${map_save_status}"
+  fi
   return "${play_status}"
 }
 
@@ -1042,9 +1174,6 @@ run_sim_lio_sam() {
         shift
         launch_args+=("rviz_config:=$(require_value --rviz-config "${1:-}")")
         ;;
-      --map)
-        launch_args+=("use_map_saver:=true")
-        ;;
       --lite)
         lite_mode=true
         ;;
@@ -1109,6 +1238,9 @@ run_sim_lio_sam() {
     launch_args+=("robot_name:=ai_ship_robot_lio_sam_$$")
   fi
 
+  # simulation経由のmap作成でも、通常起動と同じPCD map saverを有効化する。
+  launch_args+=("use_map_saver:=true")
+
   source_sim_slam_environment false
 
   if [[ "${build_workspace}" == "true" ]]; then
@@ -1153,8 +1285,31 @@ BAG_PLAY_RATE="1.0"
 BAG_START_DELAY="0"
 BAG_START_OFFSET="0"
 BAG_AUTO_EXIT=true
+PCD_MAP_REQUESTED=false
 
 trap cleanup_background_processes EXIT
+
+# 先頭引数を実行モードとして固定し、以降のoption解析からmode名を分離する。
+if [[ $# -eq 0 ]]; then
+  usage >&2
+  exit 2
+fi
+
+case "$1" in
+  -h|--help)
+    usage
+    exit 0
+    ;;
+  map|loc)
+    RUN_MODE="$1"
+    shift
+    ;;
+  *)
+    echo "First argument must be 'map' or 'loc': $1" >&2
+    usage >&2
+    exit 2
+    ;;
+esac
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -1187,6 +1342,19 @@ while [[ $# -gt 0 ]]; do
       bag_topics_value="$(require_value --bag-topics "${1:-}")"
       mapfile -t BAG_TOPICS < <(parse_csv_topics "${bag_topics_value}")
       FORWARD_ARGS+=("--bag-topics" "${bag_topics_value}")
+      ;;
+    --pcd=*)
+      PCD_MAP_REQUESTED=true
+      PCD_MAP_PATH="${1#*=}"
+      ;;
+    --pcd)
+      PCD_MAP_REQUESTED=true
+      if [[ $# -gt 1 && "${2:-}" != --* ]]; then
+        shift
+        PCD_MAP_PATH="${1}"
+      else
+        PCD_MAP_PATH=""
+      fi
       ;;
     --bag-play=*)
       BAG_PLAY_REQUESTED=true
@@ -1257,6 +1425,20 @@ while [[ $# -gt 0 ]]; do
   esac
   shift
 done
+
+# localizationは固定PCD mapを使うが、未指定時は最新の保存済みPCDを既定値にする。
+if [[ "${RUN_MODE}" == "loc" && -z "${PCD_MAP_PATH}" ]]; then
+  PCD_MAP_PATH="$(latest_pcd_map)"
+  echo "Using latest PCD map: ${PCD_MAP_PATH}" >&2
+fi
+if [[ "${RUN_MODE}" == "map" && "${PCD_MAP_REQUESTED}" == "true" ]]; then
+  echo "map mode does not use --pcd." >&2
+  exit 2
+fi
+if [[ "${RUN_MODE}" == "loc" && "${SIM_MODE}" == "true" ]]; then
+  echo "loc mode does not support --sim." >&2
+  exit 2
+fi
 
 if [[ "${SIM_MODE}" == "true" ]]; then
   if [[ "${BAG_PLAY_REQUESTED}" == "true" ]]; then

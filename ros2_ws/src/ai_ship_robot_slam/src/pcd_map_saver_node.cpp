@@ -230,6 +230,11 @@ public:
       RCLCPP_INFO(this->get_logger(), "No accumulated scan cloud points to save on shutdown.");
       return;
     }
+    // 明示保存後の終了では、巨大PCDの再書き出しでshutdownが詰まることを避ける。
+    if (map_saved_since_last_update_) {
+      RCLCPP_INFO(this->get_logger(), "PCD map was already saved after the last update; skip shutdown save.");
+      return;
+    }
 
     // 終了時にも最新pathで再配置したmapを保存し、サービス呼び忘れによる地図消失を防ぐ。
     std::string message;
@@ -253,6 +258,7 @@ private:
 
     // cloudは全メッセージを候補として保持し、対応odometry到着後にscan bufferへ移す。
     pending_clouds_.push_back(std::move(pending_cloud));
+    map_saved_since_last_update_ = false;
     match_pending_clouds();
   }
 
@@ -272,6 +278,7 @@ private:
     }
 
     // pathはloop closure後に更新されるため最新列を保存し、新規keyframeだけ初期poseとして記録する。
+    map_saved_since_last_update_ = false;
     path_frame_ = message->header.frame_id;
     latest_path_stamp_ = rclcpp::Time(message->header.stamp);
     latest_path_ = message->poses;
@@ -621,6 +628,7 @@ private:
     }
 
     message = output_path.string() + " frame=" + output_frame;
+    map_saved_since_last_update_ = true;
     return true;
   }
 
@@ -634,6 +642,7 @@ private:
   double cloud_buffer_duration_sec_{};
   double submap_voxel_leaf_size_{};
   double global_voxel_leaf_size_{};
+  bool map_saved_since_last_update_{false};
   std::size_t next_submap_anchor_index_{};
   rclcpp::Time latest_path_stamp_{};
   std::vector<geometry_msgs::msg::PoseStamped> latest_path_;
