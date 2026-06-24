@@ -105,7 +105,7 @@
     deskewMode: "odom_interpolation"
     maxPointOffsetTimeSec: 0.2
 
-    # PCD map作成向けにhybrid登録点群と補助点群publishを制御する。
+    # PCD map作成向けのhybridと、localization向けの通常登録点群publishを制御する。
     hybridRegisteredCloudEnabled: true
     hybridRegisteredCloudRawNearRange: 3.0
     hybridRegisteredCloudRawNearLeafSize: 0.01
@@ -117,7 +117,7 @@
     publishMapGlobalCloud: false
     publishMapLocalCloud: false
     publishTrajectoryCloud: false
-    publishCloudRegistered: false
+    publishCloudRegistered: true
     publishCloudRegisteredRaw: false
     publishLoopClosureClouds: false
 

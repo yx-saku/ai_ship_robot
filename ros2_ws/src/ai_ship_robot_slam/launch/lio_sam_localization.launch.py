@@ -1,4 +1,4 @@
-﻿# Copyright 2026 AI Ship Robot Developers
+# Copyright 2026 AI Ship Robot Developers
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -12,45 +12,34 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-import os
-
 from launch import LaunchDescription
 from launch.actions import DeclareLaunchArgument
 from launch.conditions import IfCondition
 from launch.substitutions import LaunchConfiguration, PathJoinSubstitution
 from launch_ros.actions import Node
-from launch_ros.parameter_descriptions import ParameterValue
 from launch_ros.substitutions import FindPackageShare
 
 
 def generate_launch_description():
     use_sim_time = LaunchConfiguration("use_sim_time")
     use_rviz = LaunchConfiguration("use_rviz")
-    use_map_saver = LaunchConfiguration("use_map_saver")
     params_file = LaunchConfiguration("params_file")
     fusion_config = LaunchConfiguration("fusion_config")
+    localization_config = LaunchConfiguration("localization_config")
     rviz_config = LaunchConfiguration("rviz_config")
     imu_topic = LaunchConfiguration("imu_topic")
     lio_sam_package = LaunchConfiguration("lio_sam_package")
-    cloud_map_directory = LaunchConfiguration("cloud_map_directory")
-    map_cloud_topic = LaunchConfiguration("map_cloud_topic")
-    map_odometry_topic = LaunchConfiguration("map_odometry_topic")
-    map_path_topic = LaunchConfiguration("map_path_topic")
-    map_odometry_sync_tolerance_sec = LaunchConfiguration("map_odometry_sync_tolerance_sec")
-    map_cloud_buffer_duration_sec = LaunchConfiguration("map_cloud_buffer_duration_sec")
-    hybrid_raw_near_leaf_size = LaunchConfiguration("hybrid_raw_near_leaf_size")
-    map_global_voxel_leaf_size = LaunchConfiguration("map_global_voxel_leaf_size")
-    map_preview_topic = LaunchConfiguration("map_preview_topic")
-    map_preview_publish_period_sec = LaunchConfiguration("map_preview_publish_period_sec")
-    map_preview_voxel_leaf_size = LaunchConfiguration("map_preview_voxel_leaf_size")
+    pcd_map_path = LaunchConfiguration("pcd_map_path")
+    localization_cloud_topic = LaunchConfiguration("localization_cloud_topic")
+    localization_odometry_topic = LaunchConfiguration("localization_odometry_topic")
 
-    # LIO-SAMの推定LiDAR frameを実機URDFのLiDAR frameから分離し、TF親子競合を避ける。
+    # 既存frame名を維持し、Nav2連携時はlidar_initをodom相当として扱える構成にする。
     map_frame = "map"
     lidar_init_frame = "lidar_init"
     lidar_odom_frame = "lidar_odom"
     base_frame = "base_footprint"
 
-    # SLAM挙動はparams_file、multi-LiDAR入力topicはfusion_configで管理する。
+    # LIO-SAMは短期odometry生成器として動かし、固定PCD mapの更新や保存は行わない。
     lio_sam_parameters = [
         params_file,
         fusion_config,
@@ -64,7 +53,7 @@ def generate_launch_description():
         },
     ]
 
-    # /tf_staticのbase_footprint -> 基準LiDARから、SLAM初期frameとbase接続TFを一貫して導出する。
+    # map->lidar_initはlocalizerが動的にpublishするため、static TF側ではbase接続だけを残す。
     slam_reference_lidar_static_tf = Node(
         package="ai_ship_robot_slam",
         executable="slam_reference_lidar_static_tf_node",
@@ -78,11 +67,12 @@ def generate_launch_description():
                 "map_frame": map_frame,
                 "lidar_init_frame": lidar_init_frame,
                 "lidar_odom_frame": lidar_odom_frame,
-            }
+                "publish_map_to_lidar_init": False,
+            },
         ],
     )
 
-    # 自己点群はSLAM投入前に除去し、LIO-SAM本体にはフィルタ後CustomMsgだけを入力する。
+    # 自己点群除去はmapping時と同じ入力経路を使い、localization固有処理を後段へ限定する。
     livox_custommsg_self_filter = Node(
         package="ai_ship_robot_slam",
         executable="livox_custommsg_self_filter_node",
@@ -91,7 +81,6 @@ def generate_launch_description():
         parameters=[fusion_config, {"use_sim_time": use_sim_time}],
     )
 
-    # LIO-SAM本体はthird_party underlayのpackageを直接起動し、設定だけをこのproject packageで管理する。
     imu_preintegration = Node(
         package=lio_sam_package,
         executable="lio_sam_imuPreintegration",
@@ -121,83 +110,50 @@ def generate_launch_description():
         parameters=lio_sam_parameters,
     )
 
+    # 完成済みPCDをread-only地図として読み、map->lidar_initの動的TFを単独でpublishする。
+    pcd_localization = Node(
+        package="ai_ship_robot_slam",
+        executable="pcd_localization_node",
+        name="pcd_localization_node",
+        output="screen",
+        parameters=[
+            localization_config,
+            {
+                "use_sim_time": use_sim_time,
+                "pcd_map_path": pcd_map_path,
+                "map_frame": map_frame,
+                "odom_frame": lidar_init_frame,
+                "lidar_frame": lidar_odom_frame,
+                "cloud_topic": localization_cloud_topic,
+                "odometry_topic": localization_odometry_topic,
+            },
+        ],
+    )
+
     rviz = Node(
         package="rviz2",
         executable="rviz2",
-        name="lio_sam_rviz2",
+        name="lio_sam_localization_rviz2",
         output="screen",
         condition=IfCondition(use_rviz),
         arguments=["-d", rviz_config],
         parameters=[{"use_sim_time": use_sim_time}],
     )
 
-    # local keyframe点群を保持し、保存時に最新path poseでmap frameへ再配置する。
-    pcd_map_saver = Node(
-        package="ai_ship_robot_slam",
-        executable="pcd_map_saver_node",
-        name="pcd_map_saver_node",
-        output="screen",
-        condition=IfCondition(use_map_saver),
-        parameters=[
-            {
-                "use_sim_time": use_sim_time,
-                "cloud_topic": map_cloud_topic,
-                "odometry_topic": map_odometry_topic,
-                "path_topic": map_path_topic,
-                "target_frame": map_frame,
-                "output_directory": cloud_map_directory,
-                "odometry_sync_tolerance_sec": ParameterValue(
-                    map_odometry_sync_tolerance_sec, value_type=float
-                ),
-                "cloud_buffer_duration_sec": ParameterValue(
-                    map_cloud_buffer_duration_sec, value_type=float
-                ),
-                "submap_voxel_leaf_size": ParameterValue(
-                    hybrid_raw_near_leaf_size, value_type=float
-                ),
-                "global_voxel_leaf_size": ParameterValue(
-                    map_global_voxel_leaf_size, value_type=float
-                ),
-                "preview_enabled": True,
-                "preview_topic": map_preview_topic,
-                "preview_publish_period_sec": ParameterValue(
-                    map_preview_publish_period_sec, value_type=float
-                ),
-                "preview_voxel_leaf_size": ParameterValue(
-                    map_preview_voxel_leaf_size, value_type=float
-                ),
-            }
-        ],
-    )
-
     return LaunchDescription(
         [
             DeclareLaunchArgument("use_sim_time", default_value="false"),
             DeclareLaunchArgument("use_rviz", default_value="true"),
-            DeclareLaunchArgument("use_map_saver", default_value="false"),
             DeclareLaunchArgument("imu_topic", default_value="/lidar1/livox/imu"),
             DeclareLaunchArgument("lio_sam_package", default_value="lio_sam"),
+            DeclareLaunchArgument("pcd_map_path", default_value=""),
             DeclareLaunchArgument(
-                "map_cloud_topic", default_value="/lio_sam/mapping/cloud_registered_hybrid"
+                "localization_cloud_topic",
+                default_value="/lio_sam/mapping/cloud_registered",
             ),
-            DeclareLaunchArgument("map_odometry_topic", default_value="/lio_sam/mapping/odometry"),
-            DeclareLaunchArgument("map_path_topic", default_value="/lio_sam/mapping/path"),
-            DeclareLaunchArgument("map_odometry_sync_tolerance_sec", default_value="0.25"),
-            DeclareLaunchArgument("map_cloud_buffer_duration_sec", default_value="5.0"),
-            DeclareLaunchArgument("hybrid_raw_near_leaf_size", default_value="0.01"),
-            DeclareLaunchArgument("map_global_voxel_leaf_size", default_value="0.01"),
             DeclareLaunchArgument(
-                "map_preview_topic", default_value="/pcd_map_saver/map_preview"
-            ),
-            DeclareLaunchArgument("map_preview_publish_period_sec", default_value="2.0"),
-            DeclareLaunchArgument("map_preview_voxel_leaf_size", default_value="0.05"),
-            DeclareLaunchArgument(
-                "cloud_map_directory",
-                default_value=os.path.join(
-                    os.environ.get("AI_SHIP_ROBOT_WORKSPACE_ROOT", os.getcwd()),
-                    "outputs",
-                    "cloud_map",
-                ),
+                "localization_odometry_topic",
+                default_value="/lio_sam/mapping/odometry",
             ),
             DeclareLaunchArgument(
                 "fusion_config",
@@ -212,6 +168,12 @@ def generate_launch_description():
                 ),
             ),
             DeclareLaunchArgument(
+                "localization_config",
+                default_value=PathJoinSubstitution(
+                    [FindPackageShare("ai_ship_robot_slam"), "config", "pcd_localization.yaml"]
+                ),
+            ),
+            DeclareLaunchArgument(
                 "rviz_config",
                 default_value=PathJoinSubstitution(
                     [FindPackageShare("ai_ship_robot_slam"), "rviz", "lio_sam.rviz"]
@@ -223,7 +185,7 @@ def generate_launch_description():
             image_projection,
             feature_extraction,
             map_optimization,
-            pcd_map_saver,
+            pcd_localization,
             rviz,
         ]
     )

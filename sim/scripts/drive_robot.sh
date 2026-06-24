@@ -16,6 +16,8 @@ Usage: bash sim/scripts/drive_robot.sh [OPTIONS]
 
 Options:
   --build                  Run one-time environment setup before starting keyboard drive.
+  --clean-build            Remove target workspace build artifacts, then run setup.
+                           Implies --build.
   --scenario FILE          Run scripted drive with a YAML scenario file.
   --start-delay SEC        Wait before starting scripted drive. Default: 0.0
   --linear-speed VALUE     Forward/backward speed in m/s. Default: 0.20
@@ -110,7 +112,7 @@ source_overlay_if_current() {
     || grep -Fq "${WORKSPACE_ROOT}/third_party_ws" "${setup_file}" \
     || grep -Fq "${WORKSPACE_ROOT}/third_party_vendor" "${setup_file}"; then
     echo "Stale workspace setup detected: ${setup_file}" >&2
-    echo "Run bash install/install_third_party.sh && bash sim/install/install_third_party.sh && bash sim/scripts/drive_robot.sh --build." >&2
+    echo "Run bash install/install_third_party.sh && bash sim/install/install_third_party.sh && bash sim/scripts/drive_robot.sh --build or --clean-build." >&2
     return 1
   fi
 
@@ -120,6 +122,7 @@ source_overlay_if_current() {
 trap cleanup_terminal EXIT
 
 BUILD_WORKSPACE=false
+CLEAN_BUILD_WORKSPACE=false
 SCENARIO_FILE=""
 START_DELAY_SEC="0.0"
 LINEAR_SPEED="0.20"
@@ -135,6 +138,10 @@ while [[ $# -gt 0 ]]; do
       exit 0
       ;;
     --build)
+      BUILD_WORKSPACE=true
+      ;;
+    --clean-build)
+      CLEAN_BUILD_WORKSPACE=true
       BUILD_WORKSPACE=true
       ;;
     --scenario=*)
@@ -203,9 +210,14 @@ done
 source_workspace_environment false
 
 if [[ "${BUILD_WORKSPACE}" == "true" ]]; then
-  # --build指定時だけ workspace setup を実行し、通常起動では再buildを避ける。
-  bash "${SETUP_RUNTIME_SCRIPT}"
-  bash "${SETUP_SIMULATION_SCRIPT}"
+  # 明示build時だけ setup を実行し、clean指定時は runtime/simulation の両workspaceを再生成する。
+  if [[ "${CLEAN_BUILD_WORKSPACE}" == "true" ]]; then
+    bash "${SETUP_RUNTIME_SCRIPT}" --clean-build
+    bash "${SETUP_SIMULATION_SCRIPT}" --clean-build
+  else
+    bash "${SETUP_RUNTIME_SCRIPT}"
+    bash "${SETUP_SIMULATION_SCRIPT}"
+  fi
 fi
 
 if [[ ! -f "${SIM_ROOT}/ros2_ws/install/setup.bash" ]]; then
@@ -224,7 +236,7 @@ fi
 
 if [[ ! -x "${DRIVE_EXECUTABLE}" ]]; then
   echo "Missing drive executable: ${DRIVE_EXECUTABLE}" >&2
-  echo "Run bash sim/scripts/drive_robot.sh --build or bash install/setup.sh && bash sim/install/setup.sh first." >&2
+  echo "Run bash sim/scripts/drive_robot.sh --build or --clean-build, or bash install/setup.sh && bash sim/install/setup.sh first." >&2
   exit 1
 fi
 

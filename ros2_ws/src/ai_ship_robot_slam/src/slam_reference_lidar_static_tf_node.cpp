@@ -117,6 +117,7 @@ public:
     map_frame_ = declare_parameter<std::string>("map_frame", "map");
     lidar_init_frame_ = declare_parameter<std::string>("lidar_init_frame", "lidar_init");
     lidar_odom_frame_ = declare_parameter<std::string>("lidar_odom_frame", "lidar_odom");
+    publish_map_to_lidar_init_ = declare_parameter<bool>("publish_map_to_lidar_init", true);
     const double lookup_period_sec = declare_parameter<double>("lookup_period_sec", 0.2);
 
     validate_parameters(lookup_period_sec);
@@ -216,22 +217,24 @@ private:
   {
     const auto stamp = get_clock()->now();
     std::vector<geometry_msgs::msg::TransformStamped> transforms;
-    transforms.reserve(2);
+    transforms.reserve(publish_map_to_lidar_init_ ? 2 : 1);
 
-    // map原点を初期base姿勢に置き、基準LiDAR位置と水平yawだけをSLAM初期frameへ与える。
-    const tf2::Matrix3x3 base_to_lidar_rotation(base_to_lidar.getRotation());
-    const double lidar_init_yaw = projected_x_axis_yaw(base_to_lidar_rotation);
-    tf2::Quaternion lidar_init_rotation;
-    lidar_init_rotation.setRPY(0.0, 0.0, lidar_init_yaw);
-    lidar_init_rotation.normalize();
+    if (publish_map_to_lidar_init_) {
+      // localization時はlocalizerがmap->lidar_initを所有するため、競合するstatic TFだけを止める。
+      const tf2::Matrix3x3 base_to_lidar_rotation(base_to_lidar.getRotation());
+      const double lidar_init_yaw = projected_x_axis_yaw(base_to_lidar_rotation);
+      tf2::Quaternion lidar_init_rotation;
+      lidar_init_rotation.setRPY(0.0, 0.0, lidar_init_yaw);
+      lidar_init_rotation.normalize();
 
-    geometry_msgs::msg::TransformStamped map_to_lidar_init;
-    map_to_lidar_init.header.stamp = stamp;
-    map_to_lidar_init.header.frame_id = map_frame_;
-    map_to_lidar_init.child_frame_id = lidar_init_frame_;
-    map_to_lidar_init.transform.translation = make_translation_message(base_to_lidar.getOrigin());
-    map_to_lidar_init.transform.rotation = make_quaternion_message(lidar_init_rotation);
-    transforms.push_back(map_to_lidar_init);
+      geometry_msgs::msg::TransformStamped map_to_lidar_init;
+      map_to_lidar_init.header.stamp = stamp;
+      map_to_lidar_init.header.frame_id = map_frame_;
+      map_to_lidar_init.child_frame_id = lidar_init_frame_;
+      map_to_lidar_init.transform.translation = make_translation_message(base_to_lidar.getOrigin());
+      map_to_lidar_init.transform.rotation = make_quaternion_message(lidar_init_rotation);
+      transforms.push_back(map_to_lidar_init);
+    }
 
     // LIO-SAMの推定LiDAR poseからbase_footprintへ接続し、URDF側のlink treeへつなぐ。
     const tf2::Transform lidar_to_base = base_to_lidar.inverse();
@@ -246,11 +249,19 @@ private:
     static_broadcaster_.sendTransform(transforms);
     published_transforms_ = transforms;
     published_ = true;
-    RCLCPP_INFO(
-      get_logger(),
-      "Published SLAM static TFs from %s -> %s: %s -> %s and %s -> %s",
-      base_frame_.c_str(), reference_lidar_frame_.c_str(), map_frame_.c_str(),
-      lidar_init_frame_.c_str(), lidar_odom_frame_.c_str(), base_frame_.c_str());
+    if (publish_map_to_lidar_init_) {
+      RCLCPP_INFO(
+        get_logger(),
+        "Published SLAM static TFs from %s -> %s: %s -> %s and %s -> %s",
+        base_frame_.c_str(), reference_lidar_frame_.c_str(), map_frame_.c_str(),
+        lidar_init_frame_.c_str(), lidar_odom_frame_.c_str(), base_frame_.c_str());
+    } else {
+      RCLCPP_INFO(
+        get_logger(),
+        "Published SLAM static TF from %s -> %s: %s -> %s; skip %s -> %s",
+        base_frame_.c_str(), reference_lidar_frame_.c_str(), lidar_odom_frame_.c_str(),
+        base_frame_.c_str(), map_frame_.c_str(), lidar_init_frame_.c_str());
+    }
   }
 
   std::string base_frame_;
@@ -259,6 +270,7 @@ private:
   std::string map_frame_;
   std::string lidar_init_frame_;
   std::string lidar_odom_frame_;
+  bool publish_map_to_lidar_init_{true};
   std::vector<geometry_msgs::msg::TransformStamped> published_transforms_;
   bool published_{false};
   std::size_t lookup_attempt_count_{0};

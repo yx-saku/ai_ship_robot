@@ -204,6 +204,12 @@ public:
     cloud_buffer_duration_sec_ = this->declare_parameter<double>("cloud_buffer_duration_sec", 5.0);
     submap_voxel_leaf_size_ = this->declare_parameter<double>("submap_voxel_leaf_size", 0.01);
     global_voxel_leaf_size_ = this->declare_parameter<double>("global_voxel_leaf_size", 0.0);
+    preview_enabled_ = this->declare_parameter<bool>("preview_enabled", true);
+    preview_topic_ = this->declare_parameter<std::string>(
+      "preview_topic", "/pcd_map_saver/map_preview");
+    preview_publish_period_sec_ = this->declare_parameter<double>(
+      "preview_publish_period_sec", 2.0);
+    preview_voxel_leaf_size_ = this->declare_parameter<double>("preview_voxel_leaf_size", 0.05);
 
     // 全scan点群を一時保持し、odometry pose同期後にkeyframe区間submapへ圧縮する。
     cloud_subscription_ = this->create_subscription<PointCloud2>(
@@ -222,6 +228,16 @@ public:
       [this](const Trigger::Request::SharedPtr, const Trigger::Response::SharedPtr response) {
         this->save_map(response);
       });
+
+    if (preview_enabled_) {
+      // RViz後起動でも最後のpreviewを受け取れるよう、保存予定mapをlatched publishする。
+      preview_publisher_ = this->create_publisher<PointCloud2>(
+        preview_topic_, rclcpp::QoS(rclcpp::KeepLast(1)).reliable().transient_local());
+      preview_timer_ = this->create_wall_timer(
+        std::chrono::duration_cast<std::chrono::nanoseconds>(
+          std::chrono::duration<double>(std::max(preview_publish_period_sec_, 0.1))),
+        [this]() { this->publish_preview(); });
+    }
   }
 
   ~PcdMapSaverNode() override
@@ -632,16 +648,102 @@ private:
     return true;
   }
 
+  PointCloud2 build_point_cloud2_message(
+    const std::vector<CloudPoint> & points, const std::string & frame_id) const
+  {
+    PointCloud2 message;
+    message.header.stamp = this->now();
+    message.header.frame_id = frame_id;
+    message.height = 1;
+    message.width = static_cast<std::uint32_t>(points.size());
+    message.is_bigendian = false;
+    message.is_dense = true;
+    message.point_step = sizeof(CloudPoint);
+    message.row_step = message.point_step * message.width;
+    message.fields.resize(4);
+    message.fields[0].name = "x";
+    message.fields[0].offset = 0U;
+    message.fields[0].datatype = PointField::FLOAT32;
+    message.fields[0].count = 1U;
+    message.fields[1].name = "y";
+    message.fields[1].offset = 4U;
+    message.fields[1].datatype = PointField::FLOAT32;
+    message.fields[1].count = 1U;
+    message.fields[2].name = "z";
+    message.fields[2].offset = 8U;
+    message.fields[2].datatype = PointField::FLOAT32;
+    message.fields[2].count = 1U;
+    message.fields[3].name = "intensity";
+    message.fields[3].offset = 12U;
+    message.fields[3].datatype = PointField::FLOAT32;
+    message.fields[3].count = 1U;
+
+    // XYZIだけを連続配置し、PCL依存なしでRViz向けPointCloud2を組み立てる。
+    message.data.resize(points.size() * sizeof(CloudPoint));
+    if (!points.empty()) {
+      std::memcpy(message.data.data(), points.data(), message.data.size());
+    }
+    return message;
+  }
+
+  bool build_preview_message(PointCloud2 & message, std::string & error_message)
+  {
+    finalize_ready_submaps();
+    if (latest_path_.empty()) {
+      error_message = "latest path is empty";
+      return false;
+    }
+
+    tf2::Transform target_from_path;
+    std::string output_frame;
+    if (!resolve_target_transform(target_from_path, output_frame, error_message)) {
+      return false;
+    }
+
+    auto preview_points = apply_voxel_filter(
+      build_global_points(target_from_path), preview_voxel_leaf_size_);
+    if (preview_points.empty()) {
+      error_message = "no accumulated scan cloud points for preview";
+      return false;
+    }
+
+    message = build_point_cloud2_message(preview_points, output_frame);
+    return true;
+  }
+
+  void publish_preview()
+  {
+    if (preview_publisher_ == nullptr) {
+      return;
+    }
+
+    PointCloud2 message;
+    std::string error_message;
+    if (!build_preview_message(message, error_message)) {
+      // 初期化前やTF未解決区間ではpublish不能なので、周期warnはthrottleしてログを抑える。
+      RCLCPP_WARN_THROTTLE(
+        this->get_logger(), *this->get_clock(), 5000,
+        "Skip map preview publish: %s", error_message.c_str());
+      return;
+    }
+
+    preview_publisher_->publish(message);
+  }
+
   std::string target_frame_;
   std::string output_directory_;
   std::string cloud_topic_;
   std::string odometry_topic_;
   std::string path_topic_;
+  std::string preview_topic_;
   std::string path_frame_;
   double odometry_sync_tolerance_sec_{};
   double cloud_buffer_duration_sec_{};
   double submap_voxel_leaf_size_{};
   double global_voxel_leaf_size_{};
+  double preview_publish_period_sec_{};
+  double preview_voxel_leaf_size_{};
+  bool preview_enabled_{true};
   bool map_saved_since_last_update_{false};
   std::size_t next_submap_anchor_index_{};
   rclcpp::Time latest_path_stamp_{};
@@ -657,6 +759,8 @@ private:
   rclcpp::Subscription<Odometry>::SharedPtr odometry_subscription_;
   rclcpp::Subscription<Path>::SharedPtr path_subscription_;
   rclcpp::Service<Trigger>::SharedPtr save_service_;
+  rclcpp::Publisher<PointCloud2>::SharedPtr preview_publisher_;
+  rclcpp::TimerBase::SharedPtr preview_timer_;
 };
 }  // namespace ai_ship_robot_slam
 

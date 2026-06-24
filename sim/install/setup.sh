@@ -19,11 +19,12 @@ SIM_INSTALL_THIRD_PARTY_SCRIPT="${SIM_ROOT}/install/install_third_party.sh"
 
 usage() {
   cat <<'EOF'
-Usage: bash sim/install/setup.sh
+Usage: bash sim/install/setup.sh [--clean-build]
 
 simulation向け workspace セットアップを実行します。
 - /opt/ai_ship_robot の third_party underlay 読み込み
 - rosdep / sim/ros2_ws build
+- --clean-build 指定時は sim/ros2_ws/build install log を削除してから再 build
 - shell 自動読み込み設定更新
 
 事前に以下を実行してください。
@@ -34,10 +35,27 @@ simulation向け workspace セットアップを実行します。
 EOF
 }
 
-if [[ "${1:-}" == "-h" || "${1:-}" == "--help" ]]; then
-  usage
-  exit 0
-fi
+CLEAN_BUILD=false
+
+parse_args() {
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      -h|--help)
+        usage
+        exit 0
+        ;;
+      --clean-build)
+        CLEAN_BUILD=true
+        ;;
+      *)
+        echo "Unknown option: $1" >&2
+        echo "Run with --help to see available options." >&2
+        exit 2
+        ;;
+    esac
+    shift
+  done
+}
 
 if [[ "$(id -u)" -eq 0 ]]; then
   SUDO=""
@@ -134,6 +152,12 @@ remove_stale_workspace_artifacts() {
   if [[ "${stale_simulation}" -eq 1 ]]; then rm -rf "${ROS_SIM_WS}/build" "${ROS_SIM_WS}/install" "${ROS_SIM_WS}/log"; fi
 }
 
+remove_simulation_workspace_artifacts_for_clean_build() {
+  # 明示的なクリーンビルド要求では、simulation workspace の生成物だけを削除して責務外へ波及させない。
+  echo "Remove sim/ros2_ws artifacts for clean build."
+  rm -rf "${ROS_SIM_WS}/build" "${ROS_SIM_WS}/install" "${ROS_SIM_WS}/log"
+}
+
 ensure_rosdep_initialized() {
   if [[ ! -f /etc/ros/rosdep/sources.list.d/20-default.list ]]; then
     ${SUDO} rosdep init || true
@@ -199,12 +223,16 @@ setup_simulation_workspace() {
   source_third_party_underlay
   ensure_simulation_underlay_patch_current
   require_simulation_underlay_package
+  if [[ "${CLEAN_BUILD}" == "true" ]]; then
+    remove_simulation_workspace_artifacts_for_clean_build
+  fi
   remove_stale_workspace_artifacts
   source_runtime_workspace_if_exists
   install_rosdeps_for_workspace "${ROS_SIM_WS_SRC_DIR}"
   build_project_workspace
 }
 
+parse_args "$@"
 require_ros2
 setup_simulation_workspace
 write_shell_environment_setup "${WORKSPACE_ROOT}" "${ROS_DISTRO}"
