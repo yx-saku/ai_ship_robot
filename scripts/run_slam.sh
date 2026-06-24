@@ -543,6 +543,72 @@ wait_for_lio_sam_startup() {
   done
 }
 
+is_bag_play_sensor_topic() {
+  local topic="$1"
+
+  [[ "${topic}" == *"/livox/lidar" || "${topic}" == *"/livox/imu" ]]
+}
+
+topic_has_subscriber() {
+  local topic="$1"
+  local topic_info=""
+
+  # ROS graph上の購読数だけを見て、bag再生前に入力待機状態へ入ったことを確認する。
+  topic_info="$(timeout 5s ros2 topic info "${topic}" --no-daemon --spin-time 2 2>/dev/null || true)"
+  [[ "${topic_info}" =~ Subscription[[:space:]]count:[[:space:]]([1-9][0-9]*) ]]
+}
+
+wait_for_bag_play_sensor_subscriber() {
+  local started_seconds=${SECONDS}
+  local elapsed_seconds=0
+  local last_log_seconds=0
+  local topic=""
+  local sensor_topics=()
+
+  # /tf_staticや後段のfiltered topicは除外し、bagに含まれるraw LiDAR/IMU入力だけを待機対象にする。
+  for topic in "$@"; do
+    if is_bag_play_sensor_topic "${topic}"; then
+      sensor_topics+=("${topic}")
+    fi
+  done
+
+  if [[ "${#sensor_topics[@]}" -eq 0 ]]; then
+    echo "No LiDAR/IMU rosbag playback topics configured; skipping subscriber wait." >&2
+    return 0
+  fi
+
+  echo "Waiting for a LiDAR/IMU subscriber before rosbag playback..." >&2
+  while true; do
+    if [[ -n "${SLAM_PID}" ]] && ! kill -0 "${SLAM_PID}" 2>/dev/null; then
+      echo "LIO-SAM exited before LiDAR/IMU subscriber became ready." >&2
+      return 1
+    fi
+
+    # どれか1つの入力topicにsubscriberが見えれば、SLAM側が受信待機に入ったとみなす。
+    for topic in "${sensor_topics[@]}"; do
+      if topic_has_subscriber "${topic}"; then
+        echo "LiDAR/IMU subscriber is ready on ${topic}." >&2
+        return 0
+      fi
+    done
+
+    elapsed_seconds=$((SECONDS - started_seconds))
+    if [[ "${WAIT_FOR_SLAM_STARTUP_TIMEOUT_SECONDS}" != "0" &&
+          "${WAIT_FOR_SLAM_STARTUP_TIMEOUT_SECONDS}" != "0.0" &&
+          "${elapsed_seconds}" -ge "${WAIT_FOR_SLAM_STARTUP_TIMEOUT_SECONDS}" ]]; then
+      echo "Timed out waiting for a LiDAR/IMU subscriber after ${elapsed_seconds}s." >&2
+      echo "Checked topics: ${sensor_topics[*]}" >&2
+      return 1
+    fi
+
+    if (( SECONDS - last_log_seconds >= 5 )); then
+      echo "Still waiting for a LiDAR/IMU subscriber on: ${sensor_topics[*]}" >&2
+      last_log_seconds=${SECONDS}
+    fi
+    sleep 0.2
+  done
+}
+
 wait_for_lio_sam_cloud_queue_empty() {
   local service_name="/lio_sam/deskew/is_cloud_queue_empty"
   local service_type="lio_sam/srv/SaveMap"
@@ -941,6 +1007,7 @@ run_bag_play_lio_sam() {
   SLAM_PID=$!
   ensure_process_started "${SLAM_PID}" "LIO-SAM"
   wait_for_lio_sam_startup
+  wait_for_bag_play_sensor_subscriber "${play_topics[@]}"
   # bag再生前にrecordを起動し、再生開始直後のtopicも取りこぼしにくくする。
   if [[ "${record_bag}" == "true" ]]; then
     start_rosbag_record "${bag_output}" true "${record_topics[@]}"

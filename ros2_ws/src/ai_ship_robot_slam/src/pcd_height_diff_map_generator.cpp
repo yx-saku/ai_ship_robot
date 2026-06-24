@@ -14,6 +14,7 @@
 
 #include <algorithm>
 #include <array>
+#include <cctype>
 #include <cmath>
 #include <cstdint>
 #include <cstdlib>
@@ -141,10 +142,12 @@ std::size_t parse_size(const std::string & value, const std::string & name)
 void print_usage(std::ostream & stream)
 {
   stream << "Usage: ros2 run ai_ship_robot_slam pcd_height_diff_map_generator ";
-  stream << "--input MAP.pcd --output MAP.pgm [OPTIONS]\n\n";
+  stream << "[--input MAP.pcd] [--output MAP.pgm] [OPTIONS]\n\n";
   stream << "Options:\n";
   stream << "  --input PATH                  Input ASCII PCD file.\n";
+  stream << "                                Default: latest PCD under workspace.\n";
   stream << "  --output PATH                 Output PGM file. YAML is written next to it.\n";
+  stream << "                                Default: outputs/traversability/<input>.pgm\n";
   stream << "  --resolution M                Grid resolution in meters. Default: 0.01\n";
   stream << "  --height-diff-threshold M     Neighbor height difference threshold. Default: 0.03\n";
   stream << "  --min-points-per-cell N       Minimum points required for observed cells.\n";
@@ -166,6 +169,105 @@ std::string take_option_value(
   }
   ++index;
   return argv[index];
+}
+
+std::string lowercase_copy(const std::string & text)
+{
+  std::string lowered;
+  lowered.reserve(text.size());
+  for (const auto character : text) {
+    lowered.push_back(static_cast<char>(std::tolower(static_cast<unsigned char>(character))));
+  }
+  return lowered;
+}
+
+std::filesystem::path find_workspace_root()
+{
+  if (const auto * workspace_root = std::getenv("AI_SHIP_ROBOT_WORKSPACE_ROOT")) {
+    return std::filesystem::path(workspace_root);
+  }
+
+  // 任意のサブディレクトリから実行されても、プロジェクト固有のファイル配置でrootを推定する。
+  auto directory = std::filesystem::current_path();
+  while (true) {
+    const auto package_xml = directory / "ros2_ws" / "src" / "ai_ship_robot_slam" / "package.xml";
+    if (std::filesystem::exists(package_xml)) {
+      return directory;
+    }
+    if (directory == directory.root_path()) {
+      break;
+    }
+    directory = directory.parent_path();
+  }
+  return std::filesystem::current_path();
+}
+
+bool should_skip_search_directory(const std::filesystem::path & path)
+{
+  const auto name = path.filename().string();
+  if (name.empty()) {
+    return false;
+  }
+
+  // 依存物・生成物・VCS配下はPCD探索対象から外し、重い再帰探索や誤選択を避ける。
+  if (name[0] == '.') {
+    return true;
+  }
+  return name == "build" || name == "install" || name == "log" || name == "node_modules";
+}
+
+bool is_pcd_file(const std::filesystem::path & path)
+{
+  return lowercase_copy(path.extension().string()) == ".pcd";
+}
+
+std::filesystem::path find_latest_pcd_file(const std::filesystem::path & workspace_root)
+{
+  std::error_code error;
+  if (!std::filesystem::is_directory(workspace_root, error)) {
+    throw std::runtime_error("workspace root is not a directory: " + workspace_root.string());
+  }
+
+  std::optional<std::filesystem::path> latest_path;
+  std::filesystem::file_time_type latest_time{};
+  std::filesystem::recursive_directory_iterator iterator(
+    workspace_root, std::filesystem::directory_options::skip_permission_denied, error);
+  if (error) {
+    throw std::runtime_error("failed to scan workspace for PCD files: " + error.message());
+  }
+
+  // ワークスペース内のPCDを更新時刻で比較し、同時刻ならパス名で決定的に選択する。
+  const std::filesystem::recursive_directory_iterator end;
+  while (iterator != end) {
+    const auto & entry = *iterator;
+    error.clear();
+    if (entry.is_directory(error) && should_skip_search_directory(entry.path())) {
+      iterator.disable_recursion_pending();
+    } else if (entry.is_regular_file(error) && is_pcd_file(entry.path())) {
+      const auto write_time = entry.last_write_time(error);
+      if (!error && (!latest_path.has_value() || write_time > latest_time ||
+        (write_time == latest_time && entry.path().string() > latest_path->string())))
+      {
+        latest_path = entry.path();
+        latest_time = write_time;
+      }
+    }
+    error.clear();
+    iterator.increment(error);
+  }
+
+  if (!latest_path.has_value()) {
+    throw std::runtime_error("no PCD files were found under workspace: " + workspace_root.string());
+  }
+  return *latest_path;
+}
+
+std::filesystem::path default_output_path(
+  const std::filesystem::path & workspace_root, const std::filesystem::path & input_path)
+{
+  auto output_path = workspace_root / "outputs" / "traversability" / input_path.filename();
+  output_path.replace_extension(".pgm");
+  return output_path;
 }
 
 Options parse_options(const int argc, char ** argv)
@@ -218,13 +320,15 @@ Options parse_options(const int argc, char ** argv)
     }
   }
 
-  // 必須引数と数値範囲を早期に検証し、巨大な点群読み込み前に設定ミスを止める。
+  const auto workspace_root = find_workspace_root();
   if (!has_input) {
-    throw std::invalid_argument("--input is required");
+    options.input_path = find_latest_pcd_file(workspace_root);
   }
   if (!has_output) {
-    throw std::invalid_argument("--output is required");
+    options.output_pgm_path = default_output_path(workspace_root, options.input_path);
   }
+
+  // 数値範囲と出力拡張子を早期に検証し、巨大な点群読み込み前に設定ミスを止める。
   if (options.resolution <= 0.0) {
     throw std::invalid_argument("--resolution must be positive");
   }
