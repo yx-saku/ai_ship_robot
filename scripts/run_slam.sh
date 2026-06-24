@@ -61,6 +61,9 @@ Modes:
 Options:
   --sim              Launch Gazebo simulation and LIO-SAM together.
                      Supported only in map mode.
+  --build            Run one-time environment setup before starting SLAM.
+  --clean-build      Remove target workspace build artifacts, then run setup.
+                     Implies --build.
   --record-bag       Record default SLAM output topics during SLAM execution.
   --bag-output PATH  Set rosbag output directory or prefix.
   --bag-topics CSV   Record only the given comma-separated topics.
@@ -214,7 +217,7 @@ source_overlay_if_current() {
     || grep -Fq "${WORKSPACE_ROOT}/third_party_ws" "${setup_file}" \
     || grep -Fq "${WORKSPACE_ROOT}/third_party_vendor" "${setup_file}"; then
     echo "Stale workspace setup detected: ${setup_file}" >&2
-    echo "Run bash install/install_third_party.sh && bash scripts/run_slam.sh map --sim --build." >&2
+    echo "Run bash install/install_third_party.sh && bash scripts/run_slam.sh map --sim --build or --clean-build." >&2
     return 1
   fi
 
@@ -736,6 +739,7 @@ save_pcd_map_if_requested() {
 
 run_slam_launch() {
   local build_workspace=false
+  local clean_build_workspace=false
   local launch_file="lio_sam.launch.py"
   local launch_args=()
 
@@ -750,6 +754,10 @@ run_slam_launch() {
 
     case "$1" in
       --build)
+        build_workspace=true
+        ;;
+      --clean-build)
+        clean_build_workspace=true
         build_workspace=true
         ;;
       --config=*)
@@ -941,8 +949,12 @@ run_slam_launch() {
   source_sim_slam_environment false
 
   if [[ "${build_workspace}" == "true" ]]; then
-    # --build指定時だけworkspace setupを実行し、通常起動では再buildを避ける。
-    bash "${SETUP_RUNTIME_SCRIPT}"
+    # 明示build時だけworkspace setupを実行し、clean指定時は同じ導線で再生成まで行う。
+    if [[ "${clean_build_workspace}" == "true" ]]; then
+      bash "${SETUP_RUNTIME_SCRIPT}" --clean-build
+    else
+      bash "${SETUP_RUNTIME_SCRIPT}"
+    fi
   fi
 
   if [[ ! -f "${WORKSPACE_ROOT}/ros2_ws/install/setup.bash" ]]; then
@@ -1056,6 +1068,7 @@ run_bag_play_lio_sam() {
 
 run_sim_lio_sam() {
   local build_workspace=false
+  local clean_build_workspace=false
   local lite_mode=false
   local robot_name_set=false
   local launch_args=()
@@ -1074,6 +1087,10 @@ run_sim_lio_sam() {
 
     case "$1" in
       --build)
+        build_workspace=true
+        ;;
+      --clean-build)
+        clean_build_workspace=true
         build_workspace=true
         ;;
       --config=*)
@@ -1322,9 +1339,14 @@ run_sim_lio_sam() {
   source_sim_slam_environment false
 
   if [[ "${build_workspace}" == "true" ]]; then
-    # --simのbuildはSLAM workspaceとsimulation workspaceを順に更新する。
-    bash "${SETUP_RUNTIME_SCRIPT}"
-    bash "${SETUP_SIMULATION_SCRIPT}"
+    # --simのbuildはruntimeとsimulationを順に更新し、clean指定時だけ各workspaceを再生成する。
+    if [[ "${clean_build_workspace}" == "true" ]]; then
+      bash "${SETUP_RUNTIME_SCRIPT}" --clean-build
+      bash "${SETUP_SIMULATION_SCRIPT}" --clean-build
+    else
+      bash "${SETUP_RUNTIME_SCRIPT}"
+      bash "${SETUP_SIMULATION_SCRIPT}"
+    fi
   fi
 
   if [[ ! -f "${WORKSPACE_ROOT}/ros2_ws/install/setup.bash" ]]; then

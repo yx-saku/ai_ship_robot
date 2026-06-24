@@ -13,6 +13,7 @@
 // limitations under the License.
 
 #include <Eigen/Core>
+#include <Eigen/Eigenvalues>
 #include <pcl/PCLPointCloud2.h>
 #include <pcl/common/transforms.h>
 #include <pcl/conversions.h>
@@ -41,6 +42,7 @@
 #include <sstream>
 #include <stdexcept>
 #include <string>
+#include <tuple>
 #include <unordered_set>
 #include <utility>
 #include <vector>
@@ -151,6 +153,16 @@ struct DistanceFieldMap
   int height{};
   std::size_t occupied_cells{};
   cv::Mat distance_meters;
+};
+
+struct CloudFeatureMetrics
+{
+  std::size_t filtered_points{};
+  std::size_t xy_cells{};
+  double linearity{1.0};
+  double planarity{};
+  double scattering{};
+  bool passed{};
 };
 
 struct StampedOdometry
@@ -388,6 +400,110 @@ CloudT::Ptr extract_cloud_neighborhood(
   return neighborhood;
 }
 
+CloudT::Ptr extract_cloud_neighborhood_with_z_band(
+  const CloudT::ConstPtr & cloud, const Eigen::Vector3f & center, const double radius,
+  const double z_min, const double z_max)
+{
+  CloudT::Ptr neighborhood(new CloudT);
+  const double radius_sq = radius * radius;
+  neighborhood->reserve(std::min<std::size_t>(cloud->size(), 200000U));
+
+  // GICP特徴量判定では中心相対zではなく絶対z帯域を使い、床天井に偏った範囲を除外する。
+  for (const auto & point : cloud->points) {
+    const double dx = static_cast<double>(point.x) - center.x();
+    const double dy = static_cast<double>(point.y) - center.y();
+    if (dx * dx + dy * dy > radius_sq) {
+      continue;
+    }
+    if (static_cast<double>(point.z) < z_min || static_cast<double>(point.z) > z_max) {
+      continue;
+    }
+    neighborhood->push_back(point);
+  }
+  neighborhood->width = static_cast<std::uint32_t>(neighborhood->size());
+  neighborhood->height = 1;
+  neighborhood->is_dense = true;
+  return neighborhood;
+}
+
+std::size_t count_xy_occupancy_cells(const CloudT::ConstPtr & cloud, const double cell_size)
+{
+  if (cell_size <= 0.0 || cloud->empty()) {
+    return 0U;
+  }
+
+  std::unordered_set<std::uint64_t> cells;
+  cells.reserve(cloud->size());
+
+  // 点密度差の影響を減らすため、局所形状の広がりはXY occupancy cell数へ圧縮して評価する。
+  for (const auto & point : cloud->points) {
+    const int cell_x = static_cast<int>(std::floor(static_cast<double>(point.x) / cell_size));
+    const int cell_y = static_cast<int>(std::floor(static_cast<double>(point.y) / cell_size));
+    cells.insert(make_cell_key(cell_x, cell_y));
+  }
+  return cells.size();
+}
+
+std::tuple<double, double, double> compute_pca_shape_metrics(const CloudT::ConstPtr & cloud)
+{
+  if (cloud->size() < 3U) {
+    return {1.0, 0.0, 0.0};
+  }
+
+  Eigen::Vector3d centroid = Eigen::Vector3d::Zero();
+  for (const auto & point : cloud->points) {
+    centroid.x() += static_cast<double>(point.x);
+    centroid.y() += static_cast<double>(point.y);
+    centroid.z() += static_cast<double>(point.z);
+  }
+  centroid /= static_cast<double>(cloud->size());
+
+  Eigen::Matrix3d covariance = Eigen::Matrix3d::Zero();
+  for (const auto & point : cloud->points) {
+    const Eigen::Vector3d centered(
+      static_cast<double>(point.x) - centroid.x(),
+      static_cast<double>(point.y) - centroid.y(),
+      static_cast<double>(point.z) - centroid.z());
+    covariance += centered * centered.transpose();
+  }
+  covariance /= static_cast<double>(cloud->size());
+
+  // 固有値比から線状性・平面性・散乱度を算出し、退化した局所形状を安全に判定する。
+  Eigen::SelfAdjointEigenSolver<Eigen::Matrix3d> solver(covariance);
+  if (solver.info() != Eigen::Success) {
+    return {1.0, 0.0, 0.0};
+  }
+
+  Eigen::Vector3d eigenvalues = solver.eigenvalues().cwiseMax(0.0);
+  const double lambda1 = eigenvalues(2);
+  const double lambda2 = eigenvalues(1);
+  const double lambda3 = eigenvalues(0);
+  if (!std::isfinite(lambda1) || lambda1 <= 1.0e-12) {
+    return {1.0, 0.0, 0.0};
+  }
+
+  const double linearity = std::clamp((lambda1 - lambda2) / lambda1, 0.0, 1.0);
+  const double planarity = std::clamp((lambda2 - lambda3) / lambda1, 0.0, 1.0);
+  const double scattering = std::clamp(lambda3 / lambda1, 0.0, 1.0);
+  return {linearity, planarity, scattering};
+}
+
+CloudFeatureMetrics evaluate_cloud_feature_metrics(
+  const CloudT::ConstPtr & cloud, const double occupancy_cell_size, const std::size_t min_points,
+  const std::size_t min_xy_cells, const double min_scattering, const double max_linearity)
+{
+  CloudFeatureMetrics metrics;
+  metrics.filtered_points = cloud->size();
+  metrics.xy_cells = count_xy_occupancy_cells(cloud, occupancy_cell_size);
+  std::tie(metrics.linearity, metrics.planarity, metrics.scattering) =
+    compute_pca_shape_metrics(cloud);
+
+  // 点数・広がり・退化度を併用し、平坦面や線状物だけの局所範囲をGICP候補から外す。
+  metrics.passed = metrics.filtered_points >= min_points && metrics.xy_cells >= min_xy_cells &&
+    (metrics.scattering >= min_scattering || metrics.linearity <= max_linearity);
+  return metrics;
+}
+
 std::size_t descriptor_index(
   const int ring_index, const int sector_index, const int sectors)
 {
@@ -509,17 +625,28 @@ public:
       get_logger(),
       "PCD localization diagnostics: cloud_topic=%s odometry_topic=%s accumulation=%.3fs "
       "sc_leaf(map=%.3f scan=%.3f) initial_ndt_leaf(map=%.3f scan=%.3f) "
-      "fine_gicp(enabled=%d candidates=%d leaf(map=%.3f scan=%.3f) threshold=%.3f) "
+      "fine_gicp(enabled=%d candidates=%d leaf(map=%.3f scan=%.3f) threshold=%.3f "
+      "early_accept=%d early_fitness=%.3f adaptive=%d radius=[%.3f,%.3f,%.3f,%.3f] "
+      "feature_z=[%.3f,%.3f] min_points=(%zu,%zu) min_xy_cells=(%zu,%zu) cell=%.3f "
+      "min_scattering=%.3f max_linearity=%.3f) "
       "distance_match(enabled=%d grid=%.3f max_dist=%.3f search_xy=%.3f step=%.3f "
       "yaw_range=%.3f yaw_step=%.3f candidates=%d hit=%.3f) "
       "tracking_ndt_leaf(map=%.3f scan=%.3f) sc_threshold=%.3f sc_gap=%.3f "
-      "ndt_fitness=%.3f ndt_gap=%.3f continuous_localization=%d",
+      "ndt_fitness=%.3f ndt_gap=%.3f early_accept=%d early_fitness=%.3f min_candidates=%d "
+      "continuous_localization=%d",
       cloud_topic_.c_str(), odometry_topic_.c_str(), initial_accumulation_sec_,
       scan_context_map_voxel_leaf_size_, scan_context_scan_voxel_leaf_size_,
       initial_ndt_map_voxel_leaf_size_, initial_ndt_scan_voxel_leaf_size_,
       fine_gicp_enabled_ ? 1 : 0, fine_gicp_candidate_count_,
       fine_gicp_map_voxel_leaf_size_, fine_gicp_scan_voxel_leaf_size_,
-      fine_gicp_fitness_threshold_,
+      fine_gicp_fitness_threshold_, fine_gicp_early_accept_enabled_ ? 1 : 0,
+      fine_gicp_early_accept_fitness_, adaptive_fine_gicp_enabled_ ? 1 : 0,
+      adaptive_fine_gicp_radius_1_, adaptive_fine_gicp_radius_2_, adaptive_fine_gicp_radius_3_,
+      adaptive_fine_gicp_radius_4_, adaptive_fine_gicp_feature_z_min_,
+      adaptive_fine_gicp_feature_z_max_, adaptive_fine_gicp_min_source_points_,
+      adaptive_fine_gicp_min_target_points_, adaptive_fine_gicp_min_source_xy_cells_,
+      adaptive_fine_gicp_min_target_xy_cells_, adaptive_fine_gicp_xy_cell_size_,
+      adaptive_fine_gicp_min_scattering_, adaptive_fine_gicp_max_linearity_,
       distance_match_enabled_ ? 1 : 0, distance_match_grid_resolution_,
       distance_match_max_distance_, distance_match_search_xy_radius_,
       distance_match_search_xy_step_, distance_match_search_yaw_range_deg_,
@@ -527,7 +654,9 @@ public:
       distance_match_hit_distance_,
       tracking_ndt_map_voxel_leaf_size_, tracking_ndt_scan_voxel_leaf_size_,
       scan_context_score_threshold_, scan_context_score_gap_threshold_, ndt_fitness_threshold_,
-      ndt_fitness_gap_threshold_, continuous_localization_enabled_ ? 1 : 0);
+      ndt_fitness_gap_threshold_, initial_ndt_early_accept_enabled_ ? 1 : 0,
+      initial_ndt_early_accept_fitness_, initial_ndt_early_accept_min_candidates_,
+      continuous_localization_enabled_ ? 1 : 0);
     publish_status("waiting for accumulated scan context input");
   }
 
@@ -601,6 +730,12 @@ private:
     ndt_max_iterations_ = declare_parameter<int>("ndt_max_iterations", 20);
     ndt_fitness_threshold_ = declare_parameter<double>("ndt_fitness_threshold", 2.0);
     ndt_fitness_gap_threshold_ = declare_parameter<double>("ndt_fitness_gap_threshold", 0.02);
+    initial_ndt_early_accept_enabled_ = declare_parameter<bool>(
+      "initial_ndt_early_accept_enabled", true);
+    initial_ndt_early_accept_fitness_ = declare_parameter<double>(
+      "initial_ndt_early_accept_fitness", 0.4);
+    initial_ndt_early_accept_min_candidates_ = declare_parameter<int>(
+      "initial_ndt_early_accept_min_candidates", 2);
     ndt_transformation_epsilon_ = declare_parameter<double>("ndt_transformation_epsilon", 0.01);
     ndt_step_size_ = declare_parameter<double>("ndt_step_size", 0.1);
     continuous_localization_enabled_ = declare_parameter<bool>(
@@ -622,6 +757,33 @@ private:
       "fine_gicp_fitness_threshold", 0.5);
     fine_gicp_fitness_gap_threshold_ = declare_parameter<double>(
       "fine_gicp_fitness_gap_threshold", 0.0);
+    fine_gicp_early_accept_enabled_ = declare_parameter<bool>(
+      "fine_gicp_early_accept_enabled", true);
+    fine_gicp_early_accept_fitness_ = declare_parameter<double>(
+      "fine_gicp_early_accept_fitness", 0.12);
+    adaptive_fine_gicp_enabled_ = declare_parameter<bool>("adaptive_fine_gicp_enabled", true);
+    adaptive_fine_gicp_radius_1_ = declare_parameter<double>("adaptive_fine_gicp_radius_1", 4.0);
+    adaptive_fine_gicp_radius_2_ = declare_parameter<double>("adaptive_fine_gicp_radius_2", 6.0);
+    adaptive_fine_gicp_radius_3_ = declare_parameter<double>("adaptive_fine_gicp_radius_3", 8.0);
+    adaptive_fine_gicp_radius_4_ = declare_parameter<double>("adaptive_fine_gicp_radius_4", 10.0);
+    adaptive_fine_gicp_feature_z_min_ = declare_parameter<double>(
+      "adaptive_fine_gicp_feature_z_min", 0.2);
+    adaptive_fine_gicp_feature_z_max_ = declare_parameter<double>(
+      "adaptive_fine_gicp_feature_z_max", 1.5);
+    adaptive_fine_gicp_min_source_points_ = static_cast<std::size_t>(declare_parameter<int>(
+      "adaptive_fine_gicp_min_source_points", 400));
+    adaptive_fine_gicp_min_target_points_ = static_cast<std::size_t>(declare_parameter<int>(
+      "adaptive_fine_gicp_min_target_points", 1200));
+    adaptive_fine_gicp_min_source_xy_cells_ = static_cast<std::size_t>(declare_parameter<int>(
+      "adaptive_fine_gicp_min_source_xy_cells", 80));
+    adaptive_fine_gicp_min_target_xy_cells_ = static_cast<std::size_t>(declare_parameter<int>(
+      "adaptive_fine_gicp_min_target_xy_cells", 120));
+    adaptive_fine_gicp_xy_cell_size_ = declare_parameter<double>(
+      "adaptive_fine_gicp_xy_cell_size", 0.5);
+    adaptive_fine_gicp_min_scattering_ = declare_parameter<double>(
+      "adaptive_fine_gicp_min_scattering", 0.01);
+    adaptive_fine_gicp_max_linearity_ = declare_parameter<double>(
+      "adaptive_fine_gicp_max_linearity", 0.95);
     local_map_radius_ = declare_parameter<double>("local_map_radius", 10.0);
     local_map_z_radius_ = declare_parameter<double>("local_map_z_radius", 5.0);
     initial_pose_z_ = declare_parameter<double>("initial_pose_z", 0.0);
@@ -650,11 +812,17 @@ private:
       distance_match_hit_distance_ <= 0.0 ||
       distance_match_max_mean_distance_ <= 0.0 || distance_match_min_hit_ratio_ < 0.0 ||
       distance_match_max_far_ratio_ < 0.0 || distance_match_max_out_of_bounds_ratio_ < 0.0 ||
+      initial_ndt_early_accept_fitness_ <= 0.0 ||
       initial_ndt_source_radius_ <= 0.0 || initial_ndt_target_radius_ <= 0.0 ||
       initial_ndt_z_radius_ <= 0.0 || fine_gicp_source_radius_ <= 0.0 ||
       fine_gicp_target_radius_ <= 0.0 || fine_gicp_z_radius_ <= 0.0 ||
       fine_gicp_max_correspondence_distance_ <= 0.0 || fine_gicp_transformation_epsilon_ <= 0.0 ||
-      fine_gicp_fitness_threshold_ <= 0.0 || local_map_radius_ <= 0.0 ||
+      fine_gicp_fitness_threshold_ <= 0.0 || fine_gicp_early_accept_fitness_ <= 0.0 ||
+      adaptive_fine_gicp_radius_1_ <= 0.0 || adaptive_fine_gicp_radius_2_ <= 0.0 ||
+      adaptive_fine_gicp_radius_3_ <= 0.0 || adaptive_fine_gicp_radius_4_ <= 0.0 ||
+      adaptive_fine_gicp_xy_cell_size_ <= 0.0 || adaptive_fine_gicp_min_scattering_ < 0.0 ||
+      adaptive_fine_gicp_max_linearity_ < 0.0 ||
+      local_map_radius_ <= 0.0 ||
       local_map_z_radius_ <= 0.0)
     {
       throw std::invalid_argument(
@@ -663,20 +831,29 @@ private:
     if (initial_candidate_count_ <= 0 || scan_context_rings_ <= 0 || scan_context_sectors_ <= 0 ||
       ndt_max_iterations_ <= 0 || fine_gicp_candidate_count_ <= 0 ||
       distance_match_candidate_count_ <= 0 ||
-      fine_gicp_max_iterations_ <= 0 || tracking_failure_limit_ <= 0 ||
+      fine_gicp_max_iterations_ <= 0 || initial_ndt_early_accept_min_candidates_ <= 0 ||
+      tracking_failure_limit_ <= 0 ||
       min_registration_points_ <= 0 || min_scan_context_points_ <= 0 ||
       min_scan_context_bins_ <= 0)
     {
       throw std::invalid_argument("count parameters must be positive");
     }
     if (distance_match_map_z_min_ >= distance_match_map_z_max_ ||
-      distance_match_scan_z_min_ >= distance_match_scan_z_max_)
+      distance_match_scan_z_min_ >= distance_match_scan_z_max_ ||
+      adaptive_fine_gicp_feature_z_min_ >= adaptive_fine_gicp_feature_z_max_)
     {
       throw std::invalid_argument("distance matching z filter min must be less than max");
     }
+    if (!(adaptive_fine_gicp_radius_1_ < adaptive_fine_gicp_radius_2_ &&
+      adaptive_fine_gicp_radius_2_ < adaptive_fine_gicp_radius_3_ &&
+      adaptive_fine_gicp_radius_3_ < adaptive_fine_gicp_radius_4_))
+    {
+      throw std::invalid_argument("adaptive fine GICP radii must be strictly increasing");
+    }
     if (distance_match_hit_distance_ > distance_match_max_distance_ ||
       distance_match_min_hit_ratio_ > 1.0 || distance_match_max_far_ratio_ > 1.0 ||
-      distance_match_max_out_of_bounds_ratio_ > 1.0)
+      distance_match_max_out_of_bounds_ratio_ > 1.0 ||
+      adaptive_fine_gicp_min_scattering_ > 1.0 || adaptive_fine_gicp_max_linearity_ > 1.0)
     {
       throw std::invalid_argument("distance matching thresholds are inconsistent");
     }
@@ -1159,6 +1336,28 @@ private:
     return lhs.registration.fitness < rhs.registration.fitness;
   }
 
+  bool should_early_accept_ndt(
+    const std::size_t accepted_candidate_count, const InitialGuessCandidate & guess_candidate,
+    const RegistrationResult & registration) const
+  {
+    if (!initial_ndt_early_accept_enabled_ || !guess_candidate.refined_with_distance) {
+      return false;
+    }
+    if (accepted_candidate_count <
+      static_cast<std::size_t>(initial_ndt_early_accept_min_candidates_))
+    {
+      return false;
+    }
+    return registration.converged &&
+           registration.fitness <= initial_ndt_early_accept_fitness_;
+  }
+
+  bool should_early_accept_gicp(const RegistrationResult & registration) const
+  {
+    return fine_gicp_early_accept_enabled_ && registration.converged &&
+           registration.fitness <= fine_gicp_early_accept_fitness_;
+  }
+
   std::vector<InitialGuessCandidate> make_fallback_initial_guesses(
     const std::vector<CandidateMatch> & candidates) const
   {
@@ -1290,16 +1489,13 @@ private:
       ndt_source_full, Eigen::Vector3f::Zero(), initial_ndt_source_radius_, initial_ndt_z_radius_);
     auto fine_gicp_source_full = voxel_downsample(
       accumulated_scan_lidar_init_, fine_gicp_scan_voxel_leaf_size_);
-    auto fine_gicp_source = extract_cloud_neighborhood(
-      fine_gicp_source_full, Eigen::Vector3f::Zero(), fine_gicp_source_radius_,
-      fine_gicp_z_radius_);
     RCLCPP_INFO(
       get_logger(),
       "Initialization attempt %zu: stamp=%.6f accumulated_points=%zu sc_source_points=%zu "
-      "ndt_source_points=%zu ndt_source_full_points=%zu fine_gicp_source_points=%zu",
+      "ndt_source_points=%zu ndt_source_full_points=%zu fine_gicp_source_full_points=%zu",
       initialization_attempt_count_, stamp.seconds(), accumulated_scan_lidar_init_->size(),
       scan_context_source->size(), ndt_source->size(), ndt_source_full->size(),
-      fine_gicp_source->size());
+      fine_gicp_source_full->size());
     if (ndt_source->size() < static_cast<std::size_t>(min_registration_points_)) {
       RCLCPP_WARN(
         get_logger(),
@@ -1425,6 +1621,17 @@ private:
         accepted_results.push_back(
           InitialResult{candidate, registration, registration.fitness, false,
             guess_candidate.distance_score, guess_candidate.refined_with_distance});
+
+        // DTで絞り込んだ候補が十分低fitnessなら、最低件数確認後に残りNDTを省略して初期化を短縮する。
+        if (should_early_accept_ndt(accepted_results.size(), guess_candidate, registration)) {
+          RCLCPP_INFO(
+            get_logger(),
+            "Initialization NDT early accepted: attempt=%zu accepted_candidates=%zu "
+            "fitness=%.6f threshold=%.6f min_candidates=%d",
+            initialization_attempt_count_, accepted_results.size(), registration.fitness,
+            initial_ndt_early_accept_fitness_, initial_ndt_early_accept_min_candidates_);
+          break;
+        }
       }
     }
 
@@ -1443,7 +1650,7 @@ private:
       });
     auto final_results = accepted_results;
     if (fine_gicp_enabled_) {
-      final_results = refine_initial_candidates_with_gicp(accepted_results, fine_gicp_source);
+      final_results = refine_initial_candidates_with_gicp(accepted_results, fine_gicp_source_full);
       if (final_results.empty()) {
         RCLCPP_WARN(
           get_logger(),
@@ -1502,36 +1709,113 @@ private:
     if (source_cloud->size() < static_cast<std::size_t>(min_registration_points_)) {
       RCLCPP_WARN(
         get_logger(),
-        "Skip fine GICP because source_points=%zu is below min_registration_points=%d",
+        "Skip fine GICP because source_full_points=%zu is below min_registration_points=%d",
         source_cloud->size(), min_registration_points_);
       return refined_results;
     }
 
+    const std::vector<double> adaptive_radii{
+      adaptive_fine_gicp_radius_1_, adaptive_fine_gicp_radius_2_, adaptive_fine_gicp_radius_3_,
+      adaptive_fine_gicp_radius_4_};
     const auto refine_count = std::min<std::size_t>(
       coarse_results.size(), static_cast<std::size_t>(fine_gicp_candidate_count_));
     refined_results.reserve(refine_count);
     for (std::size_t index = 0; index < refine_count; ++index) {
       const auto & coarse_result = coarse_results[index];
       const auto origin = coarse_result.registration.target_from_source.getOrigin();
-      auto target_cloud = extract_cloud_neighborhood(
-        fine_gicp_map_cloud_, Eigen::Vector3f(
-          origin.x(), origin.y(),
-          origin.z()), fine_gicp_target_radius_,
-        fine_gicp_z_radius_);
-      if (target_cloud->size() < static_cast<std::size_t>(min_registration_points_)) {
+      CloudT::ConstPtr selected_source_cloud;
+      CloudT::ConstPtr selected_target_cloud;
+      double selected_radius = fine_gicp_target_radius_;
+
+      if (adaptive_fine_gicp_enabled_) {
+        bool selected = false;
+        for (const double radius : adaptive_radii) {
+          auto candidate_source_cloud = extract_cloud_neighborhood(
+            source_cloud, Eigen::Vector3f::Zero(), radius, fine_gicp_z_radius_);
+          auto candidate_target_cloud = extract_cloud_neighborhood(
+            fine_gicp_map_cloud_, Eigen::Vector3f(origin.x(), origin.y(), origin.z()), radius,
+            fine_gicp_z_radius_);
+          auto feature_source_cloud = extract_cloud_neighborhood_with_z_band(
+            source_cloud, Eigen::Vector3f::Zero(), radius, adaptive_fine_gicp_feature_z_min_,
+            adaptive_fine_gicp_feature_z_max_);
+          auto feature_target_cloud = extract_cloud_neighborhood_with_z_band(
+            fine_gicp_map_cloud_, Eigen::Vector3f(origin.x(), origin.y(), origin.z()), radius,
+            adaptive_fine_gicp_feature_z_min_, adaptive_fine_gicp_feature_z_max_);
+          const auto source_metrics = evaluate_cloud_feature_metrics(
+            feature_source_cloud, adaptive_fine_gicp_xy_cell_size_,
+            adaptive_fine_gicp_min_source_points_, adaptive_fine_gicp_min_source_xy_cells_,
+            adaptive_fine_gicp_min_scattering_, adaptive_fine_gicp_max_linearity_);
+          const auto target_metrics = evaluate_cloud_feature_metrics(
+            feature_target_cloud, adaptive_fine_gicp_xy_cell_size_,
+            adaptive_fine_gicp_min_target_points_, adaptive_fine_gicp_min_target_xy_cells_,
+            adaptive_fine_gicp_min_scattering_, adaptive_fine_gicp_max_linearity_);
+
+          // 半径ごとにsource/target双方の局所形状を評価し、十分な最小範囲だけをGICPへ渡す。
+          RCLCPP_INFO(
+            get_logger(),
+            "Fine GICP adaptive radius: attempt=%zu index=%zu/%zu radius=%.3f "
+            "source(points=%zu cells=%zu lin=%.3f plan=%.3f scat=%.3f passed=%d) "
+            "target(points=%zu cells=%zu lin=%.3f plan=%.3f scat=%.3f passed=%d)",
+            initialization_attempt_count_, index + 1U, refine_count, radius,
+            source_metrics.filtered_points, source_metrics.xy_cells, source_metrics.linearity,
+            source_metrics.planarity, source_metrics.scattering, source_metrics.passed ? 1 : 0,
+            target_metrics.filtered_points, target_metrics.xy_cells, target_metrics.linearity,
+            target_metrics.planarity, target_metrics.scattering, target_metrics.passed ? 1 : 0);
+          if (!source_metrics.passed || !target_metrics.passed) {
+            continue;
+          }
+
+          selected_source_cloud = candidate_source_cloud;
+          selected_target_cloud = candidate_target_cloud;
+          selected_radius = radius;
+          selected = true;
+          RCLCPP_INFO(
+            get_logger(),
+            "Fine GICP adaptive radius selected: attempt=%zu index=%zu/%zu radius=%.3f",
+            initialization_attempt_count_, index + 1U, refine_count, selected_radius);
+          break;
+        }
+
+        if (!selected) {
+          RCLCPP_WARN(
+            get_logger(),
+            "Fine GICP candidate skipped by feature gating: attempt=%zu index=%zu/%zu "
+            "max_radius=%.3f coarse_fitness=%.6f",
+            initialization_attempt_count_, index + 1U, refine_count, adaptive_radii.back(),
+            coarse_result.registration.fitness);
+          continue;
+        }
+      } else {
+        selected_source_cloud = extract_cloud_neighborhood(
+          source_cloud, Eigen::Vector3f::Zero(), fine_gicp_source_radius_, fine_gicp_z_radius_);
+        selected_target_cloud = extract_cloud_neighborhood(
+          fine_gicp_map_cloud_, Eigen::Vector3f(origin.x(), origin.y(), origin.z()),
+          fine_gicp_target_radius_, fine_gicp_z_radius_);
+      }
+
+      if (selected_source_cloud->size() < static_cast<std::size_t>(min_registration_points_)) {
+        RCLCPP_WARN(
+          get_logger(),
+          "Fine GICP candidate skipped: attempt=%zu index=%zu/%zu source_points=%zu "
+          "min_registration_points=%d radius=%.3f coarse_fitness=%.6f",
+          initialization_attempt_count_, index + 1U, refine_count, selected_source_cloud->size(),
+          min_registration_points_, selected_radius, coarse_result.registration.fitness);
+        continue;
+      }
+      if (selected_target_cloud->size() < static_cast<std::size_t>(min_registration_points_)) {
         RCLCPP_WARN(
           get_logger(),
           "Fine GICP candidate skipped: attempt=%zu index=%zu/%zu target_points=%zu "
-          "min_registration_points=%d coarse_fitness=%.6f",
-          initialization_attempt_count_, index + 1U, refine_count, target_cloud->size(),
-          min_registration_points_, coarse_result.registration.fitness);
+          "min_registration_points=%d radius=%.3f coarse_fitness=%.6f",
+          initialization_attempt_count_, index + 1U, refine_count, selected_target_cloud->size(),
+          min_registration_points_, selected_radius, coarse_result.registration.fitness);
         continue;
       }
 
       // 粗いNDTのposeを初期値にして、局所範囲だけをGICPで精密化する。
       const auto gicp_start = std::chrono::steady_clock::now();
       auto registration = run_gicp(
-        source_cloud, target_cloud, coarse_result.registration.target_from_source);
+        selected_source_cloud, selected_target_cloud, coarse_result.registration.target_from_source);
       const double gicp_ms = elapsed_milliseconds(
         gicp_start, std::chrono::steady_clock::now());
       const bool accepted = registration.converged &&
@@ -1539,18 +1823,30 @@ private:
       const auto result_origin = registration.target_from_source.getOrigin();
       RCLCPP_INFO(
         get_logger(),
-        "Fine GICP candidate: attempt=%zu index=%zu/%zu source_points=%zu target_points=%zu "
-        "result=(%.3f, %.3f, %.3f, %.6f) duration_ms=%.3f converged=%d "
+        "Fine GICP candidate: attempt=%zu index=%zu/%zu radius=%.3f source_points=%zu "
+        "target_points=%zu result=(%.3f, %.3f, %.3f, %.6f) duration_ms=%.3f converged=%d "
         "fitness=%.6f threshold=%.6f accepted=%d coarse_fitness=%.6f",
-        initialization_attempt_count_, index + 1U, refine_count, source_cloud->size(),
-        target_cloud->size(), result_origin.x(), result_origin.y(), result_origin.z(),
-        yaw_from_transform(registration.target_from_source), gicp_ms,
+        initialization_attempt_count_, index + 1U, refine_count, selected_radius,
+        selected_source_cloud->size(), selected_target_cloud->size(), result_origin.x(),
+        result_origin.y(), result_origin.z(), yaw_from_transform(registration.target_from_source),
+        gicp_ms,
         registration.converged ? 1 : 0, registration.fitness, fine_gicp_fitness_threshold_,
         accepted ? 1 : 0, coarse_result.registration.fitness);
       if (accepted) {
         refined_results.push_back(
           InitialResult{coarse_result.candidate, registration, coarse_result.registration.fitness,
             true, coarse_result.distance_score, coarse_result.refined_with_distance});
+
+        // coarse NDT後のGICPが十分良ければ、その時点で最終候補として扱い残り精密化を省略する。
+        if (should_early_accept_gicp(registration)) {
+          RCLCPP_INFO(
+            get_logger(),
+            "Fine GICP early accepted: attempt=%zu accepted_candidates=%zu "
+            "fitness=%.6f threshold=%.6f",
+            initialization_attempt_count_, refined_results.size(), registration.fitness,
+            fine_gicp_early_accept_fitness_);
+          break;
+        }
       }
     }
 
@@ -1843,6 +2139,9 @@ private:
   int ndt_max_iterations_{};
   double ndt_fitness_threshold_{};
   double ndt_fitness_gap_threshold_{};
+  bool initial_ndt_early_accept_enabled_{};
+  double initial_ndt_early_accept_fitness_{};
+  int initial_ndt_early_accept_min_candidates_{};
   double ndt_transformation_epsilon_{};
   double ndt_step_size_{};
   bool continuous_localization_enabled_{};
@@ -1859,6 +2158,22 @@ private:
   double fine_gicp_transformation_epsilon_{};
   double fine_gicp_fitness_threshold_{};
   double fine_gicp_fitness_gap_threshold_{};
+  bool fine_gicp_early_accept_enabled_{};
+  double fine_gicp_early_accept_fitness_{};
+  bool adaptive_fine_gicp_enabled_{};
+  double adaptive_fine_gicp_radius_1_{};
+  double adaptive_fine_gicp_radius_2_{};
+  double adaptive_fine_gicp_radius_3_{};
+  double adaptive_fine_gicp_radius_4_{};
+  double adaptive_fine_gicp_feature_z_min_{};
+  double adaptive_fine_gicp_feature_z_max_{};
+  std::size_t adaptive_fine_gicp_min_source_points_{};
+  std::size_t adaptive_fine_gicp_min_target_points_{};
+  std::size_t adaptive_fine_gicp_min_source_xy_cells_{};
+  std::size_t adaptive_fine_gicp_min_target_xy_cells_{};
+  double adaptive_fine_gicp_xy_cell_size_{};
+  double adaptive_fine_gicp_min_scattering_{};
+  double adaptive_fine_gicp_max_linearity_{};
   double local_map_radius_{};
   double local_map_z_radius_{};
   double initial_pose_z_{};

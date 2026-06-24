@@ -45,6 +45,8 @@ Usage: bash sim/scripts/run_simulation.sh [OPTIONS]
 
 Options:
   --build             Run one-time environment setup before launching simulation.
+  --clean-build       Remove target workspace build artifacts, then run setup.
+                      Implies --build.
   --lite              Disable Gazebo Classic GUI and default LiDAR rays to quarter resolution.
   --gui               Enable Gazebo Classic GUI.
   --no-gui            Disable Gazebo Classic GUI.
@@ -263,7 +265,7 @@ source_overlay_if_current() {
     || grep -Fq "${WORKSPACE_ROOT}/third_party_ws" "${setup_file}" \
     || grep -Fq "${WORKSPACE_ROOT}/third_party_vendor" "${setup_file}"; then
     echo "Stale workspace setup detected: ${setup_file}" >&2
-    echo "Run bash install/install_third_party.sh && bash sim/install/install_third_party.sh && bash sim/scripts/run_simulation.sh --build." >&2
+    echo "Run bash install/install_third_party.sh && bash sim/install/install_third_party.sh && bash sim/scripts/run_simulation.sh --build or --clean-build." >&2
     return 1
   fi
 
@@ -629,6 +631,7 @@ WORLD_PATH=""
 REAL_TIME_FACTOR=""
 SCAN_PATTERN_LINE_LOOKUP=false
 BUILD_WORKSPACE=false
+CLEAN_BUILD_WORKSPACE=false
 LITE_MODE=false
 LIDAR_RESOLUTION_MODE="default"
 RECORD_BAG=false
@@ -651,6 +654,10 @@ while [[ $# -gt 0 ]]; do
       exit 0
       ;;
     --build)
+      BUILD_WORKSPACE=true
+      ;;
+    --clean-build)
+      CLEAN_BUILD_WORKSPACE=true
       BUILD_WORKSPACE=true
       ;;
     --lite)
@@ -839,8 +846,12 @@ esac
 source_workspace_environment false
 
 if [[ "${BUILD_WORKSPACE}" == "true" ]]; then
-  # simulation単体起動ではros2_wsをbuildせず、simulation workspaceだけを更新する。
-  bash "${SETUP_SIMULATION_SCRIPT}"
+  # simulation単体起動では simulation workspace だけを更新し、clean指定時だけその生成物を再作成する。
+  if [[ "${CLEAN_BUILD_WORKSPACE}" == "true" ]]; then
+    bash "${SETUP_SIMULATION_SCRIPT}" --clean-build
+  else
+    bash "${SETUP_SIMULATION_SCRIPT}"
+  fi
 fi
 
 if [[ ! -f "${SIM_ROOT}/ros2_ws/install/setup.bash" ]]; then

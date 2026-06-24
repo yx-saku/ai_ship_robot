@@ -12,9 +12,9 @@ pcd_localization_node:
     initial_ndt_map_voxel_leaf_size: 0.5
     initial_ndt_scan_voxel_leaf_size: 0.5
     fine_gicp_enabled: true
-    fine_gicp_candidate_count: 2
-    fine_gicp_map_voxel_leaf_size: 0.15
-    fine_gicp_scan_voxel_leaf_size: 0.15
+    fine_gicp_candidate_count: 1
+    fine_gicp_map_voxel_leaf_size: 0.25
+    fine_gicp_scan_voxel_leaf_size: 0.25
     distance_match_enabled: true
     distance_match_grid_resolution: 0.25
     distance_match_max_distance: 3.0
@@ -34,7 +34,7 @@ pcd_localization_node:
     distance_match_max_out_of_bounds_ratio: 0.3
     tracking_ndt_map_voxel_leaf_size: 0.2
     tracking_ndt_scan_voxel_leaf_size: 0.2
-    initial_accumulation_sec: 3.0
+    initial_accumulation_sec: 1.0
     initial_candidate_count: 5
     scan_context_rings: 20
     scan_context_sectors: 60
@@ -47,6 +47,9 @@ pcd_localization_node:
     ndt_max_iterations: 20
     ndt_fitness_threshold: 2.0
     ndt_fitness_gap_threshold: 0.02
+    initial_ndt_early_accept_enabled: true
+    initial_ndt_early_accept_fitness: 0.4
+    initial_ndt_early_accept_min_candidates: 2
     ndt_transformation_epsilon: 0.01
     ndt_step_size: 0.1
     continuous_localization_enabled: false
@@ -55,14 +58,30 @@ pcd_localization_node:
     initial_ndt_source_radius: 10.0
     initial_ndt_target_radius: 10.0
     initial_ndt_z_radius: 5.0
-    fine_gicp_source_radius: 8.0
-    fine_gicp_target_radius: 8.0
+    fine_gicp_source_radius: 6.0
+    fine_gicp_target_radius: 6.0
     fine_gicp_z_radius: 5.0
     fine_gicp_max_correspondence_distance: 0.7
     fine_gicp_max_iterations: 30
     fine_gicp_transformation_epsilon: 0.001
     fine_gicp_fitness_threshold: 0.5
     fine_gicp_fitness_gap_threshold: 0.0
+    fine_gicp_early_accept_enabled: true
+    fine_gicp_early_accept_fitness: 0.12
+    adaptive_fine_gicp_enabled: true
+    adaptive_fine_gicp_radius_1: 4.0
+    adaptive_fine_gicp_radius_2: 6.0
+    adaptive_fine_gicp_radius_3: 8.0
+    adaptive_fine_gicp_radius_4: 10.0
+    adaptive_fine_gicp_feature_z_min: 0.2
+    adaptive_fine_gicp_feature_z_max: 1.5
+    adaptive_fine_gicp_min_source_points: 100
+    adaptive_fine_gicp_min_target_points: 100
+    adaptive_fine_gicp_min_source_xy_cells: 10
+    adaptive_fine_gicp_min_target_xy_cells: 10
+    adaptive_fine_gicp_xy_cell_size: 0.5
+    adaptive_fine_gicp_min_scattering: 0.01
+    adaptive_fine_gicp_max_linearity: 0.95
     local_map_radius: 10.0
     local_map_z_radius: 5.0
     initial_pose_z: 0.0

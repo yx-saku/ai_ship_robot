@@ -40,6 +40,9 @@ def generate_launch_description():
     map_cloud_buffer_duration_sec = LaunchConfiguration("map_cloud_buffer_duration_sec")
     hybrid_raw_near_leaf_size = LaunchConfiguration("hybrid_raw_near_leaf_size")
     map_global_voxel_leaf_size = LaunchConfiguration("map_global_voxel_leaf_size")
+    map_preview_topic = LaunchConfiguration("map_preview_topic")
+    map_preview_publish_period_sec = LaunchConfiguration("map_preview_publish_period_sec")
+    map_preview_voxel_leaf_size = LaunchConfiguration("map_preview_voxel_leaf_size")
 
     # LIO-SAMの推定LiDAR frameを実機URDFのLiDAR frameから分離し、TF親子競合を避ける。
     map_frame = "map"
@@ -155,6 +158,14 @@ def generate_launch_description():
                 "global_voxel_leaf_size": ParameterValue(
                     map_global_voxel_leaf_size, value_type=float
                 ),
+                "preview_enabled": True,
+                "preview_topic": map_preview_topic,
+                "preview_publish_period_sec": ParameterValue(
+                    map_preview_publish_period_sec, value_type=float
+                ),
+                "preview_voxel_leaf_size": ParameterValue(
+                    map_preview_voxel_leaf_size, value_type=float
+                ),
             }
         ],
     )
@@ -175,6 +186,11 @@ def generate_launch_description():
             DeclareLaunchArgument("map_cloud_buffer_duration_sec", default_value="5.0"),
             DeclareLaunchArgument("hybrid_raw_near_leaf_size", default_value="0.01"),
             DeclareLaunchArgument("map_global_voxel_leaf_size", default_value="0.01"),
+            DeclareLaunchArgument(
+                "map_preview_topic", default_value="/pcd_map_saver/map_preview"
+            ),
+            DeclareLaunchArgument("map_preview_publish_period_sec", default_value="2.0"),
+            DeclareLaunchArgument("map_preview_voxel_leaf_size", default_value="0.05"),
             DeclareLaunchArgument(
                 "cloud_map_directory",
                 default_value=os.path.join(

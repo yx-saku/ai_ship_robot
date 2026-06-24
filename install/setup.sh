@@ -16,21 +16,39 @@ ROSDEP_UPDATED=0
 
 usage() {
   cat <<'EOF'
-Usage: bash install/setup.sh
+Usage: bash install/setup.sh [--clean-build]
 
 本番向け workspace セットアップを実行します。
 - /opt/ai_ship_robot の third_party underlay 読み込み
 - rosdep / ros2_ws build
+- --clean-build 指定時は ros2_ws/build install log を削除してから再 build
 - shell 自動読み込み設定更新
 
 事前に `bash install/install.sh` と `bash install/install_third_party.sh` を実行してください。
 EOF
 }
 
-if [[ "${1:-}" == "-h" || "${1:-}" == "--help" ]]; then
-  usage
-  exit 0
-fi
+CLEAN_BUILD=false
+
+parse_args() {
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      -h|--help)
+        usage
+        exit 0
+        ;;
+      --clean-build)
+        CLEAN_BUILD=true
+        ;;
+      *)
+        echo "Unknown option: $1" >&2
+        echo "Run with --help to see available options." >&2
+        exit 2
+        ;;
+    esac
+    shift
+  done
+}
 
 if [[ "$(id -u)" -eq 0 ]]; then
   SUDO=""
@@ -88,6 +106,12 @@ remove_stale_workspace_artifacts() {
 
   # 旧workspace内third_partyの絶対パスを含む生成物は、新underlayへ切替後のsource順を壊すため再生成する。
   echo "Remove stale ros2_ws artifacts that reference old third_party paths."
+  rm -rf "${ROS_WS}/build" "${ROS_WS}/install" "${ROS_WS}/log"
+}
+
+remove_runtime_workspace_artifacts_for_clean_build() {
+  # 明示的なクリーンビルド要求では、runtime workspace の生成物だけを削除して再生成する。
+  echo "Remove ros2_ws artifacts for clean build."
   rm -rf "${ROS_WS}/build" "${ROS_WS}/install" "${ROS_WS}/log"
 }
 
@@ -154,11 +178,15 @@ setup_runtime_workspace() {
   source_ros2
   require_third_party_underlay
   source_third_party_underlay
+  if [[ "${CLEAN_BUILD}" == "true" ]]; then
+    remove_runtime_workspace_artifacts_for_clean_build
+  fi
   remove_stale_workspace_artifacts
   install_rosdeps_for_workspace "${ROS_WS_SRC_DIR}"
   build_project_workspace
 }
 
+parse_args "$@"
 require_ros2
 setup_runtime_workspace
 write_shell_environment_setup "${WORKSPACE_ROOT}" "${ROS_DISTRO}"
