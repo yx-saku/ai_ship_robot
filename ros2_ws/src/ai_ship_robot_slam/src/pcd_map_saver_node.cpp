@@ -717,6 +717,11 @@ private:
       return;
     }
 
+    // preview購読者がいない間は、重いmap再構築とvoxel化を行わず周期処理を軽量化する。
+    if (preview_publisher_->get_subscription_count() == 0U) {
+      return;
+    }
+
     PointCloud2 message;
     std::string error_message;
     if (!build_preview_message(message, error_message)) {

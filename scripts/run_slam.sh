@@ -141,6 +141,49 @@ has_config_arg() {
   return 1
 }
 
+build_requested_in_args() {
+  local arg=""
+
+  # top-levelでbuild指定を先に検出し、後続のbag解決やsource処理をbuild完了後へ送る。
+  for arg in "$@"; do
+    case "${arg}" in
+      --build|--clean-build)
+        return 0
+        ;;
+    esac
+  done
+  return 1
+}
+
+clean_build_requested_in_args() {
+  local arg=""
+
+  # clean-buildは通常buildより優先し、artifact削除を伴う再生成を一度だけ実行する。
+  for arg in "$@"; do
+    if [[ "${arg}" == "--clean-build" ]]; then
+      return 0
+    fi
+  done
+  return 1
+}
+
+build_runtime_workspace_if_requested() {
+  local args=("$@")
+
+  if ! build_requested_in_args "${args[@]}"; then
+    return 0
+  fi
+
+  source_sim_slam_environment false
+
+  # bag再生前の待機やoverlay読込より先にruntime buildを完了させ、未生成install参照を避ける。
+  if clean_build_requested_in_args "${args[@]}"; then
+    bash "${SETUP_RUNTIME_SCRIPT}" --clean-build
+  else
+    bash "${SETUP_RUNTIME_SCRIPT}"
+  fi
+}
+
 map_saver_requested() {
   local arg=""
 
@@ -305,6 +348,8 @@ build_passthrough_args() {
         ;;
       --bag-topics|--bag-output)
         skip_next=1
+        ;;
+      --build|--clean-build)
         ;;
       *)
         filtered_args+=("${arg}")
@@ -1564,6 +1609,9 @@ if [[ "${SIM_MODE}" == "true" ]]; then
   exit $?
 fi
 
+# 非sim経路ではbuild指定を最優先で処理し、後続のsourceやbag判定を新しいinstall成果物前提へ揃える。
+build_runtime_workspace_if_requested "${FORWARD_ARGS[@]}"
+
 if [[ "${BAG_PLAY_REQUESTED}" == "true" ]]; then
   for arg in "${FORWARD_ARGS[@]}"; do
     if [[ "${arg}" == "--no-use-sim-time" ]]; then
@@ -1605,4 +1653,5 @@ if [[ "${#BAG_TOPICS[@]}" -gt 0 || -n "${BAG_OUTPUT}" ]]; then
   exit $?
 fi
 
-run_slam_launch "${FORWARD_ARGS[@]}"
+mapfile -t PASSTHROUGH_ARGS < <(build_passthrough_args)
+run_slam_launch "${PASSTHROUGH_ARGS[@]}"

@@ -1,0 +1,198 @@
+<?xml version="1.0" ?>
+<sdf version="1.6">
+  <world name="hill_placement">
+    <gravity>0 0 -9.80511</gravity>
+    <magnetic_field>6.0e-6 2.3e-5 -4.2e-5</magnetic_field>
+    <atmosphere type="adiabatic" />
+    <!-- /clock の更新粒度を上げるため、physics step を 1ms 基準に固定する。 -->
+    <physics type="ode">
+      <real_time_update_rate>1000</real_time_update_rate>
+      <max_step_size>0.001</max_step_size>
+      <real_time_factor>1.0</real_time_factor>
+    </physics>
+
+    <light name="sun" type="directional">
+      <cast_shadows>true</cast_shadows>
+      <pose>0 0 10 0 0 0</pose>
+      <diffuse>0.8 0.8 0.8 1</diffuse>
+      <specular>0.2 0.2 0.2 1</specular>
+      <attenuation>
+        <range>1000</range>
+        <constant>0.9</constant>
+        <linear>0.01</linear>
+        <quadratic>0.001</quadratic>
+      </attenuation>
+      <direction>-0.5 0.1 -0.9</direction>
+    </light>
+
+    <model name="flat_floor">
+      <static>true</static>
+      <!-- 8個の丘を前方へ並べられるよう、既存worldよりX方向を広くした平坦床を用意する。 -->
+      <link name="link">
+        <collision name="collision">
+          <pose>3.0 0 -0.01 0 0 0</pose>
+          <geometry>
+            <box><size>24.0 10.0 0.02</size></box>
+          </geometry>
+        </collision>
+        <visual name="visual">
+          <pose>3.0 0 -0.01 0 0 0</pose>
+          <geometry>
+            <box><size>24.0 10.0 0.02</size></box>
+          </geometry>
+          <material>
+            <ambient>0.30 0.30 0.30 1</ambient>
+            <diffuse>0.55 0.55 0.55 1</diffuse>
+          </material>
+        </visual>
+      </link>
+    </model>
+
+    <model name="hill_constant_5deg">
+      <static>true</static>
+      <pose>-1.9742 -1.5 0 0 0 0</pose>
+      <!-- 5度の一定勾配丘は厚みを持つ傾斜直方体で側面を兼ね、上面高さ10cmを維持する。 -->
+      <link name="up_slope"><pose>-1.3215 0 0.0002 0 -0.087266 0</pose><collision name="collision"><geometry><box><size>1.1474 1.50 0.10</size></box></geometry></collision><visual name="visual"><geometry><box><size>1.1474 1.50 0.10</size></box></geometry><material><ambient>0.42 0.30 0.18 1</ambient><diffuse>0.70 0.50 0.30 1</diffuse></material></visual></link>
+      <link name="top"><pose>0.0000 0 0.0500 0 0.000000 0</pose><collision name="collision"><geometry><box><size>1.5000 1.50 0.10</size></box></geometry></collision><visual name="visual"><geometry><box><size>1.5000 1.50 0.10</size></box></geometry><material><ambient>0.48 0.36 0.20 1</ambient><diffuse>0.78 0.58 0.32 1</diffuse></material></visual></link>
+      <link name="down_slope"><pose>1.3215 0 0.0002 0 0.087266 0</pose><collision name="collision"><geometry><box><size>1.1474 1.50 0.10</size></box></geometry></collision><visual name="visual"><geometry><box><size>1.1474 1.50 0.10</size></box></geometry><material><ambient>0.42 0.30 0.18 1</ambient><diffuse>0.70 0.50 0.30 1</diffuse></material></visual></link>
+    </model>
+
+    <model name="hill_smooth_5deg">
+      <static>true</static>
+      <pose>-1.9742 1.5 0 0 0 0</pose>
+      <!-- 5度のなだらか接続丘は厚みを持つ分割傾斜直方体で接地側と上面側の勾配を緩和する。 -->
+      <link name="up_slope_low"><pose>-2.7536 0 -0.0437 0 -0.021817 0</pose><collision name="collision"><geometry><box><size>0.5726 1.50 0.10</size></box></geometry></collision><visual name="visual"><geometry><box><size>0.5726 1.50 0.10</size></box></geometry><material><ambient>0.34 0.42 0.20 1</ambient><diffuse>0.54 0.68 0.34 1</diffuse></material></visual></link>
+      <link name="up_slope_mid"><pose>-2.1811 0 -0.0250 0 -0.043633 0</pose><collision name="collision"><geometry><box><size>0.5730 1.50 0.10</size></box></geometry></collision><visual name="visual"><geometry><box><size>0.5730 1.50 0.10</size></box></geometry><material><ambient>0.34 0.42 0.20 1</ambient><diffuse>0.54 0.68 0.34 1</diffuse></material></visual></link>
+      <link name="up_slope_high"><pose>-1.6087 0 0.0064 0 -0.065450 0</pose><collision name="collision"><geometry><box><size>0.5737 1.50 0.10</size></box></geometry></collision><visual name="visual"><geometry><box><size>0.5737 1.50 0.10</size></box></geometry><material><ambient>0.34 0.42 0.20 1</ambient><diffuse>0.54 0.68 0.34 1</diffuse></material></visual></link>
+      <link name="up_slope_top"><pose>-1.0362 0 0.0376 0 -0.043633 0</pose><collision name="collision"><geometry><box><size>0.5730 1.50 0.10</size></box></geometry></collision><visual name="visual"><geometry><box><size>0.5730 1.50 0.10</size></box></geometry><material><ambient>0.34 0.42 0.20 1</ambient><diffuse>0.54 0.68 0.34 1</diffuse></material></visual></link>
+      <link name="top"><pose>0.0000 0 0.0500 0 0.000000 0</pose><collision name="collision"><geometry><box><size>1.5000 1.50 0.10</size></box></geometry></collision><visual name="visual"><geometry><box><size>1.5000 1.50 0.10</size></box></geometry><material><ambient>0.40 0.50 0.24 1</ambient><diffuse>0.64 0.78 0.40 1</diffuse></material></visual></link>
+      <link name="down_slope_top"><pose>1.0362 0 0.0376 0 0.043633 0</pose><collision name="collision"><geometry><box><size>0.5730 1.50 0.10</size></box></geometry></collision><visual name="visual"><geometry><box><size>0.5730 1.50 0.10</size></box></geometry><material><ambient>0.34 0.42 0.20 1</ambient><diffuse>0.54 0.68 0.34 1</diffuse></material></visual></link>
+      <link name="down_slope_high"><pose>1.6087 0 0.0064 0 0.065450 0</pose><collision name="collision"><geometry><box><size>0.5737 1.50 0.10</size></box></geometry></collision><visual name="visual"><geometry><box><size>0.5737 1.50 0.10</size></box></geometry><material><ambient>0.34 0.42 0.20 1</ambient><diffuse>0.54 0.68 0.34 1</diffuse></material></visual></link>
+      <link name="down_slope_mid"><pose>2.1811 0 -0.0250 0 0.043633 0</pose><collision name="collision"><geometry><box><size>0.5730 1.50 0.10</size></box></geometry></collision><visual name="visual"><geometry><box><size>0.5730 1.50 0.10</size></box></geometry><material><ambient>0.34 0.42 0.20 1</ambient><diffuse>0.54 0.68 0.34 1</diffuse></material></visual></link>
+      <link name="down_slope_low"><pose>2.7536 0 -0.0437 0 0.021817 0</pose><collision name="collision"><geometry><box><size>0.5726 1.50 0.10</size></box></geometry></collision><visual name="visual"><geometry><box><size>0.5726 1.50 0.10</size></box></geometry><material><ambient>0.34 0.42 0.20 1</ambient><diffuse>0.54 0.68 0.34 1</diffuse></material></visual></link>
+    </model>
+
+    <model name="hill_constant_10deg">
+      <static>true</static>
+      <pose>3.0954 -1.5 0 0 0 0</pose>
+      <!-- 10度の一定勾配丘は厚みを持つ傾斜直方体で側面を兼ね、上面高さ10cmを維持する。 -->
+      <link name="up_slope"><pose>-1.0336 0 0.0008 0 -0.174533 0</pose><collision name="collision"><geometry><box><size>0.5759 1.50 0.10</size></box></geometry></collision><visual name="visual"><geometry><box><size>0.5759 1.50 0.10</size></box></geometry><material><ambient>0.42 0.30 0.18 1</ambient><diffuse>0.70 0.50 0.30 1</diffuse></material></visual></link>
+      <link name="top"><pose>0.0000 0 0.0500 0 0.000000 0</pose><collision name="collision"><geometry><box><size>1.5000 1.50 0.10</size></box></geometry></collision><visual name="visual"><geometry><box><size>1.5000 1.50 0.10</size></box></geometry><material><ambient>0.48 0.36 0.20 1</ambient><diffuse>0.78 0.58 0.32 1</diffuse></material></visual></link>
+      <link name="down_slope"><pose>1.0336 0 0.0008 0 0.174533 0</pose><collision name="collision"><geometry><box><size>0.5759 1.50 0.10</size></box></geometry></collision><visual name="visual"><geometry><box><size>0.5759 1.50 0.10</size></box></geometry><material><ambient>0.42 0.30 0.18 1</ambient><diffuse>0.70 0.50 0.30 1</diffuse></material></visual></link>
+    </model>
+
+    <model name="hill_smooth_10deg">
+      <static>true</static>
+      <pose>3.0954 1.5 0 0 0 0</pose>
+      <!-- 10度のなだらか接続丘は厚みを持つ分割傾斜直方体で接地側と上面側の勾配を緩和する。 -->
+      <link name="up_slope_low"><pose>-1.7492 0 -0.0437 0 -0.043633 0</pose><collision name="collision"><geometry><box><size>0.2857 1.50 0.10</size></box></geometry></collision><visual name="visual"><geometry><box><size>0.2857 1.50 0.10</size></box></geometry><material><ambient>0.34 0.42 0.20 1</ambient><diffuse>0.54 0.68 0.34 1</diffuse></material></visual></link>
+      <link name="up_slope_mid"><pose>-1.4637 0 -0.0249 0 -0.087266 0</pose><collision name="collision"><geometry><box><size>0.2866 1.50 0.10</size></box></geometry></collision><visual name="visual"><geometry><box><size>0.2866 1.50 0.10</size></box></geometry><material><ambient>0.34 0.42 0.20 1</ambient><diffuse>0.54 0.68 0.34 1</diffuse></material></visual></link>
+      <link name="up_slope_high"><pose>-1.1782 0 0.0067 0 -0.130900 0</pose><collision name="collision"><geometry><box><size>0.2879 1.50 0.10</size></box></geometry></collision><visual name="visual"><geometry><box><size>0.2879 1.50 0.10</size></box></geometry><material><ambient>0.34 0.42 0.20 1</ambient><diffuse>0.54 0.68 0.34 1</diffuse></material></visual></link>
+      <link name="up_slope_top"><pose>-0.8927 0 0.0377 0 -0.087266 0</pose><collision name="collision"><geometry><box><size>0.2866 1.50 0.10</size></box></geometry></collision><visual name="visual"><geometry><box><size>0.2866 1.50 0.10</size></box></geometry><material><ambient>0.34 0.42 0.20 1</ambient><diffuse>0.54 0.68 0.34 1</diffuse></material></visual></link>
+      <link name="top"><pose>0.0000 0 0.0500 0 0.000000 0</pose><collision name="collision"><geometry><box><size>1.5000 1.50 0.10</size></box></geometry></collision><visual name="visual"><geometry><box><size>1.5000 1.50 0.10</size></box></geometry><material><ambient>0.40 0.50 0.24 1</ambient><diffuse>0.64 0.78 0.40 1</diffuse></material></visual></link>
+      <link name="down_slope_top"><pose>0.8927 0 0.0377 0 0.087266 0</pose><collision name="collision"><geometry><box><size>0.2866 1.50 0.10</size></box></geometry></collision><visual name="visual"><geometry><box><size>0.2866 1.50 0.10</size></box></geometry><material><ambient>0.34 0.42 0.20 1</ambient><diffuse>0.54 0.68 0.34 1</diffuse></material></visual></link>
+      <link name="down_slope_high"><pose>1.1782 0 0.0067 0 0.130900 0</pose><collision name="collision"><geometry><box><size>0.2879 1.50 0.10</size></box></geometry></collision><visual name="visual"><geometry><box><size>0.2879 1.50 0.10</size></box></geometry><material><ambient>0.34 0.42 0.20 1</ambient><diffuse>0.54 0.68 0.34 1</diffuse></material></visual></link>
+      <link name="down_slope_mid"><pose>1.4637 0 -0.0249 0 0.087266 0</pose><collision name="collision"><geometry><box><size>0.2866 1.50 0.10</size></box></geometry></collision><visual name="visual"><geometry><box><size>0.2866 1.50 0.10</size></box></geometry><material><ambient>0.34 0.42 0.20 1</ambient><diffuse>0.54 0.68 0.34 1</diffuse></material></visual></link>
+      <link name="down_slope_low"><pose>1.7492 0 -0.0437 0 0.043633 0</pose><collision name="collision"><geometry><box><size>0.2857 1.50 0.10</size></box></geometry></collision><visual name="visual"><geometry><box><size>0.2857 1.50 0.10</size></box></geometry><material><ambient>0.34 0.42 0.20 1</ambient><diffuse>0.54 0.68 0.34 1</diffuse></material></visual></link>
+    </model>
+
+    <model name="hill_constant_30deg">
+      <static>true</static>
+      <pose>6.7174 -1.5 0 0 0 0</pose>
+      <!-- 30度の一定勾配丘は厚みを持つ傾斜直方体で側面を兼ね、上面高さ10cmを維持する。 -->
+      <link name="up_slope"><pose>-0.8366 0 0.0067 0 -0.523599 0</pose><collision name="collision"><geometry><box><size>0.2000 1.50 0.10</size></box></geometry></collision><visual name="visual"><geometry><box><size>0.2000 1.50 0.10</size></box></geometry><material><ambient>0.42 0.30 0.18 1</ambient><diffuse>0.70 0.50 0.30 1</diffuse></material></visual></link>
+      <link name="top"><pose>0.0000 0 0.0500 0 0.000000 0</pose><collision name="collision"><geometry><box><size>1.5000 1.50 0.10</size></box></geometry></collision><visual name="visual"><geometry><box><size>1.5000 1.50 0.10</size></box></geometry><material><ambient>0.48 0.36 0.20 1</ambient><diffuse>0.78 0.58 0.32 1</diffuse></material></visual></link>
+      <link name="down_slope"><pose>0.8366 0 0.0067 0 0.523599 0</pose><collision name="collision"><geometry><box><size>0.2000 1.50 0.10</size></box></geometry></collision><visual name="visual"><geometry><box><size>0.2000 1.50 0.10</size></box></geometry><material><ambient>0.42 0.30 0.18 1</ambient><diffuse>0.70 0.50 0.30 1</diffuse></material></visual></link>
+    </model>
+
+    <model name="hill_smooth_30deg">
+      <static>true</static>
+      <pose>6.7174 1.5 0 0 0 0</pose>
+      <!-- 30度のなだらか接続丘は厚みを持つ分割傾斜直方体で接地側と上面側の勾配を緩和する。 -->
+      <link name="up_slope_low"><pose>-1.0735 0 -0.0435 0 -0.130900 0</pose><collision name="collision"><geometry><box><size>0.0932 1.50 0.10</size></box></geometry></collision><visual name="visual"><geometry><box><size>0.0932 1.50 0.10</size></box></geometry><material><ambient>0.34 0.42 0.20 1</ambient><diffuse>0.54 0.68 0.34 1</diffuse></material></visual></link>
+      <link name="up_slope_mid"><pose>-0.9811 0 -0.0237 0 -0.261799 0</pose><collision name="collision"><geometry><box><size>0.0957 1.50 0.10</size></box></geometry></collision><visual name="visual"><geometry><box><size>0.0957 1.50 0.10</size></box></geometry><material><ambient>0.34 0.42 0.20 1</ambient><diffuse>0.54 0.68 0.34 1</diffuse></material></visual></link>
+      <link name="up_slope_high"><pose>-0.8887 0 0.0099 0 -0.392699 0</pose><collision name="collision"><geometry><box><size>0.1001 1.50 0.10</size></box></geometry></collision><visual name="visual"><geometry><box><size>0.1001 1.50 0.10</size></box></geometry><material><ambient>0.34 0.42 0.20 1</ambient><diffuse>0.54 0.68 0.34 1</diffuse></material></visual></link>
+      <link name="up_slope_top"><pose>-0.7962 0 0.0393 0 -0.261799 0</pose><collision name="collision"><geometry><box><size>0.0957 1.50 0.10</size></box></geometry></collision><visual name="visual"><geometry><box><size>0.0957 1.50 0.10</size></box></geometry><material><ambient>0.34 0.42 0.20 1</ambient><diffuse>0.54 0.68 0.34 1</diffuse></material></visual></link>
+      <link name="top"><pose>0.0000 0 0.0500 0 0.000000 0</pose><collision name="collision"><geometry><box><size>1.5000 1.50 0.10</size></box></geometry></collision><visual name="visual"><geometry><box><size>1.5000 1.50 0.10</size></box></geometry><material><ambient>0.40 0.50 0.24 1</ambient><diffuse>0.64 0.78 0.40 1</diffuse></material></visual></link>
+      <link name="down_slope_top"><pose>0.7962 0 0.0393 0 0.261799 0</pose><collision name="collision"><geometry><box><size>0.0957 1.50 0.10</size></box></geometry></collision><visual name="visual"><geometry><box><size>0.0957 1.50 0.10</size></box></geometry><material><ambient>0.34 0.42 0.20 1</ambient><diffuse>0.54 0.68 0.34 1</diffuse></material></visual></link>
+      <link name="down_slope_high"><pose>0.8887 0 0.0099 0 0.392699 0</pose><collision name="collision"><geometry><box><size>0.1001 1.50 0.10</size></box></geometry></collision><visual name="visual"><geometry><box><size>0.1001 1.50 0.10</size></box></geometry><material><ambient>0.34 0.42 0.20 1</ambient><diffuse>0.54 0.68 0.34 1</diffuse></material></visual></link>
+      <link name="down_slope_mid"><pose>0.9811 0 -0.0237 0 0.261799 0</pose><collision name="collision"><geometry><box><size>0.0957 1.50 0.10</size></box></geometry></collision><visual name="visual"><geometry><box><size>0.0957 1.50 0.10</size></box></geometry><material><ambient>0.34 0.42 0.20 1</ambient><diffuse>0.54 0.68 0.34 1</diffuse></material></visual></link>
+      <link name="down_slope_low"><pose>1.0735 0 -0.0435 0 0.130900 0</pose><collision name="collision"><geometry><box><size>0.0932 1.50 0.10</size></box></geometry></collision><visual name="visual"><geometry><box><size>0.0932 1.50 0.10</size></box></geometry><material><ambient>0.34 0.42 0.20 1</ambient><diffuse>0.54 0.68 0.34 1</diffuse></material></visual></link>
+    </model>
+
+    <model name="hill_constant_60deg">
+      <static>true</static>
+      <pose>9.588 -1.5 0 0 0 0</pose>
+      <!-- 60度の一定勾配丘は厚みを持つ傾斜直方体で側面を兼ね、上面高さ10cmを維持する。 -->
+      <link name="up_slope"><pose>-0.7789 0 0.0250 0 -1.047198 0</pose><collision name="collision"><geometry><box><size>0.1155 1.50 0.10</size></box></geometry></collision><visual name="visual"><geometry><box><size>0.1155 1.50 0.10</size></box></geometry><material><ambient>0.42 0.30 0.18 1</ambient><diffuse>0.70 0.50 0.30 1</diffuse></material></visual></link>
+      <link name="top"><pose>0.0000 0 0.0500 0 0.000000 0</pose><collision name="collision"><geometry><box><size>1.5000 1.50 0.10</size></box></geometry></collision><visual name="visual"><geometry><box><size>1.5000 1.50 0.10</size></box></geometry><material><ambient>0.48 0.36 0.20 1</ambient><diffuse>0.78 0.58 0.32 1</diffuse></material></visual></link>
+      <link name="down_slope"><pose>0.7789 0 0.0250 0 1.047198 0</pose><collision name="collision"><geometry><box><size>0.1155 1.50 0.10</size></box></geometry></collision><visual name="visual"><geometry><box><size>0.1155 1.50 0.10</size></box></geometry><material><ambient>0.42 0.30 0.18 1</ambient><diffuse>0.70 0.50 0.30 1</diffuse></material></visual></link>
+    </model>
+
+    <model name="hill_smooth_60deg">
+      <static>true</static>
+      <pose>9.588 1.5 0 0 0 0</pose>
+      <!-- 60度のなだらか接続丘は厚みを持つ分割傾斜直方体で接地側と上面側の勾配を緩和する。 -->
+      <link name="up_slope_low"><pose>-0.8945 0 -0.0428 0 -0.261799 0</pose><collision name="collision"><geometry><box><size>0.0427 1.50 0.10</size></box></geometry></collision><visual name="visual"><geometry><box><size>0.0427 1.50 0.10</size></box></geometry><material><ambient>0.34 0.42 0.20 1</ambient><diffuse>0.54 0.68 0.34 1</diffuse></material></visual></link>
+      <link name="up_slope_mid"><pose>-0.8532 0 -0.0203 0 -0.523599 0</pose><collision name="collision"><geometry><box><size>0.0477 1.50 0.10</size></box></geometry></collision><visual name="visual"><geometry><box><size>0.0477 1.50 0.10</size></box></geometry><material><ambient>0.34 0.42 0.20 1</ambient><diffuse>0.54 0.68 0.34 1</diffuse></material></visual></link>
+      <link name="up_slope_high"><pose>-0.8119 0 0.0202 0 -0.785398 0</pose><collision name="collision"><geometry><box><size>0.0584 1.50 0.10</size></box></geometry></collision><visual name="visual"><geometry><box><size>0.0584 1.50 0.10</size></box></geometry><material><ambient>0.34 0.42 0.20 1</ambient><diffuse>0.54 0.68 0.34 1</diffuse></material></visual></link>
+      <link name="up_slope_top"><pose>-0.7706 0 0.0448 0 -0.523599 0</pose><collision name="collision"><geometry><box><size>0.0477 1.50 0.10</size></box></geometry></collision><visual name="visual"><geometry><box><size>0.0477 1.50 0.10</size></box></geometry><material><ambient>0.34 0.42 0.20 1</ambient><diffuse>0.54 0.68 0.34 1</diffuse></material></visual></link>
+      <link name="top"><pose>0.0000 0 0.0500 0 0.000000 0</pose><collision name="collision"><geometry><box><size>1.5000 1.50 0.10</size></box></geometry></collision><visual name="visual"><geometry><box><size>1.5000 1.50 0.10</size></box></geometry><material><ambient>0.40 0.50 0.24 1</ambient><diffuse>0.64 0.78 0.40 1</diffuse></material></visual></link>
+      <link name="down_slope_top"><pose>0.7706 0 0.0448 0 0.523599 0</pose><collision name="collision"><geometry><box><size>0.0477 1.50 0.10</size></box></geometry></collision><visual name="visual"><geometry><box><size>0.0477 1.50 0.10</size></box></geometry><material><ambient>0.34 0.42 0.20 1</ambient><diffuse>0.54 0.68 0.34 1</diffuse></material></visual></link>
+      <link name="down_slope_high"><pose>0.8119 0 0.0202 0 0.785398 0</pose><collision name="collision"><geometry><box><size>0.0584 1.50 0.10</size></box></geometry></collision><visual name="visual"><geometry><box><size>0.0584 1.50 0.10</size></box></geometry><material><ambient>0.34 0.42 0.20 1</ambient><diffuse>0.54 0.68 0.34 1</diffuse></material></visual></link>
+      <link name="down_slope_mid"><pose>0.8532 0 -0.0203 0 0.523599 0</pose><collision name="collision"><geometry><box><size>0.0477 1.50 0.10</size></box></geometry></collision><visual name="visual"><geometry><box><size>0.0477 1.50 0.10</size></box></geometry><material><ambient>0.34 0.42 0.20 1</ambient><diffuse>0.54 0.68 0.34 1</diffuse></material></visual></link>
+      <link name="down_slope_low"><pose>0.8945 0 -0.0428 0 0.261799 0</pose><collision name="collision"><geometry><box><size>0.0427 1.50 0.10</size></box></geometry></collision><visual name="visual"><geometry><box><size>0.0427 1.50 0.10</size></box></geometry><material><ambient>0.34 0.42 0.20 1</ambient><diffuse>0.54 0.68 0.34 1</diffuse></material></visual></link>
+    </model>
+
+    <model name="dock_wall_north">
+      <static>true</static>
+      <pose>3.0 5.0 1.0 0 0 0</pose>
+      <link name="link">
+        <!-- 既存worldと同じ高さ・厚みの外壁で、拡張した床外周を閉じる。 -->
+        <collision name="collision"><geometry><box><size>24.0 0.25 2.0</size></box></geometry></collision>
+        <visual name="visual"><geometry><box><size>24.0 0.25 2.0</size></box></geometry><material><ambient>0.45 0.42 0.38 1</ambient><diffuse>0.45 0.42 0.38 1</diffuse></material></visual>
+      </link>
+    </model>
+
+    <model name="dock_wall_south">
+      <static>true</static>
+      <pose>3.0 -5.0 1.0 0 0 0</pose>
+      <link name="link">
+        <collision name="collision"><geometry><box><size>24.0 0.25 2.0</size></box></geometry></collision>
+        <visual name="visual"><geometry><box><size>24.0 0.25 2.0</size></box></geometry><material><ambient>0.45 0.42 0.38 1</ambient><diffuse>0.45 0.42 0.38 1</diffuse></material></visual>
+      </link>
+    </model>
+
+    <model name="dock_wall_east">
+      <static>true</static>
+      <pose>15.0 0 1.0 0 0 0</pose>
+      <link name="link">
+        <collision name="collision"><geometry><box><size>0.25 10.0 2.0</size></box></geometry></collision>
+        <visual name="visual"><geometry><box><size>0.25 10.0 2.0</size></box></geometry><material><ambient>0.45 0.42 0.38 1</ambient><diffuse>0.45 0.42 0.38 1</diffuse></material></visual>
+      </link>
+    </model>
+
+    <model name="dock_wall_west">
+      <static>true</static>
+      <pose>-9.0 0 1.0 0 0 0</pose>
+      <link name="link">
+        <collision name="collision"><geometry><box><size>0.25 10.0 2.0</size></box></geometry></collision>
+        <visual name="visual"><geometry><box><size>0.25 10.0 2.0</size></box></geometry><material><ambient>0.45 0.42 0.38 1</ambient><diffuse>0.45 0.42 0.38 1</diffuse></material></visual>
+      </link>
+    </model>
+
+    <model name="ceiling">
+      <static>true</static>
+      <pose>3.0 0 2.05 0 0 0</pose>
+      <link name="link">
+        <!-- 天井は既存worldと同様にLiDAR ray用の衝突を持たせ、表示だけ透明にする。 -->
+        <collision name="collision"><geometry><box><size>24.0 10.25 0.10</size></box></geometry></collision>
+        <visual name="visual">
+          <geometry><box><size>24.0 10.25 0.10</size></box></geometry>
+          <material><ambient>0.35 0.35 0.38 0</ambient><diffuse>0.35 0.35 0.38 0</diffuse></material>
+          <transparency>1.0</transparency>
+        </visual>
+      </link>
+    </model>
+  </world>
+</sdf>

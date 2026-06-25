@@ -1,0 +1,76 @@
+vars:
+  pi: 3.14159265359
+
+steps:
+  - duration_sec: 10.0
+    commands:
+      - type: stop
+
+  - duration_sec: 26.0
+    commands:
+      - type: forward
+        speed: 0.5
+
+  - duration_sec: 2.0
+    commands:
+      - type: yaw_left
+        speed: ${pi / 4}
+
+  - duration_sec: 6.0
+    commands:
+      - type: forward
+        speed: 0.5
+
+  - duration_sec: 2.0
+    commands:
+      - type: yaw_left
+        speed: ${pi / 4}
+
+  - duration_sec: 40.0
+    commands:
+      - type: forward
+        speed: 0.5
+
+  - duration_sec: 2.0
+    commands:
+      - type: yaw_left
+        speed: ${pi / 4}
+
+  - duration_sec: 12.0
+    commands:
+      - type: forward
+        speed: 0.5
+
+  - duration_sec: 2.0
+    commands:
+      - type: yaw_left
+        speed: ${pi / 4}
+
+  - duration_sec: 40.0
+    commands:
+      - type: forward
+        speed: 0.5
+
+  - duration_sec: 2.0
+    commands:
+      - type: yaw_left
+        speed: ${pi / 4}
+
+  - duration_sec: 6.0
+    commands:
+      - type: forward
+        speed: 0.5
+
+  - duration_sec: 2.0
+    commands:
+      - type: yaw_left
+        speed: ${pi / 4}
+
+  - duration_sec: 26.0
+    commands:
+      - type: forward
+        speed: 0.5
+        
+  - duration_sec: 10.0
+    commands:
+      - type: stop
