@@ -128,7 +128,40 @@ bash sim/scripts/drive_robot.sh \
   --start-delay 1.0
 ```
 
+- YAML の通常 step は `duration_sec` と `commands` または `move_to_pose` で記述します
+- `move_to_pose.type: abs` は `/odom` 原点基準の絶対位置・絶対 yaw へ移動します
+- `move_to_pose.type: rel` は step 開始時の位置・yaw を基準にした相対移動です
+- `move_to_pose.type` を省略した場合は `abs` として扱います
+- `move_to_pose.yaw.deg` と `move_to_pose.yaw.tolerance` は degree 単位です
+- `move_to_pose.pos` は `[x, y]` / `[x, y, tolerance]`、`yaw` は数値 / `[deg]` / `[deg, tolerance]` でも指定できます
+- `move_to_pose.pos` または `yaw` を省略した場合、未指定側は step 開始時の現在値を維持します
+- `move_to_pose` の `duration_sec` は速度算出用の目標到達時間であり、超過しても timeout にはしません
 - シナリオの繰り返しは `--loop` ではなく YAML の `repeat` ブロックで指定します
+
+```yaml
+steps:
+  - duration_sec: 2.0
+    commands:
+      - type: forward
+        speed: 0.2
+
+  - duration_sec: 5.0
+    move_to_pose:
+      type: abs
+      pos:
+        x: 1.0
+        y: 2.0
+        tolerance: 0.05
+      yaw:
+        deg: 90.0
+        tolerance: 0.5
+
+  - duration_sec: 5.0
+    move_to_pose:
+      type: rel
+      pos: [1.0, 0.0]
+      yaw: 90.0
+```
 
 ## LiDAR 配置
 
