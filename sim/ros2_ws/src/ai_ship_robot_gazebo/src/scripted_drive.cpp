@@ -398,6 +398,7 @@ private:
   rclcpp::Publisher<geometry_msgs::msg::Twist>::SharedPtr publisher_;
   rclcpp::Subscription<nav_msgs::msg::Odometry>::SharedPtr odom_subscription_;
   std::optional<PlanarPose> latest_pose_;
+  std::optional<std::string> last_warning_signature_;
   ScenarioDefinition scenario_;
 };
 
