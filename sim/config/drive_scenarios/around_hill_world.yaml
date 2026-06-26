@@ -7,70 +7,57 @@ steps:
       - type: stop
 
   - duration_sec: 26.0
-    commands:
-      - type: forward
-        speed: 0.5
+    move_to_pose:
+      pos: [13.0, 0.0]
 
   - duration_sec: 2.0
-    commands:
-      - type: yaw_left
-        speed: ${pi / 4}
+    move_to_pose:
+      yaw: 90.0
 
   - duration_sec: 6.0
-    commands:
-      - type: forward
-        speed: 0.5
+    move_to_pose:
+      pos: [13.0, 3.0]
 
   - duration_sec: 2.0
-    commands:
-      - type: yaw_left
-        speed: ${pi / 4}
+    move_to_pose:
+      yaw: 180.0
 
   - duration_sec: 40.0
-    commands:
-      - type: forward
-        speed: 0.5
+    move_to_pose:
+      pos: [-7.0, 3.0]
 
   - duration_sec: 2.0
-    commands:
-      - type: yaw_left
-        speed: ${pi / 4}
+    move_to_pose:
+      yaw: 270.0
 
   - duration_sec: 12.0
-    commands:
-      - type: forward
-        speed: 0.5
+    move_to_pose:
+      pos: [-7.0, -3.0]
 
   - duration_sec: 2.0
-    commands:
-      - type: yaw_left
-        speed: ${pi / 4}
+    move_to_pose:
+      yaw: 0.0
 
   - duration_sec: 40.0
-    commands:
-      - type: forward
-        speed: 0.5
+    move_to_pose:
+      pos: [13.0, -3.0]
 
   - duration_sec: 2.0
-    commands:
-      - type: yaw_left
-        speed: ${pi / 4}
+    move_to_pose:
+      yaw: 90.0
 
   - duration_sec: 6.0
-    commands:
-      - type: forward
-        speed: 0.5
+    move_to_pose:
+      pos: [13.0, 0.0]
 
   - duration_sec: 2.0
-    commands:
-      - type: yaw_left
-        speed: ${pi / 4}
+    move_to_pose:
+      yaw: 180.0
 
   - duration_sec: 26.0
-    commands:
-      - type: forward
-        speed: 0.5
-        
+    move_to_pose:
+      pos: [0.0, 0.0]
+
   - duration_sec: 10.0
     commands:
       - type: stop

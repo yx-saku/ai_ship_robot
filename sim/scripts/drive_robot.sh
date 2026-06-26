@@ -19,6 +19,7 @@ Options:
   --clean-build            Remove target workspace build artifacts, then run setup.
                            Implies --build.
   --scenario FILE          Run scripted drive with a YAML scenario file.
+                           Scenario steps support commands and move_to_pose.
   --start-delay SEC        Wait before starting scripted drive. Default: 0.0
   --linear-speed VALUE     Forward/backward speed in m/s. Default: 1.4
   --lateral-speed VALUE    Left/right strafe speed in m/s. Default: 1.4

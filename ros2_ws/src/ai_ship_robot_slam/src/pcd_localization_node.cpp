@@ -1854,7 +1854,8 @@ private:
       // 粗いNDTのposeを初期値にして、局所範囲だけをGICPで精密化する。
       const auto gicp_start = std::chrono::steady_clock::now();
       auto registration = run_gicp(
-        selected_source_cloud, selected_target_cloud, coarse_result.registration.target_from_source);
+        selected_source_cloud, selected_target_cloud,
+        coarse_result.registration.target_from_source);
       const double gicp_ms = elapsed_milliseconds(
         gicp_start, std::chrono::steady_clock::now());
       const bool accepted = registration.converged &&

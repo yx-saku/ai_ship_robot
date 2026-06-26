@@ -9,6 +9,7 @@ find_package(ament_cmake REQUIRED)
 find_package(ament_index_cpp REQUIRED)
 find_package(geometry_msgs REQUIRED)
 find_package(livox_ros_driver2 REQUIRED)
+find_package(nav_msgs REQUIRED)
 find_package(rclcpp REQUIRED)
 find_package(sensor_msgs REQUIRED)
 find_package(yaml-cpp REQUIRED)
@@ -37,6 +38,7 @@ target_compile_features(scripted_drive PRIVATE cxx_std_17)
 target_link_libraries(scripted_drive scripted_drive_core)
 ament_target_dependencies(scripted_drive
   geometry_msgs
+  nav_msgs
   rclcpp
 )
 

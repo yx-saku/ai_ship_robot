@@ -1,19 +1,33 @@
-#include <rclcpp/rclcpp.hpp>
+// Copyright 2026 AI Ship Robot Developers
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
 
-#include <livox_ros_driver2/msg/custom_msg.hpp>
-#include <sensor_msgs/msg/point_cloud2.hpp>
-#include <sensor_msgs/msg/point_field.hpp>
-
-#include <algorithm>
-#include <chrono>
 #include <cstdio>
 #include <cstdint>
 #include <cstring>
+
+#include <algorithm>
+#include <chrono>
 #include <string>
 #include <unordered_map>
 #include <unordered_set>
 #include <utility>
 #include <vector>
+
+#include <livox_ros_driver2/msg/custom_msg.hpp>
+#include <rclcpp/rclcpp.hpp>
+#include <sensor_msgs/msg/point_cloud2.hpp>
+#include <sensor_msgs/msg/point_field.hpp>
 
 namespace ai_ship_robot_slam
 {
@@ -30,7 +44,7 @@ public:
     discovery_timer_ = create_wall_timer(
       std::chrono::duration_cast<std::chrono::nanoseconds>(
         std::chrono::duration<double>(std::max(discovery_period_sec_, 0.1))),
-      [this]() { this->update_bridges(); });
+      [this]() {this->update_bridges();});
   }
 
 private:
@@ -67,7 +81,9 @@ private:
     return output_topic.substr(0, output_topic.size() - std::strlen(kPointsSuffix));
   }
 
-  static PointField make_field(const std::string & name, const std::uint32_t offset, const std::uint8_t datatype)
+  static PointField make_field(
+    const std::string & name, const std::uint32_t offset,
+    const std::uint8_t datatype)
   {
     PointField field;
     field.name = name;
@@ -77,17 +93,23 @@ private:
     return field;
   }
 
-  static void write_float32(std::vector<std::uint8_t> & data, const std::size_t offset, const float value)
+  static void write_float32(
+    std::vector<std::uint8_t> & data, const std::size_t offset,
+    const float value)
   {
     std::memcpy(data.data() + offset, &value, sizeof(value));
   }
 
-  static void write_uint16(std::vector<std::uint8_t> & data, const std::size_t offset, const std::uint16_t value)
+  static void write_uint16(
+    std::vector<std::uint8_t> & data, const std::size_t offset,
+    const std::uint16_t value)
   {
     std::memcpy(data.data() + offset, &value, sizeof(value));
   }
 
-  static void write_uint32(std::vector<std::uint8_t> & data, const std::size_t offset, const std::uint32_t value)
+  static void write_uint32(
+    std::vector<std::uint8_t> & data, const std::size_t offset,
+    const std::uint32_t value)
   {
     std::memcpy(data.data() + offset, &value, sizeof(value));
   }

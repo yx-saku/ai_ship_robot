@@ -29,7 +29,7 @@ MAP_SAVE_ATTEMPTED=false
 MAP_SAVE_SUCCEEDED=false
 MAP_SAVE_PID=""
 MAP_SAVE_CANCEL_REQUESTED=false
-AUTO_SAVE_PCD_MAP_ON_SHUTDOWN=true
+AUTO_SAVE_MAPS_ON_SHUTDOWN=true
 # bag再生ではSLAM入力に必要なLiDAR/IMUと静的TFだけを流し、sim由来の動的/tf競合を避ける。
 DEFAULT_BAG_PLAY_TOPICS=(
   /tf_static
@@ -44,7 +44,7 @@ DEFAULT_BAG_PLAY_TOPICS=(
 )
 # SLAM収録の既定topicは後段解析に必要な出力に絞り、rosbag肥大化とDDS負荷を抑える。
 DEFAULT_RECORD_BAG_TOPICS=(
-  /lio_sam/mapping/cloud_registered_hybrid
+  /lio_sam/mapping/cloud_registered_raw
   /lio_sam/mapping/odometry
   /lio_sam/mapping/path
   /clock
@@ -55,7 +55,6 @@ WAIT_FOR_CLOUD_QUEUE_DRAIN_TIMEOUT_SECONDS="${WAIT_FOR_CLOUD_QUEUE_DRAIN_TIMEOUT
 WAIT_FOR_CLOUD_QUEUE_DRAIN_POLL_SECONDS="${WAIT_FOR_CLOUD_QUEUE_DRAIN_POLL_SECONDS:-1}"
 WAIT_FOR_SLAM_STARTUP_TIMEOUT_SECONDS="${WAIT_FOR_SLAM_STARTUP_TIMEOUT_SECONDS:-30}"
 WAIT_FOR_MAP_SAVE_SERVICE_TIMEOUT_SECONDS="${WAIT_FOR_MAP_SAVE_SERVICE_TIMEOUT_SECONDS:-30}"
-SAVE_PCD_MAP_TIMEOUT_SECONDS="${SAVE_PCD_MAP_TIMEOUT_SECONDS:-300}"
 PROCESS_STOP_GRACE_SECONDS="15"
 PROCESS_STOP_TERM_SECONDS="5"
 ROSBAG_STOP_GRACE_SECONDS="60"
@@ -65,7 +64,7 @@ usage() {
 Usage: bash scripts/run_slam.sh {map|loc} [OPTIONS]
 
 Modes:
-  map               Build and save a PCD map.
+  map               Build and save map outputs.
   loc               Localize against a fixed PCD map.
 
 Options:
@@ -77,7 +76,7 @@ Options:
   --record-bag       Record default SLAM output topics during SLAM execution.
   --bag-output PATH  Set rosbag output directory or prefix.
   --bag-topics CSV   Record only the given comma-separated topics.
-                     Default: /lio_sam/mapping/cloud_registered_hybrid,/lio_sam/mapping/odometry,/lio_sam/mapping/path,/clock,/tf_static
+                     Default: /lio_sam/mapping/cloud_registered_raw,/lio_sam/mapping/odometry,/lio_sam/mapping/path,/clock,/tf_static
   --bag-play [PATH]  Play a recorded rosbag and run LIO-SAM without Gazebo.
                      If PATH is omitted, the latest outputs/rosbag2/sim_* bag is used.
                      Only LiDAR/IMU topics and /tf_static are replayed.
@@ -92,11 +91,11 @@ Options:
                         Max seconds to wait for LIO-SAM cloudQueue drain after bag playback.
                         Default: 300. Use 0 to wait without timeout.
   --no-save-map-on-shutdown
-                       Do not auto-save the PCD map when mapping mode exits.
+                       Do not auto-save map outputs when mapping mode exits.
   --no-auto-exit     Keep SLAM and recording running after rosbag playback finishes.
   --rviz-config PATH Use a workspace RViz config file for LIO-SAM.
   --pcd [PATH]       Fixed PCD map path for loc mode.
-                     If PATH is omitted, the latest outputs/cloud_map/*.pcd is used.
+                     If PATH is omitted, the latest outputs/cloud_map/map_*/localization_map.pcd is used.
   --config PATH      Use a LIO-SAM parameter YAML. SLAM behavior/performance settings live there.
   --force-zero-offset-time
                      Force simulated Livox point offset_time to zero. Default for --sim.
@@ -108,7 +107,7 @@ Examples:
   bash scripts/run_slam.sh map --no-rviz
   bash scripts/run_slam.sh map --sim --lite --no-gui
   bash scripts/run_slam.sh loc --no-rviz
-  bash scripts/run_slam.sh loc --pcd outputs/cloud_map/map.pcd --no-rviz
+  bash scripts/run_slam.sh loc --pcd outputs/cloud_map/map_YYYYmmdd_HHMMSS/localization_map.pcd --no-rviz
   bash scripts/run_slam.sh map --config ros2_ws/src/ai_ship_robot_slam/config/lio_sam_mid360.yaml
 EOF
 }
@@ -430,21 +429,21 @@ latest_bag_for_prefix() {
   printf '%s' "${newest_dir}"
 }
 
-latest_pcd_map() {
+latest_localization_map() {
   local candidate_file=""
   local newest_file=""
 
   shopt -s nullglob
-  for candidate_file in "${CLOUD_MAP_ROOT}"/*.pcd; do
+  for candidate_file in "${CLOUD_MAP_ROOT}"/map_*/localization_map.pcd; do
     if [[ -z "${newest_file}" || "${candidate_file}" -nt "${newest_file}" ]]; then
       newest_file="${candidate_file}"
     fi
   done
   shopt -u nullglob
 
-  # 保存済みPCDだけを候補にし、locモードで明示指定が無い場合の既定mapを決める。
+  # 新しいmap保存レイアウトのlocalization PCDだけを候補にし、locモードの既定mapを決める。
   if [[ -z "${newest_file}" ]]; then
-    echo "No PCD map found in ${CLOUD_MAP_ROOT}." >&2
+    echo "No localization map found in ${CLOUD_MAP_ROOT}/map_*/localization_map.pcd." >&2
     exit 1
   fi
 
@@ -484,17 +483,18 @@ signal_process_tree() {
   kill "-${signal_name}" "${root_pid}" 2>/dev/null || true
 }
 
-print_pcd_map_save_start_banner() {
+print_map_outputs_save_start_banner() {
   local save_reason="${1:-manual}"
 
   echo >&2
   echo "======================================================================" >&2
-  echo "PCDマップ保存を開始しました" >&2
+  echo "map成果物保存を開始しました" >&2
   if [[ "${save_reason}" == "shutdown" ]]; then
-    echo "SLAM停止要求を受け付けたため、終了前にPCDマップを保存しています。" >&2
+    echo "SLAM停止要求を受け付けたため、終了前にmap成果物を保存しています。" >&2
   else
-    echo "bag再生完了後の自動停止前にPCDマップを保存しています。" >&2
+    echo "bag再生完了後の自動停止前にmap成果物を保存しています。" >&2
   fi
+  echo "localization_map.pcd と elevation submaps を出力します。" >&2
   echo "大きなマップでは数分かかる場合があります。" >&2
   echo "保存を中断して終了するには、もう一度 Ctrl+C を押してください。" >&2
   echo "======================================================================" >&2
@@ -551,13 +551,13 @@ cleanup_background_processes() {
   CLEANUP_RUNNING=true
 
   # mapping終了時だけ明示saveを挟み、無効化指定時は停止だけを優先して終了経路を単純化する。
-  if [[ "${RUN_MODE}" == "map" && "${AUTO_SAVE_PCD_MAP_ON_SHUTDOWN}" == "true" && -n "${SLAM_PID}" && "${MAP_SAVE_ATTEMPTED}" != "true" ]]; then
+  if [[ "${RUN_MODE}" == "map" && "${AUTO_SAVE_MAPS_ON_SHUTDOWN}" == "true" && -n "${SLAM_PID}" && "${MAP_SAVE_ATTEMPTED}" != "true" ]]; then
     set +e
-    save_pcd_map_if_requested "shutdown"
+    save_maps_if_requested "shutdown"
     map_save_status=$?
     set -e
     if [[ "${map_save_status}" -ne 0 ]]; then
-      echo "Proceeding to SLAM shutdown even though explicit PCD map save failed." >&2
+      echo "Proceeding to SLAM shutdown even though explicit map outputs save failed." >&2
     fi
   fi
 
@@ -583,7 +583,7 @@ handle_shutdown_signal() {
   # save中の再シグナルはユーザーの中断意思として扱い、service callのプロセスグループへ伝播する。
   if [[ "${MAP_SAVE_IN_PROGRESS}" == "true" ]]; then
     MAP_SAVE_CANCEL_REQUESTED=true
-    echo "${signal_name} received while PCD map save is in progress. Cancelling PCD map save..." >&2
+    echo "${signal_name} received while map outputs save is in progress. Cancelling map outputs save..." >&2
     if [[ -n "${MAP_SAVE_PID}" ]]; then
       signal_process_tree INT "${MAP_SAVE_PID}"
     fi
@@ -592,11 +592,11 @@ handle_shutdown_signal() {
 
   # 初回シグナルでは、map保存を伴う停止へ入ることを明示してから cleanup へ流す。
   if [[ "${SHUTDOWN_SIGNAL_COUNT}" -eq 1 ]]; then
-    if [[ "${RUN_MODE}" == "map" && "${AUTO_SAVE_PCD_MAP_ON_SHUTDOWN}" == "true" ]]; then
-      echo "${signal_name} received. Mapping shutdown will save the PCD map before stopping SLAM." >&2
-      echo "Press Ctrl+C again during the save to cancel the PCD map save." >&2
+    if [[ "${RUN_MODE}" == "map" && "${AUTO_SAVE_MAPS_ON_SHUTDOWN}" == "true" ]]; then
+      echo "${signal_name} received. Mapping shutdown will save map outputs before stopping SLAM." >&2
+      echo "Press Ctrl+C again during the save to cancel the map outputs save." >&2
     elif [[ "${RUN_MODE}" == "map" ]]; then
-      echo "${signal_name} received. Stopping mapping without automatic PCD map save." >&2
+      echo "${signal_name} received. Stopping mapping without automatic map outputs save." >&2
     else
       echo "${signal_name} received. Stopping SLAM and related background processes." >&2
     fi
@@ -808,17 +808,17 @@ wait_for_lio_sam_cloud_queue_empty() {
   done
 }
 
-wait_for_save_pcd_map_service() {
-  local service_name="/save_pcd_map"
+wait_for_save_maps_service() {
+  local service_name="/save_maps"
   local started_seconds=${SECONDS}
   local elapsed_seconds=0
   local last_log_seconds=0
   local service_list=""
 
-  echo "Waiting for PCD map saver service ${service_name}..." >&2
+  echo "Waiting for map saver service ${service_name}..." >&2
   while true; do
     if [[ -n "${SLAM_PID}" ]] && ! kill -0 "${SLAM_PID}" 2>/dev/null; then
-      echo "LIO-SAM exited before PCD map saver service became available." >&2
+      echo "LIO-SAM exited before map saver service became available." >&2
       return 1
     fi
 
@@ -832,60 +832,57 @@ wait_for_save_pcd_map_service() {
     if [[ "${WAIT_FOR_MAP_SAVE_SERVICE_TIMEOUT_SECONDS}" != "0" &&
           "${WAIT_FOR_MAP_SAVE_SERVICE_TIMEOUT_SECONDS}" != "0.0" &&
           "${elapsed_seconds}" -ge "${WAIT_FOR_MAP_SAVE_SERVICE_TIMEOUT_SECONDS}" ]]; then
-      echo "Timed out waiting for PCD map saver service after ${elapsed_seconds}s." >&2
+      echo "Timed out waiting for map saver service after ${elapsed_seconds}s." >&2
       return 1
     fi
 
     if (( SECONDS - last_log_seconds >= 5 )); then
-      echo "Still waiting for PCD map saver service ${service_name}." >&2
+      echo "Still waiting for map saver service ${service_name}." >&2
       last_log_seconds=${SECONDS}
     fi
     sleep 0.5
   done
 }
 
-save_pcd_map_if_requested() {
+save_maps_if_requested() {
   local save_reason="${1:-manual}"
-  local service_name="/save_pcd_map"
+  local service_name="/save_maps"
   local service_type="std_srvs/srv/Trigger"
   local service_request="{}"
   local call_output=""
   local call_status=0
   local call_cmd=(ros2 service call "${service_name}" "${service_type}" "${service_request}")
   local output_file=""
-  local saved_map_path=""
+  local saved_output_dir=""
+  local saved_pcd_path=""
+  local saved_manifest_path=""
 
   if [[ "${RUN_MODE}" != "map" ]]; then
     return 0
   fi
   if [[ "${MAP_SAVE_ATTEMPTED}" == "true" ]]; then
     if [[ "${MAP_SAVE_SUCCEEDED}" == "true" ]]; then
-      echo "PCD map save was already completed earlier; skipping duplicate save request." >&2
+      echo "Map outputs save was already completed earlier; skipping duplicate save request." >&2
       return 0
     fi
-    echo "PCD map save was already attempted earlier; skipping duplicate save request." >&2
+    echo "Map outputs save was already attempted earlier; skipping duplicate save request." >&2
     return 1
   fi
 
   # save service待機以降は明示的に save試行中として扱い、重複要求と再シグナル中断を防ぐ。
   MAP_SAVE_ATTEMPTED=true
-  if ! wait_for_save_pcd_map_service; then
+  if ! wait_for_save_maps_service; then
     return 1
   fi
 
-  print_pcd_map_save_start_banner "${save_reason}"
+  print_map_outputs_save_start_banner "${save_reason}"
 
   MAP_SAVE_IN_PROGRESS=true
   MAP_SAVE_CANCEL_REQUESTED=false
-  output_file="$(mktemp -t ai_ship_robot_pcd_map_save.XXXXXX.log)"
+  output_file="$(mktemp -t ai_ship_robot_maps_save.XXXXXX.log)"
   set +e
-  if [[ "${SAVE_PCD_MAP_TIMEOUT_SECONDS}" == "0" || "${SAVE_PCD_MAP_TIMEOUT_SECONDS}" == "0.0" ]]; then
-    setsid "${call_cmd[@]}" >"${output_file}" 2>&1 &
-    MAP_SAVE_PID=$!
-  else
-    setsid timeout --foreground "${SAVE_PCD_MAP_TIMEOUT_SECONDS}s" "${call_cmd[@]}" >"${output_file}" 2>&1 &
-    MAP_SAVE_PID=$!
-  fi
+  setsid "${call_cmd[@]}" >"${output_file}" 2>&1 &
+  MAP_SAVE_PID=$!
   wait "${MAP_SAVE_PID}"
   call_status=$?
   set -e
@@ -894,9 +891,9 @@ save_pcd_map_if_requested() {
   MAP_SAVE_PID=""
   MAP_SAVE_IN_PROGRESS=false
 
-  if [[ "${MAP_SAVE_CANCEL_REQUESTED}" == "true" || "${call_status}" -eq 130 || "${call_status}" -eq 124 ]]; then
+  if [[ "${MAP_SAVE_CANCEL_REQUESTED}" == "true" || "${call_status}" -eq 130 ]]; then
     echo "----------------------------------------------------------------------" >&2
-    echo "PCD map save cancelled by user." >&2
+    echo "Map outputs save cancelled by user." >&2
     echo "----------------------------------------------------------------------" >&2
     return 1
   fi
@@ -905,25 +902,37 @@ save_pcd_map_if_requested() {
   if [[ "${call_status}" -eq 0 &&
         ( "${call_output}" == *"success=True"* ||
          "${call_output}" == *"success: true"* ||
-          "${call_output}" == *"success: True"* ) ]]; then
+           "${call_output}" == *"success: True"* ) ]]; then
     MAP_SAVE_SUCCEEDED=true
-    # service応答には保存先とframeが入るため、完了ログではPCDパスだけを目立つ形で再掲する。
-    if [[ "${call_output}" =~ ([^[:space:]\"\']+\.pcd) ]]; then
-      saved_map_path="${BASH_REMATCH[1]}"
+    # service応答のmessageから主要成果物を抜き出し、終了直前ログでも確認しやすくする。
+    if [[ "${call_output}" =~ output_dir=([^[:space:]\"\']+) ]]; then
+      saved_output_dir="${BASH_REMATCH[1]}"
+    fi
+    if [[ "${call_output}" =~ localization_pcd=([^[:space:]\"\']+) ]]; then
+      saved_pcd_path="${BASH_REMATCH[1]}"
+    fi
+    if [[ "${call_output}" =~ manifest=([^[:space:]\"\']+) ]]; then
+      saved_manifest_path="${BASH_REMATCH[1]}"
     fi
     echo "----------------------------------------------------------------------" >&2
-    echo "PCDマップ保存が完了しました。" >&2
-    if [[ -n "${saved_map_path}" ]]; then
-      echo "保存先PCDファイル: ${saved_map_path}" >&2
+    echo "map成果物保存が完了しました。" >&2
+    if [[ -n "${saved_output_dir}" ]]; then
+      echo "保存先ディレクトリ: ${saved_output_dir}" >&2
     fi
-    echo "PCD map save service response: ${call_output//$'\n'/ }" >&2
+    if [[ -n "${saved_pcd_path}" ]]; then
+      echo "localization PCD: ${saved_pcd_path}" >&2
+    fi
+    if [[ -n "${saved_manifest_path}" ]]; then
+      echo "elevation manifest: ${saved_manifest_path}" >&2
+    fi
+    echo "Map outputs save service response: ${call_output//$'\n'/ }" >&2
     echo "----------------------------------------------------------------------" >&2
     echo "Continuing with the remaining shutdown sequence." >&2
     return 0
   fi
 
   echo "----------------------------------------------------------------------" >&2
-  echo "PCD map save failed: ${call_output//$'\n'/ }" >&2
+  echo "Map outputs save failed: ${call_output//$'\n'/ }" >&2
   echo "----------------------------------------------------------------------" >&2
   echo "Continuing with SLAM shutdown. The shutdown fallback saver may still attempt a final save." >&2
   return 1
@@ -1272,9 +1281,9 @@ run_bag_play_lio_sam() {
         sleep "${AUTO_STOP_AFTER_BAG_PLAY_SECONDS}"
       fi
       # bag再生の auto-stop でも通常終了と同じ flag を見て、保存抑止時の挙動差をなくす。
-      if [[ "${AUTO_SAVE_PCD_MAP_ON_SHUTDOWN}" == "true" ]]; then
+      if [[ "${AUTO_SAVE_MAPS_ON_SHUTDOWN}" == "true" ]]; then
         set +e
-        save_pcd_map_if_requested
+        save_maps_if_requested
         map_save_status=$?
         set -e
       fi
@@ -1560,7 +1569,7 @@ run_sim_lio_sam() {
     launch_args+=("robot_name:=ai_ship_robot_lio_sam_$$")
   fi
 
-  # simulation経由のmap作成でも、通常起動と同じPCD map saverを有効化する。
+  # simulation経由のmap作成でも、通常起動と同じmap saverを有効化する。
   launch_args+=("use_map_saver:=true")
 
   source_sim_slam_environment false
@@ -1736,7 +1745,7 @@ while [[ $# -gt 0 ]]; do
       WAIT_FOR_CLOUD_QUEUE_DRAIN_TIMEOUT_SECONDS="$(require_value --cloud-queue-drain-timeout "${1:-}")"
       ;;
     --no-save-map-on-shutdown)
-      AUTO_SAVE_PCD_MAP_ON_SHUTDOWN=false
+      AUTO_SAVE_MAPS_ON_SHUTDOWN=false
       ;;
     --no-auto-exit)
       BAG_AUTO_EXIT=false
@@ -1760,10 +1769,10 @@ while [[ $# -gt 0 ]]; do
   shift
 done
 
-# localizationは固定PCD mapを使うが、未指定時は最新の保存済みPCDを既定値にする。
+# localizationは固定PCD mapを使うが、未指定時は最新のlocalization_map.pcdを既定値にする。
 if [[ "${RUN_MODE}" == "loc" && -z "${PCD_MAP_PATH}" ]]; then
-  PCD_MAP_PATH="$(latest_pcd_map)"
-  echo "Using latest PCD map: ${PCD_MAP_PATH}" >&2
+  PCD_MAP_PATH="$(latest_localization_map)"
+  echo "Using latest localization map: ${PCD_MAP_PATH}" >&2
 fi
 if [[ "${RUN_MODE}" == "map" && "${PCD_MAP_REQUESTED}" == "true" ]]; then
   echo "map mode does not use --pcd." >&2

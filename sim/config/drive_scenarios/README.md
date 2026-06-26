@@ -2,25 +2,33 @@
 
 このディレクトリには、`sim/scripts/drive_robot.sh --scenario` と `sim/scripts/run_simulation.sh --drive-scenario` で使う YAML シナリオを配置します。
 
-## 形式
+## 基本形式
 
 ```yaml
 vars:
-  forward_speed: 0.2
-  turn_speed: ${forward_speed * 2}
+  move_x: 1.0
+
 steps:
-  - duration_sec: 3.0
+  - duration_sec: 1.0
     commands:
-      - type: forward
-        speed: ${forward_speed}
-      - type: yaw_left
-        speed: ${turn_speed}
+      - type: stop
+
+  - duration_sec: 5.0
+    move_to_pose:
+      type: abs
+      pos:
+        x: ${move_x}
+        y: 1.0
+        tolerance: 0.05
+      yaw:
+        deg: 90.0
+        tolerance: 0.5
 ```
 
 ## トップレベル
 
 - `vars`: 任意。変数名から数値または式文字列へのマップ
-- `steps`: 必須。1 件以上の step を持つ配列
+- `steps`: 必須。1 件以上の step entry を持つ配列
 
 ## vars
 
@@ -29,35 +37,71 @@ steps:
 - 参照可能な演算子は `+` `-` `*` `/` と括弧 `(` `)`
 - 変数は定義順に評価され、後ろの変数から前の変数は参照できません
 
-```yaml
-vars:
-  base_speed: 0.25
-  turn_speed: ${base_speed / 2}
-  short_wait: ${1 + 0.5}
-```
+## 通常 step
 
-## step entry
+通常 step は `duration_sec` と、`commands` または `move_to_pose` のどちらか一方を持ちます。`duration_sec` はシミュレーション時間基準の秒数です。
 
-`steps` の各要素には、通常 step、`repeat` ブロック、`set` ステップを置けます。
-
-### 通常 step
-
-- `duration_sec`: 必須。0 より大きい秒数
-- `commands`: 必須。1 件以上の command を持つ配列
-- `duration_sec` は数値または `${...}` を指定できます
-
-### set ステップ
+### commands
 
 ```yaml
-- set:
-    stride: ${stride + 1.0}
-    turn_speed: ${turn_speed * 0.8}
+- duration_sec: 2.0
+  commands:
+    - type: forward
+      speed: 0.2
 ```
 
-- `set` は変数の更新だけを行い、走行コマンドは発行しません
-- 更新後の値は、後続の step / repeat から参照されます
+| type | 動作 | speed 単位 |
+| --- | --- | --- |
+| `stop` | 停止 | なし |
+| `forward` | `base_footprint` +X 方向へ移動 | m/s |
+| `backward` | `base_footprint` -X 方向へ移動 | m/s |
+| `left` | `base_footprint` +Y 方向へ移動 | m/s |
+| `right` | `base_footprint` -Y 方向へ移動 | m/s |
+| `yaw_left` | +Z 軸回りへ回転 | rad/s |
+| `yaw_right` | -Z 軸回りへ回転 | rad/s |
 
-### repeat ブロック
+### move_to_pose
+
+```yaml
+- duration_sec: 5.0
+  move_to_pose:
+    type: rel
+    pos:
+      x: 1.0
+      y: 0.0
+      tolerance: 0.05
+    yaw:
+      deg: 90.0
+      tolerance: 0.5
+```
+
+- `type`: `abs` または `rel`。省略時は `abs`
+- `abs`: `/odom` 原点基準の絶対位置・絶対 yaw へ移動
+- `rel`: step 開始時のロボット位置・yaw を基準にした相対位置・相対 yaw へ移動
+- `pos.x`, `pos.y`: m 単位
+- `pos.tolerance`: m 単位。省略時は `0.05`
+- `yaw.deg`: degree 単位
+- `yaw.tolerance`: degree 単位。省略時は `1.0`
+- `pos` を省略した場合は step 開始時の現在位置を維持します
+- `yaw` を省略した場合は step 開始時の現在 yaw を維持します
+- `pos` と `yaw` の両方を省略することはできません
+- `move_to_pose` の `duration_sec` は速度算出用の目標到達時間であり、超過しても timeout にはしません
+
+`pos` と `yaw` は省略記法でも指定できます。
+
+```yaml
+pos: [1.0, 1.0, 0.01]  # x=1.0, y=1.0, tolerance=0.01
+pos: [1.0, 1.0]        # x=1.0, y=1.0, tolerance=0.05
+yaw: [90.0, 0.5]       # deg=90.0, tolerance=0.5
+yaw: [90.0]            # deg=90.0, tolerance=1.0
+yaw: 90.0              # deg=90.0, tolerance=1.0
+```
+
+`pos` の flow sequence 内で `${...}` を使う場合は、`pos: ["${target_x}", "${target_y}"]` のようにクォートします。
+
+`commands` と `move_to_pose` は同じ step では併用できません。
+
+## repeat ブロック
 
 ```yaml
 - repeat:
@@ -72,75 +116,14 @@ vars:
           - type: stop
 ```
 
-- `repeat.count`: 必須。1 以上の整数
-- `repeat.count` は整数値に解決される `${...}` も指定できます
+- `repeat.count`: 必須。1 以上の整数、または整数値に解決される `${...}`
 - `repeat.steps`: 必須。1 件以上の step entry を持つ配列
-- `repeat.steps` の中でも通常 step、`repeat`、`set` をネストできます
 
-## command
-
-```yaml
-- type: <command_type>
-  speed: <non_negative_number>
-```
-
-- `type`: 必須
-- `speed`: `stop` 以外で必須。0 以上の数値または `${...}`
-
-## command type
-
-| type | 動作 | 単位 |
-| --- | --- | --- |
-| `stop` | 停止 | なし |
-| `forward` | `linear.x` 正方向 | m/s |
-| `backward` | `linear.x` 負方向 | m/s |
-| `left` | `linear.y` 正方向 | m/s |
-| `right` | `linear.y` 負方向 | m/s |
-| `yaw_left` | `angular.z` 正方向 | rad/s |
-| `yaw_right` | `angular.z` 負方向 | rad/s |
-
-## 制約
-
-- `stop` は同一 step 内で単独指定します
-- `forward` と `backward` は同時指定できません
-- `left` と `right` は同時指定できません
-- `yaw_left` と `yaw_right` は同時指定できません
-- 異なる軸の command は同一 step 内で組み合わせできます
-
-## 例
+## set ステップ
 
 ```yaml
-vars:
-  move_speed: 0.2
-  turn_speed: ${move_speed * 2}
-  wait_short: 0.5
-  cycle_count: ${1 + 2}
-
-steps:
-  - duration_sec: 2.0
-    commands:
-      - type: stop
-
-  - duration_sec: 3.0
-    commands:
-      - type: forward
-        speed: ${move_speed}
-      - type: yaw_right
-        speed: ${turn_speed}
-
-  - repeat:
-      count: ${cycle_count}
-      steps:
-        - duration_sec: ${1.0 + wait_short}
-          commands:
-            - type: left
-              speed: ${move_speed / 2}
-        - duration_sec: ${wait_short}
-          commands:
-            - type: stop
-
-  - set:
-      move_speed: ${move_speed + 0.05}
+- set:
+    stride: ${stride + 1.0}
 ```
 
-現在このディレクトリには `around_world.yaml` と `yaw_right.yaml` があります。
+`set` は変数の更新だけを行い、走行コマンドは発行しません。
