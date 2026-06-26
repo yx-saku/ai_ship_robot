@@ -771,13 +771,13 @@ private:
     adaptive_fine_gicp_feature_z_max_ = declare_parameter<double>(
       "adaptive_fine_gicp_feature_z_max", 1.5);
     adaptive_fine_gicp_min_source_points_ = static_cast<std::size_t>(declare_parameter<int>(
-      "adaptive_fine_gicp_min_source_points", 400));
+        "adaptive_fine_gicp_min_source_points", 400));
     adaptive_fine_gicp_min_target_points_ = static_cast<std::size_t>(declare_parameter<int>(
-      "adaptive_fine_gicp_min_target_points", 1200));
+        "adaptive_fine_gicp_min_target_points", 1200));
     adaptive_fine_gicp_min_source_xy_cells_ = static_cast<std::size_t>(declare_parameter<int>(
-      "adaptive_fine_gicp_min_source_xy_cells", 80));
+        "adaptive_fine_gicp_min_source_xy_cells", 80));
     adaptive_fine_gicp_min_target_xy_cells_ = static_cast<std::size_t>(declare_parameter<int>(
-      "adaptive_fine_gicp_min_target_xy_cells", 120));
+        "adaptive_fine_gicp_min_target_xy_cells", 120));
     adaptive_fine_gicp_xy_cell_size_ = declare_parameter<double>(
       "adaptive_fine_gicp_xy_cell_size", 0.5);
     adaptive_fine_gicp_min_scattering_ = declare_parameter<double>(
@@ -1815,7 +1815,8 @@ private:
       // 粗いNDTのposeを初期値にして、局所範囲だけをGICPで精密化する。
       const auto gicp_start = std::chrono::steady_clock::now();
       auto registration = run_gicp(
-        selected_source_cloud, selected_target_cloud, coarse_result.registration.target_from_source);
+        selected_source_cloud, selected_target_cloud,
+        coarse_result.registration.target_from_source);
       const double gicp_ms = elapsed_milliseconds(
         gicp_start, std::chrono::steady_clock::now());
       const bool accepted = registration.converged &&

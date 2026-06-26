@@ -28,7 +28,7 @@ Options:
   --rate VALUE         Set rosbag playback rate. Default: 1.0
   --start-offset SEC   Start playback after the given offset. Default: 0
   --loop               Loop rosbag playback.
-  --map                Save accumulated map by calling /save_pcd_map after replay.
+  --map                Save accumulated map outputs by calling /save_maps after replay.
   -h, --help           Show this help.
 EOF
 }
@@ -292,7 +292,7 @@ ros2 run ai_ship_robot_slam livox_custommsg_to_pointcloud2_node --ros-args -p us
 POINTCLOUD_BRIDGE_PID=$!
 sleep 1
 if [[ "${SAVE_MAP}" == "true" ]]; then
-  ros2 run ai_ship_robot_slam pcd_map_saver_node --ros-args -p use_sim_time:=true &
+  ros2 run ai_ship_robot_slam map_saver_node --ros-args -p use_sim_time:=true &
   MAP_SAVER_PID=$!
   sleep 1
 fi
@@ -312,7 +312,7 @@ if [[ "${play_status}" -ne 0 ]]; then
 fi
 
 if [[ "${SAVE_MAP}" == "true" ]]; then
-  ros2 service call /save_pcd_map std_srvs/srv/Trigger '{}'
+  ros2 service call /save_maps std_srvs/srv/Trigger '{}'
 fi
 
 # 再生完了後もRVizを残し、結果確認中にwindowが自動で閉じないようにする。

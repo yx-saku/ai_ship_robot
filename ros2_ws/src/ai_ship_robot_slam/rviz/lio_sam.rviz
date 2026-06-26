@@ -244,7 +244,7 @@ Visualization Manager:
         Filter size: 10
         History Policy: Keep Last
         Reliability Policy: Best Effort
-        Value: /lio_sam/mapping/cloud_registered_hybrid
+        Value: /lio_sam/mapping/cloud_registered
       Use Fixed Frame: true
       Use rainbow: true
       Value: true
@@ -278,7 +278,7 @@ Visualization Manager:
         Filter size: 10
         History Policy: Keep Last
         Reliability Policy: Reliable
-        Value: /pcd_map_saver/map_preview
+        Value: /map_saver/localization_map_preview
       Use Fixed Frame: true
       Use rainbow: true
       Value: true

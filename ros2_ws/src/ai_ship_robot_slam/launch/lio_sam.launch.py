@@ -38,8 +38,12 @@ def generate_launch_description():
     map_path_topic = LaunchConfiguration("map_path_topic")
     map_odometry_sync_tolerance_sec = LaunchConfiguration("map_odometry_sync_tolerance_sec")
     map_cloud_buffer_duration_sec = LaunchConfiguration("map_cloud_buffer_duration_sec")
-    hybrid_raw_near_leaf_size = LaunchConfiguration("hybrid_raw_near_leaf_size")
+    map_localization_voxel_leaf_size = LaunchConfiguration("map_localization_voxel_leaf_size")
     map_global_voxel_leaf_size = LaunchConfiguration("map_global_voxel_leaf_size")
+    map_elevation_cell_size = LaunchConfiguration("map_elevation_cell_size")
+    map_cell_z_cluster_gap = LaunchConfiguration("map_cell_z_cluster_gap")
+    map_ground_cluster_height_gap = LaunchConfiguration("map_ground_cluster_height_gap")
+    map_ground_cluster_min_cells = LaunchConfiguration("map_ground_cluster_min_cells")
     map_preview_topic = LaunchConfiguration("map_preview_topic")
     map_preview_publish_period_sec = LaunchConfiguration("map_preview_publish_period_sec")
     map_preview_voxel_leaf_size = LaunchConfiguration("map_preview_voxel_leaf_size")
@@ -61,6 +65,7 @@ def generate_launch_description():
             "baselinkFrame": base_frame,
             "odometryFrame": lidar_init_frame,
             "mapFrame": map_frame,
+            "publishCloudRegisteredRaw": ParameterValue(use_map_saver, value_type=bool),
         },
     ]
 
@@ -131,11 +136,11 @@ def generate_launch_description():
         parameters=[{"use_sim_time": use_sim_time}],
     )
 
-    # local keyframe点群を保持し、保存時に最新path poseでmap frameへ再配置する。
-    pcd_map_saver = Node(
+    # raw登録点群からlocalization PCDと2.5D elevation submapを保存する。
+    map_saver = Node(
         package="ai_ship_robot_slam",
-        executable="pcd_map_saver_node",
-        name="pcd_map_saver_node",
+        executable="map_saver_node",
+        name="map_saver_node",
         output="screen",
         condition=IfCondition(use_map_saver),
         parameters=[
@@ -152,11 +157,19 @@ def generate_launch_description():
                 "cloud_buffer_duration_sec": ParameterValue(
                     map_cloud_buffer_duration_sec, value_type=float
                 ),
-                "submap_voxel_leaf_size": ParameterValue(
-                    hybrid_raw_near_leaf_size, value_type=float
+                "localization_voxel_leaf_size": ParameterValue(
+                    map_localization_voxel_leaf_size, value_type=float
                 ),
                 "global_voxel_leaf_size": ParameterValue(
                     map_global_voxel_leaf_size, value_type=float
+                ),
+                "elevation_cell_size": ParameterValue(map_elevation_cell_size, value_type=float),
+                "cell_z_cluster_gap": ParameterValue(map_cell_z_cluster_gap, value_type=float),
+                "ground_cluster_height_gap": ParameterValue(
+                    map_ground_cluster_height_gap, value_type=float
+                ),
+                "ground_cluster_min_cells": ParameterValue(
+                    map_ground_cluster_min_cells, value_type=int
                 ),
                 "preview_enabled": True,
                 "preview_topic": map_preview_topic,
@@ -178,16 +191,20 @@ def generate_launch_description():
             DeclareLaunchArgument("imu_topic", default_value="/lidar1/livox/imu"),
             DeclareLaunchArgument("lio_sam_package", default_value="lio_sam"),
             DeclareLaunchArgument(
-                "map_cloud_topic", default_value="/lio_sam/mapping/cloud_registered_hybrid"
+                "map_cloud_topic", default_value="/lio_sam/mapping/cloud_registered_raw"
             ),
             DeclareLaunchArgument("map_odometry_topic", default_value="/lio_sam/mapping/odometry"),
             DeclareLaunchArgument("map_path_topic", default_value="/lio_sam/mapping/path"),
             DeclareLaunchArgument("map_odometry_sync_tolerance_sec", default_value="0.25"),
             DeclareLaunchArgument("map_cloud_buffer_duration_sec", default_value="5.0"),
-            DeclareLaunchArgument("hybrid_raw_near_leaf_size", default_value="0.01"),
-            DeclareLaunchArgument("map_global_voxel_leaf_size", default_value="0.01"),
+            DeclareLaunchArgument("map_localization_voxel_leaf_size", default_value="0.10"),
+            DeclareLaunchArgument("map_global_voxel_leaf_size", default_value="0.10"),
+            DeclareLaunchArgument("map_elevation_cell_size", default_value="0.01"),
+            DeclareLaunchArgument("map_cell_z_cluster_gap", default_value="0.03"),
+            DeclareLaunchArgument("map_ground_cluster_height_gap", default_value="0.05"),
+            DeclareLaunchArgument("map_ground_cluster_min_cells", default_value="10"),
             DeclareLaunchArgument(
-                "map_preview_topic", default_value="/pcd_map_saver/map_preview"
+                "map_preview_topic", default_value="/map_saver/localization_map_preview"
             ),
             DeclareLaunchArgument("map_preview_publish_period_sec", default_value="2.0"),
             DeclareLaunchArgument("map_preview_voxel_leaf_size", default_value="0.05"),
@@ -223,7 +240,7 @@ def generate_launch_description():
             image_projection,
             feature_extraction,
             map_optimization,
-            pcd_map_saver,
+            map_saver,
             rviz,
         ]
     )

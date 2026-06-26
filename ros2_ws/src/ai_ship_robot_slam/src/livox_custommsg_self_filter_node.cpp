@@ -19,6 +19,7 @@
 #include <tf2_ros/buffer.h>
 #include <tf2_ros/transform_listener.h>
 
+#include <algorithm>
 #include <cmath>
 #include <cstdio>
 #include <cstdint>
@@ -36,8 +37,6 @@
 #include <geometry_msgs/msg/transform_stamped.hpp>
 #include <livox_ros_driver2/msg/custom_msg.hpp>
 #include <rclcpp/rclcpp.hpp>
-
-#include <algorithm>
 
 namespace ai_ship_robot_slam
 {
@@ -204,13 +203,14 @@ private:
     // 名前順に固定しておくと、設定ファイル編集後も起動ログと実処理順の追跡がしやすい。
     std::sort(
       named_values.begin(), named_values.end(),
-      [](const auto & lhs, const auto & rhs) { return lhs.first < rhs.first; });
+      [](const auto & lhs, const auto & rhs) {return lhs.first < rhs.first;});
 
     // 各子パラメータの6値配列を既存のBox表現へ落とし込み、判定ロジックはそのまま再利用する。
     for (const auto & [box_name, values] : named_values) {
       if (values.size() != values_per_box) {
         throw std::invalid_argument(
-                "boxes." + box_name + " must have 6 values: [x_min, x_max, y_min, y_max, z_min, z_max]");
+                "boxes." + box_name +
+                " must have 6 values: [x_min, x_max, y_min, y_max, z_min, z_max]");
       }
       boxes.push_back(
         Box{

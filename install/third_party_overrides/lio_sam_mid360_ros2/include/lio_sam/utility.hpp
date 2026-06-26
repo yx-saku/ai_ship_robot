@@ -162,7 +162,7 @@ public:
     float odometrySurfLeafSize;
     float mappingCornerLeafSize;
     float mappingSurfLeafSize ;
-    // AI_SHIP_ROBOT_BEGIN: PCD map保存用hybrid点群をlocal frameで出すためのparameterを追加する。
+    // AI_SHIP_ROBOT_BEGIN: 旧hybrid点群と軽量publish制御のparameterを追加する。
     bool hybridRegisteredCloudEnabled;
     float hybridRegisteredCloudRawNearRange;
     float hybridRegisteredCloudRawNearLeafSize;
@@ -395,8 +395,8 @@ public:
         get_parameter("mappingCornerLeafSize", mappingCornerLeafSize);
         declare_parameter("mappingSurfLeafSize", 0.4);
         get_parameter("mappingSurfLeafSize", mappingSurfLeafSize);
-        // AI_SHIP_ROBOT_BEGIN: 近傍raw詳細点群とSLAM用粗点群を合成したPCD map保存用hybrid点群の設定を読む。
-        declare_parameter("hybridRegisteredCloudEnabled", true);
+        // AI_SHIP_ROBOT_BEGIN: map保存はraw登録点群を使うため、旧hybrid生成は明示有効時だけ動かす。
+        declare_parameter("hybridRegisteredCloudEnabled", false);
         get_parameter("hybridRegisteredCloudEnabled", hybridRegisteredCloudEnabled);
         declare_parameter("hybridRegisteredCloudRawNearRange", 3.0);
         get_parameter("hybridRegisteredCloudRawNearRange", hybridRegisteredCloudRawNearRange);
@@ -406,7 +406,7 @@ public:
         get_parameter("hybridRegisteredCloudRawUpperMapZLimitEnabled", hybridRegisteredCloudRawUpperMapZLimitEnabled);
         declare_parameter("hybridRegisteredCloudRawUpperMapZMax", 1.5);
         get_parameter("hybridRegisteredCloudRawUpperMapZMax", hybridRegisteredCloudRawUpperMapZMax);
-        declare_parameter("hybridRegisteredCloudTopic", "/lio_sam/mapping/cloud_registered_hybrid");
+        declare_parameter("hybridRegisteredCloudTopic", "/lio_sam/mapping/cloud_registered_legacy");
         get_parameter("hybridRegisteredCloudTopic", hybridRegisteredCloudTopic);
         declare_parameter("publishDeskewedCloud", false);
         get_parameter("publishDeskewedCloud", publishDeskewedCloud);
