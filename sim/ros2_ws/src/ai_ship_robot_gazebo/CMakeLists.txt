@@ -48,7 +48,7 @@ ament_target_dependencies(keyboard_drive
 )
 
 install(
-  DIRECTORY config launch worlds
+  DIRECTORY config launch meshes worlds
   DESTINATION share/${PROJECT_NAME}
 )
 

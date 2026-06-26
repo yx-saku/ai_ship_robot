@@ -68,7 +68,20 @@ bash sim/scripts/run_simulation.sh --drive-scenario sim/config/drive_scenarios/a
 - `--record-bag`: readiness 完了後に rosbag2 を記録
 - 自動走行の繰り返しはシナリオ YAML の `steps[].repeat` で指定
 
-既定 world は `sim/ros2_ws/src/ai_ship_robot_gazebo/worlds/lidar_placement.world` です。
+既定 world は `sim/ros2_ws/src/ai_ship_robot_gazebo/worlds/shipyard_indoor_100x50.world` です。
+
+- `shipyard_indoor_100x50.world`
+  - 原点中心 `100m x 50m` の造船所内空間です
+  - 原点付近は robot の安全スポーン帯、中央は長い主通路、北側/南側/東側に評価ゾーンがあります
+- `lidar_placement.world`
+  - 床欠損や溝の回帰確認用 world として継続利用できます
+
+旧 world を明示指定する例です。
+
+```bash
+bash sim/scripts/run_simulation.sh \
+  --world sim/ros2_ws/src/ai_ship_robot_gazebo/worlds/lidar_placement.world
+```
 
 ## 自動走行
 
@@ -84,6 +97,7 @@ bash sim/scripts/run_simulation.sh \
 - シナリオ内の一部繰り返しは YAML の `repeat.count` / `repeat.steps` で指定します
 - シナリオ完了時は既定で 5 秒後にシミュレーションを自動終了します
 - `--no-auto-exit` で自動終了を抑制できます
+- 既存シナリオは旧 world 基準で調整された可能性があるため、新既定 world では手動操作または短いシナリオから確認してください
 
 ## rosbag 記録
 

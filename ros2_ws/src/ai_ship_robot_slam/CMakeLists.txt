@@ -65,6 +65,8 @@ ament_target_dependencies(
   tf2_sensor_msgs
 )
 
+add_executable(pcd_height_diff_map_generator src/pcd_height_diff_map_generator.cpp)
+target_compile_features(pcd_height_diff_map_generator PUBLIC cxx_std_17)
 add_executable(pcd_localization_node src/pcd_localization_node.cpp)
 target_compile_features(pcd_localization_node PUBLIC cxx_std_17)
 ament_target_dependencies(
@@ -86,6 +88,7 @@ install(
   TARGETS
     livox_custommsg_self_filter_node
     livox_custommsg_to_pointcloud2_node
+    pcd_height_diff_map_generator
     pcd_localization_node
     pcd_map_saver_node
     slam_reference_lidar_static_tf_node

@@ -115,7 +115,11 @@ def generate_launch_description():
             DeclareLaunchArgument(
                 "world",
                 default_value=PathJoinSubstitution(
-                    [FindPackageShare("ai_ship_robot_gazebo"), "worlds", "lidar_placement.world"]
+                    [
+                        FindPackageShare("ai_ship_robot_gazebo"),
+                        "worlds",
+                        "shipyard_indoor_100x50.world",
+                    ]
                 ),
             ),
             DeclareLaunchArgument(
