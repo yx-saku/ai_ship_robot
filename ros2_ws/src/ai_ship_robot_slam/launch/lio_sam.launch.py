@@ -207,7 +207,7 @@ def generate_launch_description():
                 "map_preview_topic", default_value="/map_saver/localization_map_preview"
             ),
             DeclareLaunchArgument("map_preview_publish_period_sec", default_value="2.0"),
-            DeclareLaunchArgument("map_preview_voxel_leaf_size", default_value="0.05"),
+            DeclareLaunchArgument("map_preview_voxel_leaf_size", default_value="0.1"),
             DeclareLaunchArgument(
                 "cloud_map_directory",
                 default_value=os.path.join(

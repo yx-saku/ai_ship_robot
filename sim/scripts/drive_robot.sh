@@ -21,9 +21,9 @@ Options:
   --scenario FILE          Run scripted drive with a YAML scenario file.
                            Scenario steps support commands and move_to_pose.
   --start-delay SEC        Wait before starting scripted drive. Default: 0.0
-  --linear-speed VALUE     Forward/backward speed in m/s. Default: 0.20
-  --lateral-speed VALUE    Left/right strafe speed in m/s. Default: 0.20
-  --angular-speed VALUE    Yaw speed in rad/s. Default: 0.60
+  --linear-speed VALUE     Forward/backward speed in m/s. Default: 1.4
+  --lateral-speed VALUE    Left/right strafe speed in m/s. Default: 1.4
+  --angular-speed VALUE    Yaw speed in rad/s. Default: 0.873
   --publish-rate VALUE     Command publish rate in Hz. Default: 10.0
   --cmd-vel-topic TOPIC    cmd_vel topic. Default: cmd_vel
   -h, --help               Show this help.
@@ -126,9 +126,9 @@ BUILD_WORKSPACE=false
 CLEAN_BUILD_WORKSPACE=false
 SCENARIO_FILE=""
 START_DELAY_SEC="0.0"
-LINEAR_SPEED="0.20"
-LATERAL_SPEED="0.20"
-ANGULAR_SPEED="0.60"
+LINEAR_SPEED="1.4"
+LATERAL_SPEED="1.4"
+ANGULAR_SPEED="0.873"
 PUBLISH_RATE="10.0"
 CMD_VEL_TOPIC="cmd_vel"
 

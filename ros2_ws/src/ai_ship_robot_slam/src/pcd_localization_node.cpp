@@ -663,135 +663,170 @@ public:
 private:
   void declare_and_validate_parameters()
   {
-    pcd_map_path_ = declare_parameter<std::string>("pcd_map_path", "");
-    map_frame_ = declare_parameter<std::string>("map_frame", "map");
-    odom_frame_ = declare_parameter<std::string>("odom_frame", "lidar_init");
-    lidar_frame_ = declare_parameter<std::string>("lidar_frame", "lidar_odom");
+    // 設定ファイルの階層と初期位置推定の処理順を一致させ、調整対象の責務を読み取りやすくする。
+    pcd_map_path_ = declare_parameter<std::string>("io.pcd_map_path", "");
+    map_frame_ = declare_parameter<std::string>("io.frames.map", "map");
+    odom_frame_ = declare_parameter<std::string>("io.frames.odom", "lidar_init");
+    lidar_frame_ = declare_parameter<std::string>("io.frames.lidar", "lidar_odom");
     cloud_topic_ = declare_parameter<std::string>(
-      "cloud_topic", "/lio_sam/mapping/cloud_registered");
+      "io.topics.cloud", "/lio_sam/mapping/cloud_registered");
     odometry_topic_ = declare_parameter<std::string>(
-      "odometry_topic", "/lio_sam/mapping/odometry");
+      "io.topics.odometry", "/lio_sam/mapping/odometry");
     map_preview_topic_ = declare_parameter<std::string>(
-      "map_preview_topic", "/localization/map_scan_context_cloud");
+      "io.topics.map_preview", "/localization/map_scan_context_cloud");
+    publish_tf_ = declare_parameter<bool>("io.publish_tf", true);
+
+    // 固定地図は用途ごとに異なる密度へ落とし、候補探索と位置合わせの性能を両立する。
     scan_context_map_voxel_leaf_size_ = declare_parameter<double>(
-      "scan_context_map_voxel_leaf_size", 0.5);
-    scan_context_scan_voxel_leaf_size_ = declare_parameter<double>(
-      "scan_context_scan_voxel_leaf_size", 0.5);
+      "map_preprocess.scan_context.map_voxel_leaf_size", 0.5);
+    map_preview_voxel_leaf_size_ = declare_parameter<double>(
+      "map_preprocess.preview.map_voxel_leaf_size", 0.05);
     initial_ndt_map_voxel_leaf_size_ = declare_parameter<double>(
-      "initial_ndt_map_voxel_leaf_size", 0.5);
-    initial_ndt_scan_voxel_leaf_size_ = declare_parameter<double>(
-      "initial_ndt_scan_voxel_leaf_size", 0.5);
-    fine_gicp_enabled_ = declare_parameter<bool>("fine_gicp_enabled", true);
-    fine_gicp_candidate_count_ = declare_parameter<int>("fine_gicp_candidate_count", 2);
+      "map_preprocess.initial_ndt.map_voxel_leaf_size", 0.5);
     fine_gicp_map_voxel_leaf_size_ = declare_parameter<double>(
-      "fine_gicp_map_voxel_leaf_size", 0.15);
-    fine_gicp_scan_voxel_leaf_size_ = declare_parameter<double>(
-      "fine_gicp_scan_voxel_leaf_size", 0.15);
-    distance_match_enabled_ = declare_parameter<bool>("distance_match_enabled", true);
-    distance_match_grid_resolution_ = declare_parameter<double>(
-      "distance_match_grid_resolution", 0.25);
-    distance_match_max_distance_ = declare_parameter<double>("distance_match_max_distance", 3.0);
-    distance_match_map_z_min_ = declare_parameter<double>("distance_match_map_z_min", 0.2);
-    distance_match_map_z_max_ = declare_parameter<double>("distance_match_map_z_max", 1.5);
-    distance_match_scan_z_min_ = declare_parameter<double>("distance_match_scan_z_min", 0.2);
-    distance_match_scan_z_max_ = declare_parameter<double>("distance_match_scan_z_max", 1.5);
-    distance_match_search_xy_radius_ = declare_parameter<double>(
-      "distance_match_search_xy_radius", 2.5);
-    distance_match_search_xy_step_ = declare_parameter<double>(
-      "distance_match_search_xy_step", 0.25);
-    distance_match_search_yaw_range_deg_ = declare_parameter<double>(
-      "distance_match_search_yaw_range_deg", 20.0);
-    distance_match_search_yaw_step_deg_ = declare_parameter<double>(
-      "distance_match_search_yaw_step_deg", 2.0);
-    distance_match_candidate_count_ = declare_parameter<int>("distance_match_candidate_count", 5);
-    distance_match_hit_distance_ = declare_parameter<double>("distance_match_hit_distance", 0.5);
-    distance_match_max_mean_distance_ = declare_parameter<double>(
-      "distance_match_max_mean_distance", 1.0);
-    distance_match_min_hit_ratio_ = declare_parameter<double>(
-      "distance_match_min_hit_ratio", 0.3);
-    distance_match_max_far_ratio_ = declare_parameter<double>(
-      "distance_match_max_far_ratio", 0.5);
-    distance_match_max_out_of_bounds_ratio_ = declare_parameter<double>(
-      "distance_match_max_out_of_bounds_ratio", 0.3);
+      "map_preprocess.fine_gicp.map_voxel_leaf_size", 0.15);
     tracking_ndt_map_voxel_leaf_size_ = declare_parameter<double>(
-      "tracking_ndt_map_voxel_leaf_size", 0.2);
-    tracking_ndt_scan_voxel_leaf_size_ = declare_parameter<double>(
-      "tracking_ndt_scan_voxel_leaf_size", 0.2);
-    initial_accumulation_sec_ = declare_parameter<double>("initial_accumulation_sec", 3.0);
-    initial_candidate_count_ = declare_parameter<int>("initial_candidate_count", 5);
-    scan_context_rings_ = declare_parameter<int>("scan_context_rings", 20);
-    scan_context_sectors_ = declare_parameter<int>("scan_context_sectors", 60);
-    scan_context_max_radius_ = declare_parameter<double>("scan_context_max_radius", 20.0);
-    scan_context_grid_step_ = declare_parameter<double>("scan_context_grid_step", 5.0);
-    scan_context_score_threshold_ = declare_parameter<double>("scan_context_score_threshold", 0.65);
-    scan_context_score_gap_threshold_ = declare_parameter<double>(
-      "scan_context_score_gap_threshold", 0.02);
-    ndt_resolution_ = declare_parameter<double>("ndt_resolution", 1.5);
-    ndt_max_iterations_ = declare_parameter<int>("ndt_max_iterations", 20);
-    ndt_fitness_threshold_ = declare_parameter<double>("ndt_fitness_threshold", 2.0);
-    ndt_fitness_gap_threshold_ = declare_parameter<double>("ndt_fitness_gap_threshold", 0.02);
-    initial_ndt_early_accept_enabled_ = declare_parameter<bool>(
-      "initial_ndt_early_accept_enabled", true);
-    initial_ndt_early_accept_fitness_ = declare_parameter<double>(
-      "initial_ndt_early_accept_fitness", 0.4);
-    initial_ndt_early_accept_min_candidates_ = declare_parameter<int>(
-      "initial_ndt_early_accept_min_candidates", 2);
-    ndt_transformation_epsilon_ = declare_parameter<double>("ndt_transformation_epsilon", 0.01);
-    ndt_step_size_ = declare_parameter<double>("ndt_step_size", 0.1);
-    continuous_localization_enabled_ = declare_parameter<bool>(
-      "continuous_localization_enabled", false);
-    tracking_failure_limit_ = declare_parameter<int>("tracking_failure_limit", 5);
-    publish_tf_ = declare_parameter<bool>("publish_tf", true);
-    initial_ndt_source_radius_ = declare_parameter<double>("initial_ndt_source_radius", 10.0);
-    initial_ndt_target_radius_ = declare_parameter<double>("initial_ndt_target_radius", 10.0);
-    initial_ndt_z_radius_ = declare_parameter<double>("initial_ndt_z_radius", 5.0);
-    fine_gicp_source_radius_ = declare_parameter<double>("fine_gicp_source_radius", 8.0);
-    fine_gicp_target_radius_ = declare_parameter<double>("fine_gicp_target_radius", 8.0);
-    fine_gicp_z_radius_ = declare_parameter<double>("fine_gicp_z_radius", 5.0);
-    fine_gicp_max_correspondence_distance_ = declare_parameter<double>(
-      "fine_gicp_max_correspondence_distance", 0.7);
-    fine_gicp_max_iterations_ = declare_parameter<int>("fine_gicp_max_iterations", 30);
-    fine_gicp_transformation_epsilon_ = declare_parameter<double>(
-      "fine_gicp_transformation_epsilon", 0.001);
-    fine_gicp_fitness_threshold_ = declare_parameter<double>(
-      "fine_gicp_fitness_threshold", 0.5);
-    fine_gicp_fitness_gap_threshold_ = declare_parameter<double>(
-      "fine_gicp_fitness_gap_threshold", 0.0);
-    fine_gicp_early_accept_enabled_ = declare_parameter<bool>(
-      "fine_gicp_early_accept_enabled", true);
-    fine_gicp_early_accept_fitness_ = declare_parameter<double>(
-      "fine_gicp_early_accept_fitness", 0.12);
-    adaptive_fine_gicp_enabled_ = declare_parameter<bool>("adaptive_fine_gicp_enabled", true);
-    adaptive_fine_gicp_radius_1_ = declare_parameter<double>("adaptive_fine_gicp_radius_1", 4.0);
-    adaptive_fine_gicp_radius_2_ = declare_parameter<double>("adaptive_fine_gicp_radius_2", 6.0);
-    adaptive_fine_gicp_radius_3_ = declare_parameter<double>("adaptive_fine_gicp_radius_3", 8.0);
-    adaptive_fine_gicp_radius_4_ = declare_parameter<double>("adaptive_fine_gicp_radius_4", 10.0);
-    adaptive_fine_gicp_feature_z_min_ = declare_parameter<double>(
-      "adaptive_fine_gicp_feature_z_min", 0.2);
-    adaptive_fine_gicp_feature_z_max_ = declare_parameter<double>(
-      "adaptive_fine_gicp_feature_z_max", 1.5);
-    adaptive_fine_gicp_min_source_points_ = static_cast<std::size_t>(declare_parameter<int>(
-        "adaptive_fine_gicp_min_source_points", 400));
-    adaptive_fine_gicp_min_target_points_ = static_cast<std::size_t>(declare_parameter<int>(
-        "adaptive_fine_gicp_min_target_points", 1200));
-    adaptive_fine_gicp_min_source_xy_cells_ = static_cast<std::size_t>(declare_parameter<int>(
-        "adaptive_fine_gicp_min_source_xy_cells", 80));
-    adaptive_fine_gicp_min_target_xy_cells_ = static_cast<std::size_t>(declare_parameter<int>(
-        "adaptive_fine_gicp_min_target_xy_cells", 120));
-    adaptive_fine_gicp_xy_cell_size_ = declare_parameter<double>(
-      "adaptive_fine_gicp_xy_cell_size", 0.5);
-    adaptive_fine_gicp_min_scattering_ = declare_parameter<double>(
-      "adaptive_fine_gicp_min_scattering", 0.01);
-    adaptive_fine_gicp_max_linearity_ = declare_parameter<double>(
-      "adaptive_fine_gicp_max_linearity", 0.95);
-    local_map_radius_ = declare_parameter<double>("local_map_radius", 10.0);
-    local_map_z_radius_ = declare_parameter<double>("local_map_z_radius", 5.0);
-    initial_pose_z_ = declare_parameter<double>("initial_pose_z", 0.0);
-    min_registration_points_ = declare_parameter<int>("min_registration_points", 50);
-    min_scan_context_points_ = declare_parameter<int>("min_scan_context_points", 100);
-    min_scan_context_bins_ = declare_parameter<int>("min_scan_context_bins", 20);
+      "map_preprocess.tracking_ndt.map_voxel_leaf_size", 0.2);
+
+    // Scan Context用の入力蓄積と記述子条件を先に読み、粗い初期候補を作る準備を整える。
+    initial_accumulation_sec_ = declare_parameter<double>("initial.accumulation.sec", 3.0);
     initial_max_odometry_translation_ = declare_parameter<double>(
-      "initial_max_odometry_translation", 2.0);
+      "initial.accumulation.max_odometry_translation", 2.0);
+    scan_context_scan_voxel_leaf_size_ = declare_parameter<double>(
+      "initial.scan_context.scan_voxel_leaf_size", 0.5);
+    initial_candidate_count_ = declare_parameter<int>("initial.scan_context.candidate_count", 5);
+    scan_context_rings_ = declare_parameter<int>("initial.scan_context.rings", 20);
+    scan_context_sectors_ = declare_parameter<int>("initial.scan_context.sectors", 60);
+    scan_context_max_radius_ = declare_parameter<double>("initial.scan_context.max_radius", 20.0);
+    scan_context_grid_step_ = declare_parameter<double>("initial.scan_context.grid_step", 5.0);
+    scan_context_score_threshold_ = declare_parameter<double>(
+      "initial.scan_context.score_threshold", 0.65);
+    scan_context_score_gap_threshold_ = declare_parameter<double>(
+      "initial.scan_context.score_gap_threshold", 0.02);
+    min_scan_context_points_ = declare_parameter<int>("initial.scan_context.min_points", 100);
+    min_scan_context_bins_ = declare_parameter<int>("initial.scan_context.min_bins", 20);
+
+    // 距離場マッチングはScan Context候補を幾何的に再採点し、NDTへ渡す候補を絞り込む。
+    distance_match_enabled_ = declare_parameter<bool>("initial.distance_match.enabled", true);
+    distance_match_grid_resolution_ = declare_parameter<double>(
+      "initial.distance_match.grid_resolution", 0.25);
+    distance_match_max_distance_ = declare_parameter<double>(
+      "initial.distance_match.max_distance", 3.0);
+    distance_match_map_z_min_ = declare_parameter<double>(
+      "initial.distance_match.z_filter.map.min", 0.2);
+    distance_match_map_z_max_ = declare_parameter<double>(
+      "initial.distance_match.z_filter.map.max", 1.5);
+    distance_match_scan_z_min_ = declare_parameter<double>(
+      "initial.distance_match.z_filter.scan.min", 0.2);
+    distance_match_scan_z_max_ = declare_parameter<double>(
+      "initial.distance_match.z_filter.scan.max", 1.5);
+    distance_match_search_xy_radius_ = declare_parameter<double>(
+      "initial.distance_match.search.xy_radius", 2.5);
+    distance_match_search_xy_step_ = declare_parameter<double>(
+      "initial.distance_match.search.xy_step", 0.25);
+    distance_match_search_yaw_range_deg_ = declare_parameter<double>(
+      "initial.distance_match.search.yaw_range_deg", 20.0);
+    distance_match_search_yaw_step_deg_ = declare_parameter<double>(
+      "initial.distance_match.search.yaw_step_deg", 2.0);
+    distance_match_candidate_count_ = declare_parameter<int>(
+      "initial.distance_match.candidate_count", 5);
+    distance_match_hit_distance_ = declare_parameter<double>(
+      "initial.distance_match.acceptance.hit_distance", 0.5);
+    distance_match_max_mean_distance_ = declare_parameter<double>(
+      "initial.distance_match.acceptance.max_mean_distance", 1.0);
+    distance_match_min_hit_ratio_ = declare_parameter<double>(
+      "initial.distance_match.acceptance.min_hit_ratio", 0.3);
+    distance_match_max_far_ratio_ = declare_parameter<double>(
+      "initial.distance_match.acceptance.max_far_ratio", 0.5);
+    distance_match_max_out_of_bounds_ratio_ = declare_parameter<double>(
+      "initial.distance_match.acceptance.max_out_of_bounds_ratio", 0.3);
+
+    // Initial NDTは距離場で残った候補を局所地図へ合わせ、初期姿勢の粗い整合性を確認する。
+    initial_ndt_scan_voxel_leaf_size_ = declare_parameter<double>(
+      "initial.initial_ndt.scan_voxel_leaf_size", 0.5);
+    initial_ndt_source_radius_ = declare_parameter<double>(
+      "initial.initial_ndt.source_radius", 10.0);
+    initial_ndt_target_radius_ = declare_parameter<double>(
+      "initial.initial_ndt.target_radius", 10.0);
+    initial_ndt_z_radius_ = declare_parameter<double>("initial.initial_ndt.z_radius", 5.0);
+    ndt_resolution_ = declare_parameter<double>("initial.initial_ndt.resolution", 1.5);
+    ndt_max_iterations_ = declare_parameter<int>("initial.initial_ndt.max_iterations", 20);
+    ndt_fitness_threshold_ = declare_parameter<double>(
+      "initial.initial_ndt.fitness_threshold", 2.0);
+    ndt_fitness_gap_threshold_ = declare_parameter<double>(
+      "initial.initial_ndt.fitness_gap_threshold", 0.02);
+    ndt_transformation_epsilon_ = declare_parameter<double>(
+      "initial.initial_ndt.transformation_epsilon", 0.01);
+    ndt_step_size_ = declare_parameter<double>("initial.initial_ndt.step_size", 0.1);
+    initial_ndt_early_accept_enabled_ = declare_parameter<bool>(
+      "initial.initial_ndt.early_accept.enabled", true);
+    initial_ndt_early_accept_fitness_ = declare_parameter<double>(
+      "initial.initial_ndt.early_accept.fitness", 0.4);
+    initial_ndt_early_accept_min_candidates_ = declare_parameter<int>(
+      "initial.initial_ndt.early_accept.min_candidates", 2);
+
+    // Fine GICPはNDTの上位候補だけを精密化し、最終的な初期姿勢の品質を高める。
+    fine_gicp_enabled_ = declare_parameter<bool>("initial.fine_gicp.enabled", true);
+    fine_gicp_candidate_count_ = declare_parameter<int>("initial.fine_gicp.candidate_count", 2);
+    fine_gicp_scan_voxel_leaf_size_ = declare_parameter<double>(
+      "initial.fine_gicp.scan_voxel_leaf_size", 0.15);
+    fine_gicp_source_radius_ = declare_parameter<double>("initial.fine_gicp.source_radius", 8.0);
+    fine_gicp_target_radius_ = declare_parameter<double>("initial.fine_gicp.target_radius", 8.0);
+    fine_gicp_z_radius_ = declare_parameter<double>("initial.fine_gicp.z_radius", 5.0);
+    fine_gicp_max_correspondence_distance_ = declare_parameter<double>(
+      "initial.fine_gicp.max_correspondence_distance", 0.7);
+    fine_gicp_max_iterations_ = declare_parameter<int>("initial.fine_gicp.max_iterations", 30);
+    fine_gicp_transformation_epsilon_ = declare_parameter<double>(
+      "initial.fine_gicp.transformation_epsilon", 0.001);
+    fine_gicp_fitness_threshold_ = declare_parameter<double>(
+      "initial.fine_gicp.fitness_threshold", 0.5);
+    fine_gicp_fitness_gap_threshold_ = declare_parameter<double>(
+      "initial.fine_gicp.fitness_gap_threshold", 0.0);
+    fine_gicp_early_accept_enabled_ = declare_parameter<bool>(
+      "initial.fine_gicp.early_accept.enabled", true);
+    fine_gicp_early_accept_fitness_ = declare_parameter<double>(
+      "initial.fine_gicp.early_accept.fitness", 0.12);
+
+    // 適応半径は特徴点の量と分布を見てFine GICPの探索範囲を段階的に広げる。
+    adaptive_fine_gicp_enabled_ = declare_parameter<bool>("initial.fine_gicp.adaptive.enabled", true);
+    adaptive_fine_gicp_radius_1_ = declare_parameter<double>(
+      "initial.fine_gicp.adaptive.radius_1", 4.0);
+    adaptive_fine_gicp_radius_2_ = declare_parameter<double>(
+      "initial.fine_gicp.adaptive.radius_2", 6.0);
+    adaptive_fine_gicp_radius_3_ = declare_parameter<double>(
+      "initial.fine_gicp.adaptive.radius_3", 8.0);
+    adaptive_fine_gicp_radius_4_ = declare_parameter<double>(
+      "initial.fine_gicp.adaptive.radius_4", 10.0);
+    adaptive_fine_gicp_feature_z_min_ = declare_parameter<double>(
+      "initial.fine_gicp.adaptive.feature_z_min", 0.2);
+    adaptive_fine_gicp_feature_z_max_ = declare_parameter<double>(
+      "initial.fine_gicp.adaptive.feature_z_max", 1.5);
+    adaptive_fine_gicp_min_source_points_ = static_cast<std::size_t>(declare_parameter<int>(
+      "initial.fine_gicp.adaptive.min_source_points", 400));
+    adaptive_fine_gicp_min_target_points_ = static_cast<std::size_t>(declare_parameter<int>(
+      "initial.fine_gicp.adaptive.min_target_points", 1200));
+    adaptive_fine_gicp_min_source_xy_cells_ = static_cast<std::size_t>(declare_parameter<int>(
+      "initial.fine_gicp.adaptive.min_source_xy_cells", 80));
+    adaptive_fine_gicp_min_target_xy_cells_ = static_cast<std::size_t>(declare_parameter<int>(
+      "initial.fine_gicp.adaptive.min_target_xy_cells", 120));
+    adaptive_fine_gicp_xy_cell_size_ = declare_parameter<double>(
+      "initial.fine_gicp.adaptive.xy_cell_size", 0.5);
+    adaptive_fine_gicp_min_scattering_ = declare_parameter<double>(
+      "initial.fine_gicp.adaptive.min_scattering", 0.01);
+    adaptive_fine_gicp_max_linearity_ = declare_parameter<double>(
+      "initial.fine_gicp.adaptive.max_linearity", 0.95);
+
+    // 初期化後の追跡では局所地図に対するNDTを継続し、失敗回数でLOST遷移を判定する。
+    continuous_localization_enabled_ = declare_parameter<bool>("tracking.enabled", false);
+    local_map_radius_ = declare_parameter<double>("tracking.local_map.radius", 10.0);
+    local_map_z_radius_ = declare_parameter<double>("tracking.local_map.z_radius", 5.0);
+    tracking_ndt_scan_voxel_leaf_size_ = declare_parameter<double>(
+      "tracking.ndt.scan_voxel_leaf_size", 0.2);
+    tracking_failure_limit_ = declare_parameter<int>("tracking.failure_limit", 5);
+
+    // 登録処理全体で共有する安全条件を最後に読み、各段の検証条件へ反映する。
+    initial_pose_z_ = declare_parameter<double>("common.initial_pose_z", 0.0);
+    min_registration_points_ = declare_parameter<int>("common.min_registration_points", 50);
 
     // frame/topic名と探索・NDTの粒度は起動時に検証し、曖昧な失敗を実行中へ持ち込まない。
     if (pcd_map_path_.empty() || map_frame_.empty() || odom_frame_.empty() ||
@@ -800,7 +835,8 @@ private:
     {
       throw std::invalid_argument("pcd_map_path, frame, and topic parameters must not be empty");
     }
-    if (scan_context_map_voxel_leaf_size_ <= 0.0 || scan_context_scan_voxel_leaf_size_ <= 0.0 ||
+    if (scan_context_map_voxel_leaf_size_ <= 0.0 || map_preview_voxel_leaf_size_ <= 0.0 ||
+      scan_context_scan_voxel_leaf_size_ <= 0.0 ||
       initial_ndt_map_voxel_leaf_size_ <= 0.0 || initial_ndt_scan_voxel_leaf_size_ <= 0.0 ||
       fine_gicp_map_voxel_leaf_size_ <= 0.0 || fine_gicp_scan_voxel_leaf_size_ <= 0.0 ||
       tracking_ndt_map_voxel_leaf_size_ <= 0.0 || tracking_ndt_scan_voxel_leaf_size_ <= 0.0 ||
@@ -870,11 +906,13 @@ private:
     pcl::fromPCLPointCloud2(blob, *raw_cloud);
     const auto finite_cloud = remove_non_finite_points(raw_cloud);
     scan_context_map_cloud_ = voxel_downsample(finite_cloud, scan_context_map_voxel_leaf_size_);
+    map_preview_cloud_ = voxel_downsample(finite_cloud, map_preview_voxel_leaf_size_);
     initial_ndt_map_cloud_ = voxel_downsample(finite_cloud, initial_ndt_map_voxel_leaf_size_);
     fine_gicp_map_cloud_ = voxel_downsample(finite_cloud, fine_gicp_map_voxel_leaf_size_);
     tracking_ndt_map_cloud_ = voxel_downsample(finite_cloud, tracking_ndt_map_voxel_leaf_size_);
 
-    if (scan_context_map_cloud_->empty() || initial_ndt_map_cloud_->empty() ||
+    if (scan_context_map_cloud_->empty() || map_preview_cloud_->empty() ||
+      initial_ndt_map_cloud_->empty() ||
       fine_gicp_map_cloud_->empty() || tracking_ndt_map_cloud_->empty())
     {
       throw std::runtime_error(
@@ -886,13 +924,14 @@ private:
     RCLCPP_INFO(
       get_logger(),
       "Loaded PCD map: path=%s raw=%zu finite=%zu sc_points=%zu initial_ndt_points=%zu "
-      "fine_gicp_points=%zu tracking_ndt_points=%zu sc_leaf=%.3f initial_ndt_leaf=%.3f "
-      "fine_gicp_leaf=%.3f tracking_ndt_leaf=%.3f",
+      "fine_gicp_points=%zu tracking_ndt_points=%zu preview_points=%zu sc_leaf=%.3f "
+      "initial_ndt_leaf=%.3f fine_gicp_leaf=%.3f tracking_ndt_leaf=%.3f preview_leaf=%.3f",
       pcd_map_path_.c_str(), raw_cloud->size(), finite_cloud->size(),
       scan_context_map_cloud_->size(), initial_ndt_map_cloud_->size(),
-      fine_gicp_map_cloud_->size(), tracking_ndt_map_cloud_->size(),
+      fine_gicp_map_cloud_->size(), tracking_ndt_map_cloud_->size(), map_preview_cloud_->size(),
       scan_context_map_voxel_leaf_size_, initial_ndt_map_voxel_leaf_size_,
-      fine_gicp_map_voxel_leaf_size_, tracking_ndt_map_voxel_leaf_size_);
+      fine_gicp_map_voxel_leaf_size_, tracking_ndt_map_voxel_leaf_size_,
+      map_preview_voxel_leaf_size_);
   }
 
   void build_distance_field_map(const CloudT::ConstPtr & map_cloud)
@@ -1027,17 +1066,17 @@ private:
   void publish_map_preview()
   {
     PointCloud2 message;
-    pcl::toROSMsg(*scan_context_map_cloud_, message);
+    pcl::toROSMsg(*map_preview_cloud_, message);
     message.header.frame_id = map_frame_;
     message.header.stamp = now();
 
-    // 固定地図の粗い点群は静的表示用なので、transient local publisherへ一度だけ載せる。
+    // 可視化用点群は登録処理用の密度から独立させ、mapping previewと同じ見え方に揃える。
     map_preview_publisher_->publish(message);
     RCLCPP_INFO(
       get_logger(),
       "Published PCD localization map preview: topic=%s frame=%s points=%zu leaf=%.3f",
-      map_preview_topic_.c_str(), map_frame_.c_str(), scan_context_map_cloud_->size(),
-      scan_context_map_voxel_leaf_size_);
+      map_preview_topic_.c_str(), map_frame_.c_str(), map_preview_cloud_->size(),
+      map_preview_voxel_leaf_size_);
   }
 
   void handle_odometry(const Odometry::SharedPtr message)
@@ -2102,6 +2141,7 @@ private:
   std::string odometry_topic_;
   std::string map_preview_topic_;
   double scan_context_map_voxel_leaf_size_{};
+  double map_preview_voxel_leaf_size_{};
   double scan_context_scan_voxel_leaf_size_{};
   double initial_ndt_map_voxel_leaf_size_{};
   double initial_ndt_scan_voxel_leaf_size_{};
@@ -2184,6 +2224,7 @@ private:
   double initial_max_odometry_translation_{};
 
   CloudT::Ptr scan_context_map_cloud_{new CloudT};
+  CloudT::Ptr map_preview_cloud_{new CloudT};
   CloudT::Ptr initial_ndt_map_cloud_{new CloudT};
   CloudT::Ptr fine_gicp_map_cloud_{new CloudT};
   CloudT::Ptr tracking_ndt_map_cloud_{new CloudT};

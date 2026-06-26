@@ -1,91 +1,138 @@
 pcd_localization_node:
   ros__parameters:
-    pcd_map_path: ""
-    map_frame: map
-    odom_frame: lidar_init
-    lidar_frame: lidar_odom
-    cloud_topic: /lio_sam/mapping/cloud_registered
-    odometry_topic: /lio_sam/mapping/odometry
-    map_preview_topic: /localization/map_scan_context_cloud
-    scan_context_map_voxel_leaf_size: 0.5
-    scan_context_scan_voxel_leaf_size: 0.5
-    initial_ndt_map_voxel_leaf_size: 0.5
-    initial_ndt_scan_voxel_leaf_size: 0.5
-    fine_gicp_enabled: true
-    fine_gicp_candidate_count: 1
-    fine_gicp_map_voxel_leaf_size: 0.25
-    fine_gicp_scan_voxel_leaf_size: 0.25
-    distance_match_enabled: true
-    distance_match_grid_resolution: 0.25
-    distance_match_max_distance: 3.0
-    distance_match_map_z_min: 0.2
-    distance_match_map_z_max: 1.5
-    distance_match_scan_z_min: 0.2
-    distance_match_scan_z_max: 1.5
-    distance_match_search_xy_radius: 2.5
-    distance_match_search_xy_step: 0.25
-    distance_match_search_yaw_range_deg: 20.0
-    distance_match_search_yaw_step_deg: 2.0
-    distance_match_candidate_count: 5
-    distance_match_hit_distance: 0.5
-    distance_match_max_mean_distance: 1.0
-    distance_match_min_hit_ratio: 0.3
-    distance_match_max_far_ratio: 0.5
-    distance_match_max_out_of_bounds_ratio: 0.3
-    tracking_ndt_map_voxel_leaf_size: 0.2
-    tracking_ndt_scan_voxel_leaf_size: 0.2
-    initial_accumulation_sec: 1.0
-    initial_candidate_count: 5
-    scan_context_rings: 20
-    scan_context_sectors: 60
-    scan_context_max_radius: 20.0
-    scan_context_grid_step: 5.0
-    scan_context_score_threshold: 0.65
-    # scan_context_score_gap_threshold: 0.02
-    scan_context_score_gap_threshold: 0.0
-    ndt_resolution: 1.5
-    ndt_max_iterations: 20
-    ndt_fitness_threshold: 2.0
-    ndt_fitness_gap_threshold: 0.02
-    initial_ndt_early_accept_enabled: true
-    initial_ndt_early_accept_fitness: 0.4
-    initial_ndt_early_accept_min_candidates: 2
-    ndt_transformation_epsilon: 0.01
-    ndt_step_size: 0.1
-    continuous_localization_enabled: false
-    tracking_failure_limit: 5
-    publish_tf: true
-    initial_ndt_source_radius: 10.0
-    initial_ndt_target_radius: 10.0
-    initial_ndt_z_radius: 5.0
-    fine_gicp_source_radius: 6.0
-    fine_gicp_target_radius: 6.0
-    fine_gicp_z_radius: 5.0
-    fine_gicp_max_correspondence_distance: 0.7
-    fine_gicp_max_iterations: 30
-    fine_gicp_transformation_epsilon: 0.001
-    fine_gicp_fitness_threshold: 0.5
-    fine_gicp_fitness_gap_threshold: 0.0
-    fine_gicp_early_accept_enabled: true
-    fine_gicp_early_accept_fitness: 0.12
-    adaptive_fine_gicp_enabled: true
-    adaptive_fine_gicp_radius_1: 4.0
-    adaptive_fine_gicp_radius_2: 6.0
-    adaptive_fine_gicp_radius_3: 8.0
-    adaptive_fine_gicp_radius_4: 10.0
-    adaptive_fine_gicp_feature_z_min: 0.2
-    adaptive_fine_gicp_feature_z_max: 1.5
-    adaptive_fine_gicp_min_source_points: 100
-    adaptive_fine_gicp_min_target_points: 100
-    adaptive_fine_gicp_min_source_xy_cells: 10
-    adaptive_fine_gicp_min_target_xy_cells: 10
-    adaptive_fine_gicp_xy_cell_size: 0.5
-    adaptive_fine_gicp_min_scattering: 0.01
-    adaptive_fine_gicp_max_linearity: 0.95
-    local_map_radius: 10.0
-    local_map_z_radius: 5.0
-    initial_pose_z: 0.0
-    min_registration_points: 50
-    min_scan_context_points: 100
-    min_scan_context_bins: 20
-    initial_max_odometry_translation: 2.0
+    # 地図ファイル、座標系、購読/配信トピックなどROS入出力の基本設定です。
+    io:
+      pcd_map_path: ""
+      frames:
+        map: map
+        odom: lidar_init
+        lidar: lidar_odom
+      topics:
+        cloud: /lio_sam/mapping/cloud_registered
+        odometry: /lio_sam/mapping/odometry
+        map_preview: /localization/map_scan_context_cloud
+      publish_tf: true
+
+    # 固定PCD地図を各処理の目的に合わせた密度へ事前変換します。
+    map_preprocess:
+      preview:
+        map_voxel_leaf_size: 0.1
+      scan_context:
+        map_voxel_leaf_size: 0.5
+      initial_ndt:
+        map_voxel_leaf_size: 0.5
+      fine_gicp:
+        map_voxel_leaf_size: 0.25
+      tracking_ndt:
+        map_voxel_leaf_size: 0.2
+
+    # 初期位置推定は scan蓄積 -> Scan Context -> Distance Match -> Initial NDT -> Fine GICP の順に進みます。
+    initial:
+      # 初期候補を作る前に、短時間のスキャンを蓄積して特徴量を安定させます。
+      accumulation:
+        sec: 1.0
+        max_odometry_translation: 2.0
+
+      # Scan Contextで地図上の大まかな候補位置を検索します。
+      scan_context:
+        scan_voxel_leaf_size: 0.5
+        candidate_count: 5
+        rings: 20
+        sectors: 60
+        max_radius: 20.0
+        grid_step: 5.0
+        score_threshold: 0.65
+        score_gap_threshold: 0.0
+        min_points: 100
+        min_bins: 20
+
+      # 距離場マッチングでScan Context候補を再評価し、NDTへ渡す候補を絞ります。
+      distance_match:
+        enabled: true
+        grid_resolution: 0.25
+        max_distance: 3.0
+        z_filter:
+          map:
+            min: 0.2
+            max: 1.5
+          scan:
+            min: 0.2
+            max: 1.5
+        search:
+          xy_radius: 2.5
+          xy_step: 0.25
+          yaw_range_deg: 20.0
+          yaw_step_deg: 2.0
+        candidate_count: 5
+        acceptance:
+          hit_distance: 0.5
+          max_mean_distance: 1.0
+          min_hit_ratio: 0.3
+          max_far_ratio: 0.5
+          max_out_of_bounds_ratio: 0.3
+
+      # Initial NDTで候補姿勢を局所地図へ粗く位置合わせします。
+      initial_ndt:
+        scan_voxel_leaf_size: 0.5
+        source_radius: 10.0
+        target_radius: 10.0
+        z_radius: 5.0
+        resolution: 1.5
+        max_iterations: 20
+        transformation_epsilon: 0.01
+        step_size: 0.1
+        fitness_threshold: 2.0
+        fitness_gap_threshold: 0.02
+        early_accept:
+          enabled: true
+          fitness: 0.4
+          min_candidates: 2
+
+      # Fine GICPでNDTの上位候補を精密化し、初期姿勢を確定します。
+      fine_gicp:
+        enabled: true
+        candidate_count: 1
+        scan_voxel_leaf_size: 0.25
+        source_radius: 6.0
+        target_radius: 6.0
+        z_radius: 5.0
+        max_correspondence_distance: 0.7
+        max_iterations: 30
+        transformation_epsilon: 0.001
+        fitness_threshold: 0.5
+        fitness_gap_threshold: 0.0
+        early_accept:
+          enabled: true
+          fitness: 0.12
+
+        # 点群密度や形状に応じてFine GICPの探索半径を段階的に選びます。
+        adaptive:
+          enabled: true
+          radius_1: 4.0
+          radius_2: 6.0
+          radius_3: 8.0
+          radius_4: 10.0
+          feature_z_min: 0.2
+          feature_z_max: 1.5
+          min_source_points: 100
+          min_target_points: 100
+          min_source_xy_cells: 10
+          min_target_xy_cells: 10
+          xy_cell_size: 0.5
+          min_scattering: 0.01
+          max_linearity: 0.95
+
+    # 初期位置確定後に、局所地図に対するNDTで継続追跡します。
+    tracking:
+      enabled: false
+      local_map:
+        radius: 10.0
+        z_radius: 5.0
+      ndt:
+        scan_voxel_leaf_size: 0.2
+      failure_limit: 5
+
+    # 複数の登録処理で共通して使う安全条件と初期値です。
+    common:
+      initial_pose_z: 0.0
+      min_registration_points: 50
