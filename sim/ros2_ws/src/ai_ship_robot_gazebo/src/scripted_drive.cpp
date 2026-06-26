@@ -1,3 +1,4 @@
+#include "ai_ship_robot_gazebo/drive_limits.hpp"
 #include "ai_ship_robot_gazebo/scripted_drive_core.hpp"
 
 #include <rclcpp/rclcpp.hpp>
@@ -59,6 +60,7 @@ public:
   void stop()
   {
     publish_twist(0.0, 0.0, 0.0);
+    last_warning_signature_.reset();
   }
 
 private:
@@ -113,6 +115,7 @@ private:
   {
     for (std::size_t index = 0; rclcpp::ok() && index < scenario_.steps.size(); ++index) {
       const auto & step = scenario_.steps[index];
+      last_warning_signature_.reset();
       const auto active_step_time = wait_for_active_sim_time();
       if (!active_step_time) {
         return;
@@ -147,17 +150,53 @@ private:
 
   void publish_twist(const double linear_x, const double linear_y, const double angular_z)
   {
+    // 手動操縦と同じ上限制約を適用し、過大なシナリオ入力でも安全側へ補正する。
+    const auto limited = apply_drive_limits(linear_x, linear_y, angular_z);
+    log_limit_warning_once(linear_x, linear_y, angular_z, limited);
+
     geometry_msgs::msg::Twist twist;
-    twist.linear.x = linear_x;
-    twist.linear.y = linear_y;
-    twist.angular.z = angular_z;
+    twist.linear.x = limited.command.linear_x;
+    twist.linear.y = limited.command.linear_y;
+    twist.angular.z = limited.command.angular_z;
     publisher_->publish(twist);
+  }
+
+  void log_limit_warning_once(
+    const double linear_x,
+    const double linear_y,
+    const double angular_z,
+    const DriveLimitResult & limited)
+  {
+    if (!limited.linear_limited && !limited.angular_limited) {
+      return;
+    }
+
+    const std::string signature =
+      std::to_string(linear_x) + "," +
+      std::to_string(linear_y) + "," +
+      std::to_string(angular_z);
+    if (last_warning_signature_ && *last_warning_signature_ == signature) {
+      return;
+    }
+    last_warning_signature_ = signature;
+
+    // 同一step内で同じ補正ログを繰り返さず、入力値と補正後の差分だけを一度記録する。
+    RCLCPP_WARN(
+      get_logger(),
+      "Drive command limited: input=(%.3f, %.3f, %.3f) output=(%.3f, %.3f, %.3f)",
+      linear_x,
+      linear_y,
+      angular_z,
+      limited.command.linear_x,
+      limited.command.linear_y,
+      limited.command.angular_z);
   }
 
   std::string cmd_vel_topic_;
   std::string scenario_file_;
   double start_delay_sec_{};
   double publish_rate_{};
+  std::optional<std::string> last_warning_signature_;
   rclcpp::Publisher<geometry_msgs::msg::Twist>::SharedPtr publisher_;
   ScenarioDefinition scenario_;
 };

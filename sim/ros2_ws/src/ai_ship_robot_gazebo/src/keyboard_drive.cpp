@@ -1,3 +1,5 @@
+#include "ai_ship_robot_gazebo/drive_limits.hpp"
+
 #include <rclcpp/rclcpp.hpp>
 
 #include <geometry_msgs/msg/twist.hpp>
@@ -91,9 +93,9 @@ public:
   : Node("keyboard_drive")
   {
     declare_parameter<std::string>("cmd_vel_topic", "cmd_vel");
-    declare_parameter<double>("linear_speed", 0.20);
-    declare_parameter<double>("lateral_speed", 0.20);
-    declare_parameter<double>("angular_speed", 0.60);
+    declare_parameter<double>("linear_speed", kMaxTranslationSpeedMps);
+    declare_parameter<double>("lateral_speed", kMaxTranslationSpeedMps);
+    declare_parameter<double>("angular_speed", kMaxYawRateRadPerSec);
     declare_parameter<double>("publish_rate", 10.0);
 
     cmd_vel_topic_ = get_parameter("cmd_vel_topic").as_string();
@@ -137,10 +139,12 @@ public:
 
   void publish()
   {
+    // 複合入力時も単独入力時の最大値は維持しつつ、publish直前に合成速度だけ正規化する。
+    const auto limited = apply_drive_limits(linear_x_, linear_y_, angular_z_);
     geometry_msgs::msg::Twist twist;
-    twist.linear.x = linear_x_;
-    twist.linear.y = linear_y_;
-    twist.angular.z = angular_z_;
+    twist.linear.x = limited.command.linear_x;
+    twist.linear.y = limited.command.linear_y;
+    twist.angular.z = limited.command.angular_z;
     publisher_->publish(twist);
   }
 

@@ -120,12 +120,12 @@ def generate_launch_description():
             localization_config,
             {
                 "use_sim_time": use_sim_time,
-                "pcd_map_path": pcd_map_path,
-                "map_frame": map_frame,
-                "odom_frame": lidar_init_frame,
-                "lidar_frame": lidar_odom_frame,
-                "cloud_topic": localization_cloud_topic,
-                "odometry_topic": localization_odometry_topic,
+                "io.pcd_map_path": pcd_map_path,
+                "io.frames.map": map_frame,
+                "io.frames.odom": lidar_init_frame,
+                "io.frames.lidar": lidar_odom_frame,
+                "io.topics.cloud": localization_cloud_topic,
+                "io.topics.odometry": localization_odometry_topic,
             },
         ],
     )

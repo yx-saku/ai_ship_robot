@@ -1,3 +1,4 @@
+#include "ai_ship_robot_gazebo/drive_limits.hpp"
 #include "ai_ship_robot_gazebo/scripted_drive_core.hpp"
 
 #include <gtest/gtest.h>
@@ -18,6 +19,28 @@ std::string write_temp_scenario(const std::string & content)
 }
 
 }  // namespace
+
+TEST(DriveLimits, KeepsCommandWithinLimits)
+{
+  // 上限内の指令は値を変えず、そのままpublish可能なことを確認する。
+  const auto result = ai_ship_robot_gazebo::apply_drive_limits(1.0, 0.5, 0.5);
+  EXPECT_DOUBLE_EQ(result.command.linear_x, 1.0);
+  EXPECT_DOUBLE_EQ(result.command.linear_y, 0.5);
+  EXPECT_DOUBLE_EQ(result.command.angular_z, 0.5);
+  EXPECT_FALSE(result.linear_limited);
+  EXPECT_FALSE(result.angular_limited);
+}
+
+TEST(DriveLimits, NormalizesTranslationAndClampsYaw)
+{
+  // 並進は合成速度で正規化し、角速度は50deg/s由来の上限へ丸める。
+  const auto result = ai_ship_robot_gazebo::apply_drive_limits(1.4, 1.4, 1.2);
+  EXPECT_NEAR(result.command.linear_x, 0.989949, 1e-6);
+  EXPECT_NEAR(result.command.linear_y, 0.989949, 1e-6);
+  EXPECT_DOUBLE_EQ(result.command.angular_z, ai_ship_robot_gazebo::kMaxYawRateRadPerSec);
+  EXPECT_TRUE(result.linear_limited);
+  EXPECT_TRUE(result.angular_limited);
+}
 
 TEST(ScriptedDriveCore, LoadsCompositeScenario)
 {

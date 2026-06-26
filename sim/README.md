@@ -131,8 +131,11 @@ bash sim/scripts/drive_robot.sh
 速度を指定する例です。
 
 ```bash
-bash sim/scripts/drive_robot.sh --linear-speed 0.15 --lateral-speed 0.15 --angular-speed 0.5
+bash sim/scripts/drive_robot.sh --linear-speed 1.0 --lateral-speed 0.8 --angular-speed 0.5
 ```
+
+- 手動操縦の既定値は最大並進速度 `84 m/min = 1.4 m/s`、最大回転速度 `50 deg/s = 0.873 rad/s` です
+- `w` と `j` のような斜め入力では、`sqrt(vx^2 + vy^2) <= 1.4` を満たすよう publish 直前に正規化されます
 
 シナリオ単体実行の例です。
 
@@ -143,6 +146,7 @@ bash sim/scripts/drive_robot.sh \
 ```
 
 - シナリオの繰り返しは `--loop` ではなく YAML の `repeat` ブロックで指定します
+- シナリオ値が速度上限を超えた場合は、manual と同じ制約で補正され、warning ログが1回出ます
 
 ## LiDAR 配置
 
