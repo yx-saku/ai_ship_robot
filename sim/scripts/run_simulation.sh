@@ -154,7 +154,7 @@ validate_non_negative_double() {
 }
 
 default_world_file() {
-  printf '%s/ros2_ws/src/ai_ship_robot_gazebo/worlds/lidar_placement.world' "${SIM_ROOT}"
+  printf '%s/ros2_ws/src/ai_ship_robot_gazebo/worlds/shipyard_indoor_100x50.world' "${SIM_ROOT}"
 }
 
 make_real_time_factor_world() {

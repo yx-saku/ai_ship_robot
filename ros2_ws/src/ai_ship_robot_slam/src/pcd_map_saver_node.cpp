@@ -10,10 +10,13 @@
 #include <limits>
 #include <memory>
 #include <optional>
+#include <system_error>
 #include <sstream>
 #include <string>
 #include <unordered_map>
 #include <vector>
+
+#include <unistd.h>
 
 #include <geometry_msgs/msg/pose.hpp>
 #include <geometry_msgs/msg/transform.hpp>
@@ -439,6 +442,9 @@ private:
     std::unordered_map<VoxelKey, CloudPoint, VoxelKeyHash> voxel_points;
     voxel_points.reserve(points.size());
     for (const auto & point : points) {
+      if (!rclcpp::ok()) {
+        return {};
+      }
       const VoxelKey key{
         static_cast<std::int64_t>(std::floor(point.x / leaf_size)),
         static_cast<std::int64_t>(std::floor(point.y / leaf_size)),
@@ -566,6 +572,9 @@ private:
     const auto target_from_anchor = target_from_path * path_from_anchor_latest;
     global_points.reserve(global_points.size() + submap.local_points.size());
     for (const auto & local_point : submap.local_points) {
+      if (!rclcpp::ok()) {
+        return;
+      }
       const tf2::Vector3 transformed = target_from_anchor *
         tf2::Vector3(local_point.x, local_point.y, local_point.z);
       global_points.push_back(CloudPoint{
@@ -580,6 +589,9 @@ private:
   {
     std::vector<CloudPoint> global_points;
     for (const auto & submap : submaps_) {
+      if (!rclcpp::ok()) {
+        return {};
+      }
       append_submap_global_points(submap, target_from_path, global_points);
     }
 
@@ -593,6 +605,10 @@ private:
 
   bool save_map_file(std::string & message)
   {
+    RCLCPP_INFO(
+      this->get_logger(), "PCD map save started: submaps=%zu scans=%zu path_poses=%zu",
+      submaps_.size(), scan_clouds_.size(), latest_path_.size());
+    // 保存直前に確定可能なsubmapを反映し、service保存とshutdown fallbackの出力内容を揃える。
     finalize_ready_submaps();
     if (latest_path_.empty()) {
       message = "latest path is empty";
@@ -605,11 +621,27 @@ private:
       return false;
     }
 
-    auto global_points = apply_voxel_filter(build_global_points(target_from_path), global_voxel_leaf_size_);
+    RCLCPP_INFO(this->get_logger(), "Building global PCD map points...");
+    auto global_points = build_global_points(target_from_path);
+    if (!rclcpp::ok()) {
+      message = "PCD map save cancelled while building global points";
+      return false;
+    }
+    RCLCPP_INFO(this->get_logger(), "Built global PCD map points: points=%zu", global_points.size());
+
+    RCLCPP_INFO(
+      this->get_logger(), "Applying global voxel filter: leaf_size=%.6f input_points=%zu",
+      global_voxel_leaf_size_, global_points.size());
+    global_points = apply_voxel_filter(global_points, global_voxel_leaf_size_);
+    if (!rclcpp::ok()) {
+      message = "PCD map save cancelled while voxel filtering";
+      return false;
+    }
     if (global_points.empty()) {
       message = "no accumulated scan cloud points to save";
       return false;
     }
+    RCLCPP_INFO(this->get_logger(), "Filtered PCD map points: points=%zu", global_points.size());
 
     std::error_code error;
     std::filesystem::create_directories(output_directory_, error);
@@ -621,12 +653,18 @@ private:
     // 最新path poseで再配置したhybrid submap群を標準的なASCII PCDとして保存する。
     const auto output_path = std::filesystem::path(output_directory_) /
       ("lio_sam_hybrid_map_" + timestamp_string() + ".pcd");
-    std::ofstream file(output_path);
+    const auto temporary_path = std::filesystem::path(
+      output_path.string() + ".tmp." + std::to_string(::getpid()));
+    std::ofstream file(temporary_path);
     if (!file) {
-      message = "failed to open output file: " + output_path.string();
+      message = "failed to open temporary output file: " + temporary_path.string();
       return false;
     }
 
+    RCLCPP_INFO(
+      this->get_logger(), "Writing temporary PCD map file: path=%s points=%zu",
+      temporary_path.string().c_str(), global_points.size());
+    // 中断や書き込み失敗で壊れた正式PCDを残さないよう、一時ファイル完了後にrenameする。
     file << "# .PCD v0.7 - Point Cloud Data file format\n";
     file << "VERSION 0.7\n";
     file << "FIELDS x y z intensity\n";
@@ -639,12 +677,40 @@ private:
     file << "POINTS " << global_points.size() << "\n";
     file << "DATA ascii\n";
     file << std::fixed << std::setprecision(6);
-    for (const auto & point : global_points) {
+    const auto progress_interval = std::max<std::size_t>(global_points.size() / 10U, 100000U);
+    for (std::size_t index = 0; index < global_points.size(); ++index) {
+      if (!rclcpp::ok()) {
+        file.close();
+        std::filesystem::remove(temporary_path, error);
+        message = "PCD map save cancelled while writing temporary file";
+        return false;
+      }
+      const auto & point = global_points[index];
       file << point.x << ' ' << point.y << ' ' << point.z << ' ' << point.intensity << '\n';
+      if ((index + 1U) % progress_interval == 0U || index + 1U == global_points.size()) {
+        RCLCPP_INFO(
+          this->get_logger(), "Writing PCD map progress: %zu/%zu points",
+          index + 1U, global_points.size());
+      }
+    }
+    file.close();
+    if (!file) {
+      std::filesystem::remove(temporary_path, error);
+      message = "failed to write temporary output file: " + temporary_path.string();
+      return false;
+    }
+
+    error.clear();
+    std::filesystem::rename(temporary_path, output_path, error);
+    if (error) {
+      std::filesystem::remove(temporary_path, error);
+      message = "failed to rename temporary PCD map file: " + error.message();
+      return false;
     }
 
     message = output_path.string() + " frame=" + output_frame;
     map_saved_since_last_update_ = true;
+    RCLCPP_INFO(this->get_logger(), "PCD map save finished: %s", message.c_str());
     return true;
   }
 

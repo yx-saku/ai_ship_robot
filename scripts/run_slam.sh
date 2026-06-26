@@ -20,6 +20,16 @@ ROSBAG_PLAY_PID=""
 SLAM_PID=""
 ROSBAG_ROOT="${WORKSPACE_ROOT}/outputs/rosbag2"
 CLOUD_MAP_ROOT="${WORKSPACE_ROOT}/outputs/cloud_map"
+SHUTDOWN_SIGNAL_RECEIVED=false
+SHUTDOWN_SIGNAL_NAME=""
+SHUTDOWN_SIGNAL_COUNT=0
+CLEANUP_RUNNING=false
+MAP_SAVE_IN_PROGRESS=false
+MAP_SAVE_ATTEMPTED=false
+MAP_SAVE_SUCCEEDED=false
+MAP_SAVE_PID=""
+MAP_SAVE_CANCEL_REQUESTED=false
+AUTO_SAVE_PCD_MAP_ON_SHUTDOWN=true
 # bag再生ではSLAM入力に必要なLiDAR/IMUと静的TFだけを流し、sim由来の動的/tf競合を避ける。
 DEFAULT_BAG_PLAY_TOPICS=(
   /tf_static
@@ -79,8 +89,10 @@ Options:
   --auto-stop-after-bag-play SEC
                        Seconds to keep SLAM running after cloudQueue drains. Default: 30.
   --cloud-queue-drain-timeout SEC
-                       Max seconds to wait for LIO-SAM cloudQueue drain after bag playback.
-                       Default: 300. Use 0 to wait without timeout.
+                        Max seconds to wait for LIO-SAM cloudQueue drain after bag playback.
+                        Default: 300. Use 0 to wait without timeout.
+  --no-save-map-on-shutdown
+                       Do not auto-save the PCD map when mapping mode exits.
   --no-auto-exit     Keep SLAM and recording running after rosbag playback finishes.
   --rviz-config PATH Use a workspace RViz config file for LIO-SAM.
   --pcd [PATH]       Fixed PCD map path for loc mode.
@@ -384,7 +396,8 @@ start_rosbag_record() {
   record_cmd+=("${topics[@]}")
   echo "Rosbag output: ${output_path}" >&2
   echo "Recording rosbag topics: ${topics[*]}" >&2
-  "${record_cmd[@]}" &
+  # rosbag recorderも別プロセスグループに置き、Ctrl+C時のcache flush順序をshell側で制御する。
+  setsid "${record_cmd[@]}" &
   ROSBAG_PID=$!
 }
 
@@ -455,12 +468,37 @@ signal_process_tree() {
   local root_pid="$2"
   local child_pids=()
   local child_pid=""
+  local root_pgid=""
+
+  root_pgid="$(ps -o pgid= -p "${root_pid}" 2>/dev/null | tr -d '[:space:]' || true)"
+  if [[ -n "${root_pgid}" && "${root_pgid}" != "$(ps -o pgid= -p "$$" 2>/dev/null | tr -d '[:space:]' || true)" ]]; then
+    # 管理対象は別プロセスグループで起動するため、子孫列挙よりPGID宛てsignalを優先する。
+    kill "-${signal_name}" "-${root_pgid}" 2>/dev/null || true
+    return 0
+  fi
 
   mapfile -t child_pids < <(collect_child_pids "${root_pid}")
   for child_pid in "${child_pids[@]}"; do
     kill "-${signal_name}" "${child_pid}" 2>/dev/null || true
   done
   kill "-${signal_name}" "${root_pid}" 2>/dev/null || true
+}
+
+print_pcd_map_save_start_banner() {
+  local save_reason="${1:-manual}"
+
+  echo >&2
+  echo "======================================================================" >&2
+  echo "PCDマップ保存を開始しました" >&2
+  if [[ "${save_reason}" == "shutdown" ]]; then
+    echo "SLAM停止要求を受け付けたため、終了前にPCDマップを保存しています。" >&2
+  else
+    echo "bag再生完了後の自動停止前にPCDマップを保存しています。" >&2
+  fi
+  echo "大きなマップでは数分かかる場合があります。" >&2
+  echo "保存を中断して終了するには、もう一度 Ctrl+C を押してください。" >&2
+  echo "======================================================================" >&2
+  echo >&2
 }
 
 stop_background_process() {
@@ -504,11 +542,74 @@ stop_background_process() {
 }
 
 cleanup_background_processes() {
+  local map_save_status=0
+
+  # EXIT/TERM/INT が重なっても停止処理を一度だけ実行し、二重saveや二重killを避ける。
+  if [[ "${CLEANUP_RUNNING}" == "true" ]]; then
+    return 0
+  fi
+  CLEANUP_RUNNING=true
+
+  # mapping終了時だけ明示saveを挟み、無効化指定時は停止だけを優先して終了経路を単純化する。
+  if [[ "${RUN_MODE}" == "map" && "${AUTO_SAVE_PCD_MAP_ON_SHUTDOWN}" == "true" && -n "${SLAM_PID}" && "${MAP_SAVE_ATTEMPTED}" != "true" ]]; then
+    set +e
+    save_pcd_map_if_requested "shutdown"
+    map_save_status=$?
+    set -e
+    if [[ "${map_save_status}" -ne 0 ]]; then
+      echo "Proceeding to SLAM shutdown even though explicit PCD map save failed." >&2
+    fi
+  fi
+
   # bag再生終了時にSLAMも止め、逆に終了時はrecord/play側も確実に片付ける。
   stop_background_process "${ROSBAG_PID}" "rosbag recorder" "${ROSBAG_STOP_GRACE_SECONDS}" "${PROCESS_STOP_TERM_SECONDS}" || true
   # bag再生プロセスはrecordとは別PIDで持ち、同時利用時も両方を確実に停止する。
   stop_background_process "${ROSBAG_PLAY_PID}" "rosbag player" "${PROCESS_STOP_GRACE_SECONDS}" "${PROCESS_STOP_TERM_SECONDS}" || true
   stop_background_process "${SLAM_PID}" "SLAM" "${PROCESS_STOP_GRACE_SECONDS}" "${PROCESS_STOP_TERM_SECONDS}" || true
+}
+
+handle_shutdown_signal() {
+  local signal_name="$1"
+  local signal_exit_code=143
+
+  if [[ "${signal_name}" == "INT" ]]; then
+    signal_exit_code=130
+  fi
+
+  SHUTDOWN_SIGNAL_COUNT=$((SHUTDOWN_SIGNAL_COUNT + 1))
+  SHUTDOWN_SIGNAL_RECEIVED=true
+  SHUTDOWN_SIGNAL_NAME="${signal_name}"
+
+  # save中の再シグナルはユーザーの中断意思として扱い、service callのプロセスグループへ伝播する。
+  if [[ "${MAP_SAVE_IN_PROGRESS}" == "true" ]]; then
+    MAP_SAVE_CANCEL_REQUESTED=true
+    echo "${signal_name} received while PCD map save is in progress. Cancelling PCD map save..." >&2
+    if [[ -n "${MAP_SAVE_PID}" ]]; then
+      signal_process_tree INT "${MAP_SAVE_PID}"
+    fi
+    return 0
+  fi
+
+  # 初回シグナルでは、map保存を伴う停止へ入ることを明示してから cleanup へ流す。
+  if [[ "${SHUTDOWN_SIGNAL_COUNT}" -eq 1 ]]; then
+    if [[ "${RUN_MODE}" == "map" && "${AUTO_SAVE_PCD_MAP_ON_SHUTDOWN}" == "true" ]]; then
+      echo "${signal_name} received. Mapping shutdown will save the PCD map before stopping SLAM." >&2
+      echo "Press Ctrl+C again during the save to cancel the PCD map save." >&2
+    elif [[ "${RUN_MODE}" == "map" ]]; then
+      echo "${signal_name} received. Stopping mapping without automatic PCD map save." >&2
+    else
+      echo "${signal_name} received. Stopping SLAM and related background processes." >&2
+    fi
+    exit "${signal_exit_code}"
+  fi
+
+  # cleanup待ち中の再シグナルでは現在の段階だけを伝え、無駄な再押下を抑止する。
+  if [[ "${CLEANUP_RUNNING}" == "true" ]]; then
+    echo "${signal_name} received again while shutdown is already in progress. Waiting for current stop sequence to finish." >&2
+  else
+    echo "${signal_name} received again. Shutdown has already been requested; waiting for cleanup to start." >&2
+  fi
+  return 0
 }
 
 ensure_process_started() {
@@ -744,42 +845,120 @@ wait_for_save_pcd_map_service() {
 }
 
 save_pcd_map_if_requested() {
+  local save_reason="${1:-manual}"
   local service_name="/save_pcd_map"
   local service_type="std_srvs/srv/Trigger"
   local service_request="{}"
   local call_output=""
   local call_status=0
   local call_cmd=(ros2 service call "${service_name}" "${service_type}" "${service_request}")
+  local output_file=""
+  local saved_map_path=""
 
   if [[ "${RUN_MODE}" != "map" ]]; then
     return 0
   fi
+  if [[ "${MAP_SAVE_ATTEMPTED}" == "true" ]]; then
+    if [[ "${MAP_SAVE_SUCCEEDED}" == "true" ]]; then
+      echo "PCD map save was already completed earlier; skipping duplicate save request." >&2
+      return 0
+    fi
+    echo "PCD map save was already attempted earlier; skipping duplicate save request." >&2
+    return 1
+  fi
+
+  # save service待機以降は明示的に save試行中として扱い、重複要求と再シグナル中断を防ぐ。
+  MAP_SAVE_ATTEMPTED=true
   if ! wait_for_save_pcd_map_service; then
     return 1
   fi
 
-  echo "Saving PCD map before stopping SLAM..." >&2
+  print_pcd_map_save_start_banner "${save_reason}"
+
+  MAP_SAVE_IN_PROGRESS=true
+  MAP_SAVE_CANCEL_REQUESTED=false
+  output_file="$(mktemp -t ai_ship_robot_pcd_map_save.XXXXXX.log)"
   set +e
   if [[ "${SAVE_PCD_MAP_TIMEOUT_SECONDS}" == "0" || "${SAVE_PCD_MAP_TIMEOUT_SECONDS}" == "0.0" ]]; then
-    call_output="$("${call_cmd[@]}" 2>&1)"
-    call_status=$?
+    setsid "${call_cmd[@]}" >"${output_file}" 2>&1 &
+    MAP_SAVE_PID=$!
   else
-    call_output="$(timeout "${SAVE_PCD_MAP_TIMEOUT_SECONDS}s" "${call_cmd[@]}" 2>&1)"
-    call_status=$?
+    setsid timeout --foreground "${SAVE_PCD_MAP_TIMEOUT_SECONDS}s" "${call_cmd[@]}" >"${output_file}" 2>&1 &
+    MAP_SAVE_PID=$!
   fi
+  wait "${MAP_SAVE_PID}"
+  call_status=$?
   set -e
+  call_output="$(<"${output_file}")"
+  rm -f "${output_file}"
+  MAP_SAVE_PID=""
+  MAP_SAVE_IN_PROGRESS=false
+
+  if [[ "${MAP_SAVE_CANCEL_REQUESTED}" == "true" || "${call_status}" -eq 130 || "${call_status}" -eq 124 ]]; then
+    echo "----------------------------------------------------------------------" >&2
+    echo "PCD map save cancelled by user." >&2
+    echo "----------------------------------------------------------------------" >&2
+    return 1
+  fi
 
   # service callはsuccess=falseでも終了コード0になり得るため、応答本文も確認する。
   if [[ "${call_status}" -eq 0 &&
         ( "${call_output}" == *"success=True"* ||
          "${call_output}" == *"success: true"* ||
-         "${call_output}" == *"success: True"* ) ]]; then
-    echo "Saved PCD map: ${call_output//$'\n'/ }" >&2
+          "${call_output}" == *"success: True"* ) ]]; then
+    MAP_SAVE_SUCCEEDED=true
+    # service応答には保存先とframeが入るため、完了ログではPCDパスだけを目立つ形で再掲する。
+    if [[ "${call_output}" =~ ([^[:space:]\"\']+\.pcd) ]]; then
+      saved_map_path="${BASH_REMATCH[1]}"
+    fi
+    echo "----------------------------------------------------------------------" >&2
+    echo "PCDマップ保存が完了しました。" >&2
+    if [[ -n "${saved_map_path}" ]]; then
+      echo "保存先PCDファイル: ${saved_map_path}" >&2
+    fi
+    echo "PCD map save service response: ${call_output//$'\n'/ }" >&2
+    echo "----------------------------------------------------------------------" >&2
+    echo "Continuing with the remaining shutdown sequence." >&2
     return 0
   fi
 
-  echo "Failed to save PCD map: ${call_output//$'\n'/ }" >&2
+  echo "----------------------------------------------------------------------" >&2
+  echo "PCD map save failed: ${call_output//$'\n'/ }" >&2
+  echo "----------------------------------------------------------------------" >&2
+  echo "Continuing with SLAM shutdown. The shutdown fallback saver may still attempt a final save." >&2
   return 1
+}
+
+run_managed_slam_launch() {
+  local slam_args=("$@")
+  local slam_status=0
+
+  # 通常起動もbackground管理へ寄せ、終了signal時に save service を呼ぶ余地を script 側へ残す。
+  run_slam_launch "${slam_args[@]}" &
+  SLAM_PID=$!
+  ensure_process_started "${SLAM_PID}" "SLAM"
+
+  set +e
+  wait "${SLAM_PID}"
+  slam_status=$?
+  set -e
+  return "${slam_status}"
+}
+
+run_managed_sim_launch() {
+  local launch_args=("$@")
+  local sim_status=0
+
+  # sim launch も同じ supervision 配下に置き、map保存と launch tree 停止を同じ cleanup で扱う。
+  setsid ros2 launch ai_ship_robot_gazebo sim_lio_sam.launch.py "${launch_args[@]}" &
+  SLAM_PID=$!
+  ensure_process_started "${SLAM_PID}" "simulation SLAM"
+
+  set +e
+  wait "${SLAM_PID}"
+  sim_status=$?
+  set -e
+  return "${sim_status}"
 }
 
 run_slam_launch() {
@@ -1022,7 +1201,7 @@ run_slam_launch() {
       ;;
   esac
 
-  ros2 launch ai_ship_robot_slam "${launch_file}" "${launch_args[@]}"
+  exec setsid ros2 launch ai_ship_robot_slam "${launch_file}" "${launch_args[@]}"
 }
 
 run_recorded_lio_sam() {
@@ -1032,7 +1211,7 @@ run_recorded_lio_sam() {
   # 単体SLAM収録では既定topicを中央のrecord処理に委ね、CLI指定時だけ上書きする。
   start_rosbag_record "${bag_output}" false
   mapfile -t slam_args < <(build_passthrough_args)
-  run_slam_launch "${slam_args[@]}"
+  run_managed_slam_launch "${slam_args[@]}"
 }
 
 run_bag_play_lio_sam() {
@@ -1074,7 +1253,8 @@ run_bag_play_lio_sam() {
     sleep "${bag_start_delay}"
   fi
   echo "Replaying rosbag topics: ${play_topics[*]}" >&2
-  "${play_cmd[@]}" &
+  # bag playerをSLAM launchと分離し、停止時に保存serviceが先に完了できる状態を保つ。
+  setsid "${play_cmd[@]}" &
   ROSBAG_PLAY_PID=$!
   set +e
   wait "${ROSBAG_PLAY_PID}"
@@ -1091,11 +1271,13 @@ run_bag_play_lio_sam() {
         echo "Waiting ${AUTO_STOP_AFTER_BAG_PLAY_SECONDS}s post-drain grace before SLAM stop..." >&2
         sleep "${AUTO_STOP_AFTER_BAG_PLAY_SECONDS}"
       fi
-      # map作成時は停止前に明示保存し、destructor保存だけに依存しない。
-      set +e
-      save_pcd_map_if_requested
-      map_save_status=$?
-      set -e
+      # bag再生の auto-stop でも通常終了と同じ flag を見て、保存抑止時の挙動差をなくす。
+      if [[ "${AUTO_SAVE_PCD_MAP_ON_SHUTDOWN}" == "true" ]]; then
+        set +e
+        save_pcd_map_if_requested
+        map_save_status=$?
+        set -e
+      fi
     else
       set +e
       wait "${SLAM_PID}"
@@ -1412,13 +1594,15 @@ run_sim_lio_sam() {
     fi
   fi
   if [[ "${record_bag}" == "true" ]]; then
-    ros2 launch ai_ship_robot_gazebo sim_lio_sam.launch.py "${launch_args[@]}" &
+    setsid ros2 launch ai_ship_robot_gazebo sim_lio_sam.launch.py "${launch_args[@]}" &
+    SLAM_PID=$!
+    ensure_process_started "${SLAM_PID}" "simulation SLAM"
     # 明示指定があればそのtopicだけを記録し、未指定時は既定topicを記録する。
     start_rosbag_record "${bag_output}" true "${bag_topics[@]}"
     wait
     return $?
   fi
-  ros2 launch ai_ship_robot_gazebo sim_lio_sam.launch.py "${launch_args[@]}"
+  run_managed_sim_launch "${launch_args[@]}"
 }
 
 RECORD_BAG=false
@@ -1433,6 +1617,8 @@ BAG_AUTO_EXIT=true
 PCD_MAP_REQUESTED=false
 
 trap cleanup_background_processes EXIT
+trap 'handle_shutdown_signal INT' INT
+trap 'handle_shutdown_signal TERM' TERM
 
 # 先頭引数を実行モードとして固定し、以降のoption解析からmode名を分離する。
 if [[ $# -eq 0 ]]; then
@@ -1549,6 +1735,9 @@ while [[ $# -gt 0 ]]; do
       shift
       WAIT_FOR_CLOUD_QUEUE_DRAIN_TIMEOUT_SECONDS="$(require_value --cloud-queue-drain-timeout "${1:-}")"
       ;;
+    --no-save-map-on-shutdown)
+      AUTO_SAVE_PCD_MAP_ON_SHUTDOWN=false
+      ;;
     --no-auto-exit)
       BAG_AUTO_EXIT=false
       ;;
@@ -1649,9 +1838,9 @@ fi
 # 通常時はこのscript内のLIO-SAM単体起動処理を直接呼び出す。
 if [[ "${#BAG_TOPICS[@]}" -gt 0 || -n "${BAG_OUTPUT}" ]]; then
   mapfile -t PASSTHROUGH_ARGS < <(build_passthrough_args)
-  run_slam_launch "${PASSTHROUGH_ARGS[@]}"
+  run_managed_slam_launch "${PASSTHROUGH_ARGS[@]}"
   exit $?
 fi
 
 mapfile -t PASSTHROUGH_ARGS < <(build_passthrough_args)
-run_slam_launch "${PASSTHROUGH_ARGS[@]}"
+run_managed_slam_launch "${PASSTHROUGH_ARGS[@]}"

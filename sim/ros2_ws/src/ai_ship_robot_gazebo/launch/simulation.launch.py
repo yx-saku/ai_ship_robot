@@ -95,7 +95,7 @@ def generate_launch_description():
         parameters=[{"robot_description": robot_description, "use_sim_time": use_sim_time}],
     )
 
-    # 生成済みrobot_descriptionをClassic側へ直接spawnする。
+    # 生成済みrobot_descriptionをClassic側へ直接spawnし、西側平坦部で初期視認性を確保する。
     spawn_robot = Node(
         package="gazebo_ros",
         executable="spawn_entity.py",
@@ -106,11 +106,11 @@ def generate_launch_description():
             "-topic",
             "robot_description",
             "-x",
-            "0.0",
+            "-44.0",
             "-y",
             "0.0",
             "-z",
-            "0.05",
+            "0.02",
         ],
     )
 
@@ -198,12 +198,16 @@ def generate_launch_description():
                     [FindPackageShare("ai_ship_robot_gazebo"), "config", "mid360_points.rviz"]
                 ),
             ),
-            DeclareLaunchArgument(
-                "world",
-                default_value=PathJoinSubstitution(
-                    [FindPackageShare("ai_ship_robot_gazebo"), "worlds", "lidar_placement.world"]
-                ),
-            ),
+             DeclareLaunchArgument(
+                 "world",
+                 default_value=PathJoinSubstitution(
+                    [
+                        FindPackageShare("ai_ship_robot_gazebo"),
+                        "worlds",
+                        "shipyard_indoor_100x50.world",
+                    ]
+                 ),
+             ),
             gazebo,
             robot_state_publisher,
             spawn_robot,

@@ -1,0 +1,165 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+ROS_DISTRO="${ROS_DISTRO:-humble}"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+WORKSPACE_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
+SIM_ROOT="${WORKSPACE_ROOT}/sim"
+THIRD_PARTY_UNDERLAY_SETUP="/opt/ai_ship_robot/ros_underlay/${ROS_DISTRO}/third_party_ws/install/setup.bash"
+SERVICE_NAME="/save_pcd_map"
+SERVICE_TYPE="std_srvs/srv/Trigger"
+SERVICE_REQUEST='{}'
+WAIT_TIMEOUT_SECONDS="${WAIT_FOR_MAP_SAVE_SERVICE_TIMEOUT_SECONDS:-30}"
+CALL_TIMEOUT_SECONDS="${SAVE_PCD_MAP_TIMEOUT_SECONDS:-300}"
+
+usage() {
+  cat <<'EOF'
+Usage: bash scripts/save_slam_map.sh [OPTIONS]
+
+Options:
+  --wait-timeout SEC   Max seconds to wait for /save_pcd_map service. Default: 30
+                       Use 0 to wait without timeout.
+  --call-timeout SEC   Max seconds to wait for the save request itself. Default: 300
+                       Use 0 to wait without timeout.
+  -h, --help           Show this help.
+
+Examples:
+  bash scripts/save_slam_map.sh
+  bash scripts/save_slam_map.sh --wait-timeout 60 --call-timeout 600
+EOF
+}
+
+require_value() {
+  local option="$1"
+  local value="${2:-}"
+
+  if [[ -z "${value}" || "${value}" == --* ]]; then
+    echo "${option} requires a value." >&2
+    exit 2
+  fi
+
+  printf '%s' "${value}"
+}
+
+source_overlay_if_present() {
+  local setup_file="$1"
+
+  if [[ -f "${setup_file}" ]]; then
+    # 実行環境差分を吸収するため、存在する overlay だけを順に読み込む。
+    source "${setup_file}"
+  fi
+}
+
+source_runtime_environment() {
+  local had_nounset=0
+
+  if [[ ! -f "/opt/ros/${ROS_DISTRO}/setup.bash" ]]; then
+    echo "Missing /opt/ros/${ROS_DISTRO}/setup.bash. Install ROS 2 ${ROS_DISTRO} first." >&2
+    exit 1
+  fi
+
+  # set -u 有効下でも ROS setup を安全に source できるよう一時的に緩める。
+  if [[ "$-" == *u* ]]; then
+    had_nounset=1
+    set +u
+  fi
+  source "/opt/ros/${ROS_DISTRO}/setup.bash"
+  source_overlay_if_present "${THIRD_PARTY_UNDERLAY_SETUP}"
+  source_overlay_if_present "${WORKSPACE_ROOT}/ros2_ws/install/setup.bash"
+  source_overlay_if_present "${SIM_ROOT}/ros2_ws/install/setup.bash"
+  if [[ "${had_nounset}" -eq 1 ]]; then
+    set -u
+  fi
+}
+
+wait_for_service() {
+  local started_seconds=${SECONDS}
+  local elapsed_seconds=0
+  local last_log_seconds=0
+  local service_list=""
+
+  echo "Waiting for PCD map saver service ${SERVICE_NAME}..." >&2
+  while true; do
+    service_list="$(timeout 5s ros2 service list --no-daemon 2>/dev/null || true)"
+    if grep -Fxq "${SERVICE_NAME}" <<< "${service_list}"; then
+      return 0
+    fi
+
+    elapsed_seconds=$((SECONDS - started_seconds))
+    if [[ "${WAIT_TIMEOUT_SECONDS}" != "0" &&
+          "${WAIT_TIMEOUT_SECONDS}" != "0.0" &&
+          "${elapsed_seconds}" -ge "${WAIT_TIMEOUT_SECONDS}" ]]; then
+      echo "Timed out waiting for PCD map saver service after ${elapsed_seconds}s." >&2
+      return 1
+    fi
+
+    # 長時間待機時も進捗を出し、停止ではなく待機中だと判別できるようにする。
+    if (( SECONDS - last_log_seconds >= 5 )); then
+      echo "Still waiting for PCD map saver service ${SERVICE_NAME}." >&2
+      last_log_seconds=${SECONDS}
+    fi
+    sleep 0.5
+  done
+}
+
+request_map_save() {
+  local call_output=""
+  local call_status=0
+  local call_cmd=(ros2 service call "${SERVICE_NAME}" "${SERVICE_TYPE}" "${SERVICE_REQUEST}")
+
+  echo "Starting PCD map save request." >&2
+  set +e
+  if [[ "${CALL_TIMEOUT_SECONDS}" == "0" || "${CALL_TIMEOUT_SECONDS}" == "0.0" ]]; then
+    call_output="$(${call_cmd[@]} 2>&1)"
+    call_status=$?
+  else
+    call_output="$(timeout "${CALL_TIMEOUT_SECONDS}s" "${call_cmd[@]}" 2>&1)"
+    call_status=$?
+  fi
+  set -e
+
+  # service call は終了コード 0 でも success=false を返し得るため本文まで検査する。
+  if [[ "${call_status}" -eq 0 &&
+        ( "${call_output}" == *"success=True"* ||
+          "${call_output}" == *"success: true"* ||
+          "${call_output}" == *"success: True"* ) ]]; then
+    echo "PCD map save completed: ${call_output//$'\n'/ }" >&2
+    return 0
+  fi
+
+  echo "PCD map save failed: ${call_output//$'\n'/ }" >&2
+  return 1
+}
+
+parse_args() {
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --wait-timeout)
+        WAIT_TIMEOUT_SECONDS="$(require_value "$1" "${2:-}")"
+        shift 2
+        ;;
+      --call-timeout)
+        CALL_TIMEOUT_SECONDS="$(require_value "$1" "${2:-}")"
+        shift 2
+        ;;
+      -h|--help)
+        usage
+        exit 0
+        ;;
+      *)
+        echo "Unknown option: $1" >&2
+        usage >&2
+        exit 2
+        ;;
+    esac
+  done
+}
+
+main() {
+  parse_args "$@"
+  source_runtime_environment
+  wait_for_service
+  request_map_save
+}
+
+main "$@"
