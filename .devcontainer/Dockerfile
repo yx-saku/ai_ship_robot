@@ -47,10 +47,10 @@ RUN --mount=type=cache,id=ai-ship-robot-apt-cache,target=/var/cache/apt,sharing=
         pcl-tools \
         sudo
 
-# プロキシ環境の独自CA証明書を信頼済みにする。不要な環境ではこのブロック全体をコメントアウトする。
-RUN mkdir -p /usr/local/share/ca-certificates/cato
-COPY [ "./cate_root_ca.crt", "/usr/local/share/ca-certificates/cato/ca.crt" ]
-RUN update-ca-certificates
+# # プロキシ環境の独自CA証明書を信頼済みにする。不要な環境ではこのブロック全体をコメントアウトする。
+# RUN mkdir -p /usr/local/share/ca-certificates/cato
+# COPY [ "./cate_root_ca.crt", "/usr/local/share/ca-certificates/cato/ca.crt" ]
+# RUN update-ca-certificates
 
 RUN if ! getent group ${USER_GID} >/dev/null; then groupadd --gid ${USER_GID} ${USERNAME}; fi \
     && if ! id -u ${USERNAME} >/dev/null 2>&1; then useradd --uid ${USER_UID} --gid ${USER_GID} --shell /bin/bash -m ${USERNAME}; fi \

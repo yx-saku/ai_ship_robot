@@ -105,14 +105,24 @@
     deskewMode: "odom_interpolation"
     maxPointOffsetTimeSec: 0.2
 
-    # map保存はcloud_registered_rawを使い、旧hybrid点群生成は既定で止めて処理負荷を抑える。
+    # map保存拡張はLIO-SAM内部のdeskew済み全点群を使い、旧hybrid点群生成は既定で止める。
     hybridRegisteredCloudEnabled: false
     hybridRegisteredCloudRawNearRange: 3.0
     hybridRegisteredCloudRawNearLeafSize: 0.01
     hybridRegisteredCloudRawUpperMapZLimitEnabled: true
     hybridRegisteredCloudRawUpperMapZMax: 1.5
 
-    # raw登録点群はmap saver有効時にlaunchからtrueへ上書きし、通常時はpublishしない。
+    # map保存時はlaunchからsaveElevationMapを有効化し、raw登録点群publishは診断用途に限定する。
+    saveElevationMap: false
+    localizationSubmapLeafSize: 0.10
+    saveLioSamStandardPcds: false
+    elevationOutputCellSize: 0.01
+    elevationClusterCellSize: 0.30
+    elevationCellZClusterGap: 0.05
+    elevationClusterConnectionRadius: 0.45
+    elevationClusterConnectionZGap: 0.15
+    elevationMinRange: 0.0
+    elevationMaxRange: 1000.0
     publishDeskewedCloud: false
     publishFeatureClouds: false
     publishMapGlobalCloud: false

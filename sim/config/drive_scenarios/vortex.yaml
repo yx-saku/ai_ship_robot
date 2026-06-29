@@ -1,9 +1,11 @@
 vars:
   pi: 3.14159265359
-  stride: 2.0
-  yaw_duration: 2.0
-  forward_speed: 0.5
-  turn_speed: ${pi / 2}
+  x: 0.0
+  y: 0.0
+  yaw: 0.0
+  stride: 1.0
+  forward_dur: 4.0
+  yaw_dur: 4.0
 
 steps:
   - duration_sec: 5.0
@@ -11,30 +13,39 @@ steps:
       - type: stop
 
   - repeat:
-      count: 5
+      count: 6
       steps:
-        - duration_sec: ${stride}
-          commands:
-            - type: forward
-              speed: ${forward_speed}
+      - set:
+          yaw: 90.0
 
-        - duration_sec: ${yaw_duration}
-          commands:
-            - type: yaw_left
-              speed: ${turn_speed}
+      - repeat:
+          count: 2
+          steps:
+            - set:
+                x: ${x + stride}
 
-        - duration_sec: ${stride}
-          commands:
-            - type: forward
-              speed: ${forward_speed}
+            - duration_sec: ${forward_dur}
+              move_to_pose:
+                pos: ["${x}", "${y}"]
 
-        - duration_sec: ${yaw_duration}
-          commands:
-            - type: yaw_left
-              speed: ${turn_speed}
+            - duration_sec: ${yaw_dur}
+              move_to_pose:
+                yaw: ${yaw}
 
-        - set:
-            stride: ${stride + 2.0}
+            - set:
+                y: ${y + stride}
+                yaw: ${yaw + 90.0}
+
+            - duration_sec: ${forward_dur}
+              move_to_pose:
+                pos: ["${x}", "${y}"]
+
+            - duration_sec: ${yaw_dur}
+              move_to_pose:
+                yaw: ${yaw}
+
+      - set:
+          stride: ${stride + 1.0}
         
   - duration_sec: 5.0
     commands:

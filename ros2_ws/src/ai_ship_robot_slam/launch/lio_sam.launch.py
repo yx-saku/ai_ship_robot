@@ -12,8 +12,6 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-import os
-
 from launch import LaunchDescription
 from launch.actions import DeclareLaunchArgument
 from launch.conditions import IfCondition
@@ -32,21 +30,6 @@ def generate_launch_description():
     rviz_config = LaunchConfiguration("rviz_config")
     imu_topic = LaunchConfiguration("imu_topic")
     lio_sam_package = LaunchConfiguration("lio_sam_package")
-    cloud_map_directory = LaunchConfiguration("cloud_map_directory")
-    map_cloud_topic = LaunchConfiguration("map_cloud_topic")
-    map_odometry_topic = LaunchConfiguration("map_odometry_topic")
-    map_path_topic = LaunchConfiguration("map_path_topic")
-    map_odometry_sync_tolerance_sec = LaunchConfiguration("map_odometry_sync_tolerance_sec")
-    map_cloud_buffer_duration_sec = LaunchConfiguration("map_cloud_buffer_duration_sec")
-    map_localization_voxel_leaf_size = LaunchConfiguration("map_localization_voxel_leaf_size")
-    map_global_voxel_leaf_size = LaunchConfiguration("map_global_voxel_leaf_size")
-    map_elevation_cell_size = LaunchConfiguration("map_elevation_cell_size")
-    map_cell_z_cluster_gap = LaunchConfiguration("map_cell_z_cluster_gap")
-    map_ground_cluster_height_gap = LaunchConfiguration("map_ground_cluster_height_gap")
-    map_ground_cluster_min_cells = LaunchConfiguration("map_ground_cluster_min_cells")
-    map_preview_topic = LaunchConfiguration("map_preview_topic")
-    map_preview_publish_period_sec = LaunchConfiguration("map_preview_publish_period_sec")
-    map_preview_voxel_leaf_size = LaunchConfiguration("map_preview_voxel_leaf_size")
 
     # LIO-SAMの推定LiDAR frameを実機URDFのLiDAR frameから分離し、TF親子競合を避ける。
     map_frame = "map"
@@ -65,7 +48,7 @@ def generate_launch_description():
             "baselinkFrame": base_frame,
             "odometryFrame": lidar_init_frame,
             "mapFrame": map_frame,
-            "publishCloudRegisteredRaw": ParameterValue(use_map_saver, value_type=bool),
+            "saveElevationMap": ParameterValue(use_map_saver, value_type=bool),
         },
     ]
 
@@ -136,53 +119,6 @@ def generate_launch_description():
         parameters=[{"use_sim_time": use_sim_time}],
     )
 
-    # raw登録点群からlocalization PCDと2.5D elevation submapを保存する。
-    map_saver = Node(
-        package="ai_ship_robot_slam",
-        executable="map_saver_node",
-        name="map_saver_node",
-        output="screen",
-        condition=IfCondition(use_map_saver),
-        parameters=[
-            {
-                "use_sim_time": use_sim_time,
-                "cloud_topic": map_cloud_topic,
-                "odometry_topic": map_odometry_topic,
-                "path_topic": map_path_topic,
-                "target_frame": map_frame,
-                "output_directory": cloud_map_directory,
-                "odometry_sync_tolerance_sec": ParameterValue(
-                    map_odometry_sync_tolerance_sec, value_type=float
-                ),
-                "cloud_buffer_duration_sec": ParameterValue(
-                    map_cloud_buffer_duration_sec, value_type=float
-                ),
-                "localization_voxel_leaf_size": ParameterValue(
-                    map_localization_voxel_leaf_size, value_type=float
-                ),
-                "global_voxel_leaf_size": ParameterValue(
-                    map_global_voxel_leaf_size, value_type=float
-                ),
-                "elevation_cell_size": ParameterValue(map_elevation_cell_size, value_type=float),
-                "cell_z_cluster_gap": ParameterValue(map_cell_z_cluster_gap, value_type=float),
-                "ground_cluster_height_gap": ParameterValue(
-                    map_ground_cluster_height_gap, value_type=float
-                ),
-                "ground_cluster_min_cells": ParameterValue(
-                    map_ground_cluster_min_cells, value_type=int
-                ),
-                "preview_enabled": True,
-                "preview_topic": map_preview_topic,
-                "preview_publish_period_sec": ParameterValue(
-                    map_preview_publish_period_sec, value_type=float
-                ),
-                "preview_voxel_leaf_size": ParameterValue(
-                    map_preview_voxel_leaf_size, value_type=float
-                ),
-            }
-        ],
-    )
-
     return LaunchDescription(
         [
             DeclareLaunchArgument("use_sim_time", default_value="false"),
@@ -190,32 +126,6 @@ def generate_launch_description():
             DeclareLaunchArgument("use_map_saver", default_value="false"),
             DeclareLaunchArgument("imu_topic", default_value="/lidar1/livox/imu"),
             DeclareLaunchArgument("lio_sam_package", default_value="lio_sam"),
-            DeclareLaunchArgument(
-                "map_cloud_topic", default_value="/lio_sam/mapping/cloud_registered_raw"
-            ),
-            DeclareLaunchArgument("map_odometry_topic", default_value="/lio_sam/mapping/odometry"),
-            DeclareLaunchArgument("map_path_topic", default_value="/lio_sam/mapping/path"),
-            DeclareLaunchArgument("map_odometry_sync_tolerance_sec", default_value="0.25"),
-            DeclareLaunchArgument("map_cloud_buffer_duration_sec", default_value="5.0"),
-            DeclareLaunchArgument("map_localization_voxel_leaf_size", default_value="0.10"),
-            DeclareLaunchArgument("map_global_voxel_leaf_size", default_value="0.10"),
-            DeclareLaunchArgument("map_elevation_cell_size", default_value="0.01"),
-            DeclareLaunchArgument("map_cell_z_cluster_gap", default_value="0.03"),
-            DeclareLaunchArgument("map_ground_cluster_height_gap", default_value="0.05"),
-            DeclareLaunchArgument("map_ground_cluster_min_cells", default_value="10"),
-            DeclareLaunchArgument(
-                "map_preview_topic", default_value="/map_saver/localization_map_preview"
-            ),
-            DeclareLaunchArgument("map_preview_publish_period_sec", default_value="2.0"),
-            DeclareLaunchArgument("map_preview_voxel_leaf_size", default_value="0.1"),
-            DeclareLaunchArgument(
-                "cloud_map_directory",
-                default_value=os.path.join(
-                    os.environ.get("AI_SHIP_ROBOT_WORKSPACE_ROOT", os.getcwd()),
-                    "outputs",
-                    "cloud_map",
-                ),
-            ),
             DeclareLaunchArgument(
                 "fusion_config",
                 default_value=PathJoinSubstitution(
@@ -240,7 +150,6 @@ def generate_launch_description():
             image_projection,
             feature_extraction,
             map_optimization,
-            map_saver,
             rviz,
         ]
     )

@@ -30,6 +30,8 @@ MAP_SAVE_SUCCEEDED=false
 MAP_SAVE_PID=""
 MAP_SAVE_CANCEL_REQUESTED=false
 AUTO_SAVE_MAPS_ON_SHUTDOWN=true
+MAP_SAVE_DESTINATION="${MAP_SAVE_DESTINATION:-}"
+MAP_SAVE_RESOLUTION="${MAP_SAVE_RESOLUTION:-0.10}"
 # bag再生ではSLAM入力に必要なLiDAR/IMUと静的TFだけを流し、sim由来の動的/tf競合を避ける。
 DEFAULT_BAG_PLAY_TOPICS=(
   /tf_static
@@ -91,7 +93,9 @@ Options:
                         Max seconds to wait for LIO-SAM cloudQueue drain after bag playback.
                         Default: 300. Use 0 to wait without timeout.
   --no-save-map-on-shutdown
-                       Do not auto-save map outputs when mapping mode exits.
+                        Do not auto-save map outputs when mapping mode exits.
+  --map-output PATH     Save map outputs to PATH. Default: outputs/cloud_map/map_YYYYmmdd_HHMMSS
+  --map-resolution N    Downsample resolution passed to /lio_sam/save_map. Default: 0.10
   --no-auto-exit     Keep SLAM and recording running after rosbag playback finishes.
   --rviz-config PATH Use a workspace RViz config file for LIO-SAM.
   --pcd [PATH]       Fixed PCD map path for loc mode.
@@ -193,17 +197,6 @@ build_runtime_workspace_if_requested() {
   else
     bash "${SETUP_RUNTIME_SCRIPT}"
   fi
-}
-
-map_saver_requested() {
-  local arg=""
-
-  for arg in "${FORWARD_ARGS[@]}"; do
-    if [[ "${arg}" == "--map" ]]; then
-      return 0
-    fi
-  done
-  return 1
 }
 
 require_value() {
@@ -450,6 +443,22 @@ latest_localization_map() {
   printf '%s' "${newest_file}"
 }
 
+default_map_output_dir() {
+  printf '%s/map_%s' "${CLOUD_MAP_ROOT}" "$(date +%Y%m%d_%H%M%S)"
+}
+
+resolve_map_save_destination() {
+  local destination="${MAP_SAVE_DESTINATION}"
+
+  if [[ -z "${destination}" ]]; then
+    destination="$(default_map_output_dir)"
+  fi
+  if [[ "${destination}" != /* ]]; then
+    destination="${WORKSPACE_ROOT}/${destination}"
+  fi
+  printf '%s' "${destination}"
+}
+
 collect_child_pids() {
   local parent_pid="$1"
   local child_pid=""
@@ -494,7 +503,7 @@ print_map_outputs_save_start_banner() {
   else
     echo "bag再生完了後の自動停止前にmap成果物を保存しています。" >&2
   fi
-  echo "localization_map.pcd と elevation submaps を出力します。" >&2
+  echo "localization_map.pcd と global_elevation_map.csv を出力します。" >&2
   echo "大きなマップでは数分かかる場合があります。" >&2
   echo "保存を中断して終了するには、もう一度 Ctrl+C を押してください。" >&2
   echo "======================================================================" >&2
@@ -809,20 +818,20 @@ wait_for_lio_sam_cloud_queue_empty() {
 }
 
 wait_for_save_maps_service() {
-  local service_name="/save_maps"
+  local service_name="/lio_sam/save_map"
   local started_seconds=${SECONDS}
   local elapsed_seconds=0
   local last_log_seconds=0
   local service_list=""
 
-  echo "Waiting for map saver service ${service_name}..." >&2
+  echo "Waiting for LIO-SAM save_map service ${service_name}..." >&2
   while true; do
     if [[ -n "${SLAM_PID}" ]] && ! kill -0 "${SLAM_PID}" 2>/dev/null; then
-      echo "LIO-SAM exited before map saver service became available." >&2
+      echo "LIO-SAM exited before save_map service became available." >&2
       return 1
     fi
 
-    # ROS graph上でmap saver serviceの起動を確認してから保存要求を出す。
+    # ROS graph上でLIO-SAM本体の保存service起動を確認してから保存要求を出す。
     service_list="$(timeout 5s ros2 service list --no-daemon 2>/dev/null || true)"
     if grep -Fxq "${service_name}" <<< "${service_list}"; then
       return 0
@@ -832,12 +841,12 @@ wait_for_save_maps_service() {
     if [[ "${WAIT_FOR_MAP_SAVE_SERVICE_TIMEOUT_SECONDS}" != "0" &&
           "${WAIT_FOR_MAP_SAVE_SERVICE_TIMEOUT_SECONDS}" != "0.0" &&
           "${elapsed_seconds}" -ge "${WAIT_FOR_MAP_SAVE_SERVICE_TIMEOUT_SECONDS}" ]]; then
-      echo "Timed out waiting for map saver service after ${elapsed_seconds}s." >&2
+      echo "Timed out waiting for LIO-SAM save_map service after ${elapsed_seconds}s." >&2
       return 1
     fi
 
     if (( SECONDS - last_log_seconds >= 5 )); then
-      echo "Still waiting for map saver service ${service_name}." >&2
+      echo "Still waiting for LIO-SAM save_map service ${service_name}." >&2
       last_log_seconds=${SECONDS}
     fi
     sleep 0.5
@@ -846,16 +855,17 @@ wait_for_save_maps_service() {
 
 save_maps_if_requested() {
   local save_reason="${1:-manual}"
-  local service_name="/save_maps"
-  local service_type="std_srvs/srv/Trigger"
-  local service_request="{}"
+  local service_name="/lio_sam/save_map"
+  local service_type="lio_sam/srv/SaveMap"
+  local saved_output_dir=""
+  local service_request=""
   local call_output=""
   local call_status=0
-  local call_cmd=(ros2 service call "${service_name}" "${service_type}" "${service_request}")
+  local call_cmd=()
   local output_file=""
-  local saved_output_dir=""
   local saved_pcd_path=""
   local saved_manifest_path=""
+  local saved_elevation_csv_path=""
 
   if [[ "${RUN_MODE}" != "map" ]]; then
     return 0
@@ -875,7 +885,16 @@ save_maps_if_requested() {
     return 1
   fi
 
+  saved_output_dir="$(resolve_map_save_destination)"
+  saved_pcd_path="${saved_output_dir}/localization_map.pcd"
+  saved_manifest_path="${saved_output_dir}/elevation_manifest.yaml"
+  saved_elevation_csv_path="${saved_output_dir}/global_elevation_map.csv"
+  service_request="{resolution: ${MAP_SAVE_RESOLUTION}, destination: \"${saved_output_dir}\"}"
+  call_cmd=(ros2 service call "${service_name}" "${service_type}" "${service_request}")
+
   print_map_outputs_save_start_banner "${save_reason}"
+  echo "保存先ディレクトリ: ${saved_output_dir}" >&2
+  echo "SaveMap resolution: ${MAP_SAVE_RESOLUTION}" >&2
 
   MAP_SAVE_IN_PROGRESS=true
   MAP_SAVE_CANCEL_REQUESTED=false
@@ -902,29 +921,14 @@ save_maps_if_requested() {
   if [[ "${call_status}" -eq 0 &&
         ( "${call_output}" == *"success=True"* ||
          "${call_output}" == *"success: true"* ||
-           "${call_output}" == *"success: True"* ) ]]; then
+            "${call_output}" == *"success: True"* ) ]]; then
     MAP_SAVE_SUCCEEDED=true
-    # service応答のmessageから主要成果物を抜き出し、終了直前ログでも確認しやすくする。
-    if [[ "${call_output}" =~ output_dir=([^[:space:]\"\']+) ]]; then
-      saved_output_dir="${BASH_REMATCH[1]}"
-    fi
-    if [[ "${call_output}" =~ localization_pcd=([^[:space:]\"\']+) ]]; then
-      saved_pcd_path="${BASH_REMATCH[1]}"
-    fi
-    if [[ "${call_output}" =~ manifest=([^[:space:]\"\']+) ]]; then
-      saved_manifest_path="${BASH_REMATCH[1]}"
-    fi
     echo "----------------------------------------------------------------------" >&2
     echo "map成果物保存が完了しました。" >&2
-    if [[ -n "${saved_output_dir}" ]]; then
-      echo "保存先ディレクトリ: ${saved_output_dir}" >&2
-    fi
-    if [[ -n "${saved_pcd_path}" ]]; then
-      echo "localization PCD: ${saved_pcd_path}" >&2
-    fi
-    if [[ -n "${saved_manifest_path}" ]]; then
-      echo "elevation manifest: ${saved_manifest_path}" >&2
-    fi
+    echo "保存先ディレクトリ: ${saved_output_dir}" >&2
+    echo "localization PCD: ${saved_pcd_path}" >&2
+    echo "elevation manifest: ${saved_manifest_path}" >&2
+    echo "global elevation CSV: ${saved_elevation_csv_path}" >&2
     echo "Map outputs save service response: ${call_output//$'\n'/ }" >&2
     echo "----------------------------------------------------------------------" >&2
     echo "Continuing with the remaining shutdown sequence." >&2
@@ -934,7 +938,7 @@ save_maps_if_requested() {
   echo "----------------------------------------------------------------------" >&2
   echo "Map outputs save failed: ${call_output//$'\n'/ }" >&2
   echo "----------------------------------------------------------------------" >&2
-  echo "Continuing with SLAM shutdown. The shutdown fallback saver may still attempt a final save." >&2
+  echo "Continuing with SLAM shutdown after failed /lio_sam/save_map request." >&2
   return 1
 }
 
@@ -1569,7 +1573,7 @@ run_sim_lio_sam() {
     launch_args+=("robot_name:=ai_ship_robot_lio_sam_$$")
   fi
 
-  # simulation経由のmap作成でも、通常起動と同じmap saverを有効化する。
+  # simulation経由のmap作成でも、通常起動と同じsave_map用raw蓄積を有効化する。
   launch_args+=("use_map_saver:=true")
 
   source_sim_slam_environment false
@@ -1743,6 +1747,20 @@ while [[ $# -gt 0 ]]; do
     --cloud-queue-drain-timeout)
       shift
       WAIT_FOR_CLOUD_QUEUE_DRAIN_TIMEOUT_SECONDS="$(require_value --cloud-queue-drain-timeout "${1:-}")"
+      ;;
+    --map-output=*)
+      MAP_SAVE_DESTINATION="${1#*=}"
+      ;;
+    --map-output)
+      shift
+      MAP_SAVE_DESTINATION="$(require_value --map-output "${1:-}")"
+      ;;
+    --map-resolution=*)
+      MAP_SAVE_RESOLUTION="${1#*=}"
+      ;;
+    --map-resolution)
+      shift
+      MAP_SAVE_RESOLUTION="$(require_value --map-resolution "${1:-}")"
       ;;
     --no-save-map-on-shutdown)
       AUTO_SAVE_MAPS_ON_SHUTDOWN=false

@@ -24,7 +24,7 @@
 - Livox `CustomMsg` を前提にした Mid-360 向け SLAM 導線
 - 複数 LiDAR の `CustomMsg` 融合ノード
 - 6 軸 IMU 初期姿勢推定ノード
-- hybrid登録点群を使った PCD map saver ノード
+- LIO-SAM本体の `/lio_sam/save_map` によるraw keyframe submap由来map保存
 - Gazebo Classic 上の LiDAR 配置検証環境
 - rosbag2 の収録と再生補助
 
@@ -80,7 +80,7 @@ bash scripts/run_slam.sh \
 
 - `/lidar1/livox/lidar`, `/lidar2/livox/lidar`: LIO-SAM `imageProjection` が直接購読する Livox `CustomMsg`
 - `/lidar1/livox/imu`: 生 IMU
-- `/lio_sam/mapping/cloud_registered_raw`: map saver 用 raw 登録点群
+- `/lio_sam/save_map`: LIO-SAM本体が提供するmap保存service
 - `/lio_sam/mapping/odometry`: scan matching 後の global odometry
 - `/lio_sam/mapping/path`: keyframe pose 列
 
@@ -90,12 +90,21 @@ bash scripts/run_slam.sh \
 - `--sim` によるシミュレーション同時起動
 - `--bag-play` による rosbag 再生入力
 - `--record-bag` による rosbag 記録
-- `--map` による map saver 有効化
+- `--map` による LIO-SAM map保存拡張の有効化
 - `--cloud-queue-drain-timeout` による bag 再生後の cloudQueue 待機上限指定
 
-`--map` を付けた場合は、`map_saver_node` が `/lio_sam/mapping/cloud_registered_raw` を odometry pose で keyframe 区間 submap へ変換します。保存時は timestamp ディレクトリを作成し、localization 用の粗い binary PCD `localization_map.pcd` と、地面候補抽出済み 2.5D elevation submap `elevation_manifest.yaml` / `elevation_submaps/*.csv` を書き出します。
+`--map` を付けた場合は、LIO-SAM本体の `/lio_sam/save_map` を使って timestamp ディレクトリへmap成果物を保存します。必須成果物は、`cloudInfo.cloud_deskewed` をkeyframe local submapへ集約した localization 用の `localization_map.pcd`、2.5D elevation map の `global_elevation_map.csv`、生成条件を記録した `elevation_manifest.yaml` です。`GlobalMap.pcd` / `CornerMap.pcd` / `SurfMap.pcd` / `trajectory.pcd` / `transformations.pcd` は `saveLioSamStandardPcds=true` の場合だけ追加出力します。
 
-CPU/DDS 負荷を抑えるため、`/lio_sam/deskew/cloud_deskewed`、`/lio_sam/feature/cloud_corner`、`/lio_sam/feature/cloud_surface`、`/lio_sam/mapping/map_global`、`/lio_sam/mapping/map_local`、`/lio_sam/mapping/trajectory`、`/lio_sam/mapping/cloud_registered_raw` は既定では publish しません。`cloud_registered_raw` は map saver 有効時に launch から自動で有効化されます。
+CPU/DDS 負荷を抑えるため、`/lio_sam/deskew/cloud_deskewed`、`/lio_sam/feature/cloud_corner`、`/lio_sam/feature/cloud_surface`、`/lio_sam/mapping/map_global`、`/lio_sam/mapping/map_local`、`/lio_sam/mapping/trajectory`、`/lio_sam/mapping/cloud_registered_raw` は既定では publish しません。map保存時は外部raw publishではなく、LIO-SAM内部の `cloudInfo.cloud_deskewed` を保持してlocalization mapと2.5D elevation mapのsubmap蓄積に使います。
+
+保存済みの `global_elevation_map.csv` をRVizで確認する場合は、`z_max` をPointCloud2としてpublishし、RVizを自動起動できます。
+
+```bash
+bash scripts/view_elevation_map.sh
+bash scripts/view_elevation_map.sh outputs/cloud_map/map_YYYYmmdd_HHMMSS
+```
+
+RVizには `/elevation_map/z_max_points` の `PointCloud2` displayが入った状態で開きます。引数を省略した場合は `outputs/cloud_map/map_*` の最新結果を使用し、指定した場合はそのディレクトリ配下の `global_elevation_map.csv` と `elevation_manifest.yaml` を固定で使用します。
 
 rosbag を記録する例です。
 
@@ -145,7 +154,9 @@ bash dev/replay_rosbag.sh slam outputs/rosbag2/slam_20260611_120000
 
 - `slam_reference_lidar_static_tf_node`
 - `livox_custommsg_to_pointcloud2_node`
-- `map_saver_node`
+- `livox_custommsg_self_filter_node`
+- `pcd_localization_node`
+- `pcd_height_diff_map_generator`
 
 主な設定ファイルです。
 

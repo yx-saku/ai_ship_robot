@@ -20,9 +20,20 @@
 #include <tf2/time.h>
 
 #include <algorithm>
+#include <array>
 #include <chrono>
 #include <cstdint>
+#include <filesystem>
+#include <fstream>
+#include <iomanip>
+#include <limits>
 #include <map>
+#include <numeric>
+#include <optional>
+#include <queue>
+#include <sstream>
+#include <unordered_map>
+#include <unordered_set>
 
 using namespace gtsam;
 
@@ -89,6 +100,209 @@ public:
     size_t hybridCloudRawNearPointsSum = 0;
     size_t hybridCloudFeaturePointsSum = 0;
     size_t hybridCloudOutputPointsSum = 0;
+
+    struct LocalizationVoxelKey
+    {
+        int64_t ix = 0;
+        int64_t iy = 0;
+        int64_t iz = 0;
+
+        bool operator==(const LocalizationVoxelKey &other) const
+        {
+            return ix == other.ix && iy == other.iy && iz == other.iz;
+        }
+    };
+
+    struct LocalizationVoxelKeyHash
+    {
+        size_t operator()(const LocalizationVoxelKey &key) const
+        {
+            const auto hx = std::hash<int64_t>{}(key.ix);
+            const auto hy = std::hash<int64_t>{}(key.iy);
+            const auto hz = std::hash<int64_t>{}(key.iz);
+            return hx ^ (hy << 1U) ^ (hz << 2U);
+        }
+    };
+
+    struct LocalizationVoxelStats
+    {
+        size_t count = 0;
+        double sum_x = 0.0;
+        double sum_y = 0.0;
+        double sum_z = 0.0;
+        double sum_intensity = 0.0;
+
+        void add(const Eigen::Vector3f &point, float intensity)
+        {
+            ++count;
+            sum_x += point.x();
+            sum_y += point.y();
+            sum_z += point.z();
+            sum_intensity += intensity;
+        }
+
+        void addWeighted(const Eigen::Vector3f &point, double intensitySum, size_t weight)
+        {
+            if (weight == 0)
+                return;
+            count += weight;
+            sum_x += static_cast<double>(point.x()) * static_cast<double>(weight);
+            sum_y += static_cast<double>(point.y()) * static_cast<double>(weight);
+            sum_z += static_cast<double>(point.z()) * static_cast<double>(weight);
+            sum_intensity += intensitySum;
+        }
+
+        void merge(const LocalizationVoxelStats &other)
+        {
+            count += other.count;
+            sum_x += other.sum_x;
+            sum_y += other.sum_y;
+            sum_z += other.sum_z;
+            sum_intensity += other.sum_intensity;
+        }
+
+        PointType centroidPoint() const
+        {
+            PointType point;
+            point.x = 0.0f;
+            point.y = 0.0f;
+            point.z = 0.0f;
+            point.intensity = 0.0f;
+            if (count == 0)
+                return point;
+            const double denominator = static_cast<double>(count);
+            point.x = static_cast<float>(sum_x / denominator);
+            point.y = static_cast<float>(sum_y / denominator);
+            point.z = static_cast<float>(sum_z / denominator);
+            point.intensity = static_cast<float>(sum_intensity / denominator);
+            return point;
+        }
+    };
+
+    struct ElevationGridKey
+    {
+        int64_t ix = 0;
+        int64_t iy = 0;
+
+        bool operator==(const ElevationGridKey &other) const
+        {
+            return ix == other.ix && iy == other.iy;
+        }
+    };
+
+    struct ElevationGridKeyHash
+    {
+        size_t operator()(const ElevationGridKey &key) const
+        {
+            const auto hx = std::hash<int64_t>{}(key.ix);
+            const auto hy = std::hash<int64_t>{}(key.iy);
+            return hx ^ (hy << 1U);
+        }
+    };
+
+    struct ElevationClusterNode
+    {
+        ElevationGridKey key;
+        size_t cluster_index = 0;
+
+        bool operator==(const ElevationClusterNode &other) const
+        {
+            return key == other.key && cluster_index == other.cluster_index;
+        }
+    };
+
+    struct ElevationClusterNodeHash
+    {
+        size_t operator()(const ElevationClusterNode &node) const
+        {
+            const auto keyHash = ElevationGridKeyHash{}(node.key);
+            const auto indexHash = std::hash<size_t>{}(node.cluster_index);
+            return keyHash ^ (indexHash << 1U);
+        }
+    };
+
+    struct ElevationRunningStats
+    {
+        size_t count = 0;
+        double z_min = std::numeric_limits<double>::infinity();
+        double z_max = -std::numeric_limits<double>::infinity();
+        double z_mean = 0.0;
+        double z_m2 = 0.0;
+
+        void add(double z)
+        {
+            ++count;
+            z_min = std::min(z_min, z);
+            z_max = std::max(z_max, z);
+            const double delta = z - z_mean;
+            z_mean += delta / static_cast<double>(count);
+            const double delta_after = z - z_mean;
+            z_m2 += delta * delta_after;
+        }
+
+        void merge(size_t other_count, double other_min, double other_max, double other_mean, double other_m2)
+        {
+            if (other_count == 0)
+                return;
+            if (count == 0)
+            {
+                count = other_count;
+                z_min = other_min;
+                z_max = other_max;
+                z_mean = other_mean;
+                z_m2 = other_m2;
+                return;
+            }
+
+            const double total_count = static_cast<double>(count + other_count);
+            const double delta = other_mean - z_mean;
+            z_m2 += other_m2 + delta * delta * static_cast<double>(count) * static_cast<double>(other_count) / total_count;
+            z_mean += delta * static_cast<double>(other_count) / total_count;
+            z_min = std::min(z_min, other_min);
+            z_max = std::max(z_max, other_max);
+            count += other_count;
+        }
+    };
+
+    struct ElevationLocalPoint
+    {
+        double x = 0.0;
+        double y = 0.0;
+        double z = 0.0;
+    };
+
+    struct ElevationRawClusterCell
+    {
+        std::vector<ElevationLocalPoint> points;
+        std::vector<double> z_values;
+    };
+
+    struct ElevationSubmapCell
+    {
+        int64_t ix = 0;
+        int64_t iy = 0;
+        double x = 0.0;
+        double y = 0.0;
+        std::vector<ElevationRunningStats> z_clusters;
+    };
+
+    struct KeyframeMapSubmap
+    {
+        size_t keyframe_index = 0;
+        double keyframe_time = 0.0;
+        PointTypePose initial_keyframe_pose;
+        std::unordered_map<LocalizationVoxelKey, LocalizationVoxelStats, LocalizationVoxelKeyHash> localization_voxels;
+        std::unordered_map<ElevationGridKey, ElevationSubmapCell, ElevationGridKeyHash> elevation_cells;
+        size_t scan_count = 0;
+        size_t raw_point_count = 0;
+        size_t localization_point_count = 0;
+        size_t elevation_input_point_count = 0;
+    };
+
+    std::vector<KeyframeMapSubmap> keyframeMapSubmaps;
+    size_t keyframeSubmapProcessedScanCount = 0;
+    size_t keyframeSubmapSkippedEmptyScanCount = 0;
+    size_t keyframeSubmapTotalRawPointCount = 0;
 
     rclcpp::Service<lio_sam::srv::SaveMap>::SharedPtr srvSaveMap;
     rclcpp::Subscription<lio_sam::msg::CloudInfo>::SharedPtr subCloud;
@@ -207,61 +421,7 @@ public:
 
         auto saveMapService = [this](const std::shared_ptr<rmw_request_id_t> request_header, const std::shared_ptr<lio_sam::srv::SaveMap::Request> req, std::shared_ptr<lio_sam::srv::SaveMap::Response> res) -> void {
             (void)request_header;
-            string saveMapDirectory;
-            cout << "****************************************************" << endl;
-            cout << "Saving map to pcd files ..." << endl;
-            if(req->destination.empty()) saveMapDirectory = std::getenv("HOME") + savePCDDirectory;
-            else saveMapDirectory = std::getenv("HOME") + req->destination;
-            cout << "Save destination: " << saveMapDirectory << endl;
-            // create directory and remove old files;
-            int unused = system((std::string("exec rm -r ") + saveMapDirectory).c_str());
-            unused = system((std::string("mkdir -p ") + saveMapDirectory).c_str());
-            // save key frame transformations
-            pcl::io::savePCDFileBinary(saveMapDirectory + "/trajectory.pcd", *cloudKeyPoses3D);
-            pcl::io::savePCDFileBinary(saveMapDirectory + "/transformations.pcd", *cloudKeyPoses6D);
-            // extract global point cloud map
-            pcl::PointCloud<PointType>::Ptr globalCornerCloud(new pcl::PointCloud<PointType>());
-            pcl::PointCloud<PointType>::Ptr globalCornerCloudDS(new pcl::PointCloud<PointType>());
-            pcl::PointCloud<PointType>::Ptr globalSurfCloud(new pcl::PointCloud<PointType>());
-            pcl::PointCloud<PointType>::Ptr globalSurfCloudDS(new pcl::PointCloud<PointType>());
-            pcl::PointCloud<PointType>::Ptr globalMapCloud(new pcl::PointCloud<PointType>());
-            for (int i = 0; i < (int)cloudKeyPoses3D->size(); i++)
-            {
-                *globalCornerCloud += *transformPointCloud(cornerCloudKeyFrames[i],  &cloudKeyPoses6D->points[i]);
-                *globalSurfCloud   += *transformPointCloud(surfCloudKeyFrames[i],    &cloudKeyPoses6D->points[i]);
-                cout << "\r" << std::flush << "Processing feature cloud " << i << " of " << cloudKeyPoses6D->size() << " ...";
-            }
-            if(req->resolution != 0)
-            {
-               cout << "\n\nSave resolution: " << req->resolution << endl;
-               // down-sample and save corner cloud
-               downSizeFilterCorner.setInputCloud(globalCornerCloud);
-               downSizeFilterCorner.setLeafSize(req->resolution, req->resolution, req->resolution);
-               downSizeFilterCorner.filter(*globalCornerCloudDS);
-               pcl::io::savePCDFileBinary(saveMapDirectory + "/CornerMap.pcd", *globalCornerCloudDS);
-               // down-sample and save surf cloud
-               downSizeFilterSurf.setInputCloud(globalSurfCloud);
-               downSizeFilterSurf.setLeafSize(req->resolution, req->resolution, req->resolution);
-               downSizeFilterSurf.filter(*globalSurfCloudDS);
-               pcl::io::savePCDFileBinary(saveMapDirectory + "/SurfMap.pcd", *globalSurfCloudDS);
-            }
-            else
-            {
-            // save corner cloud
-               pcl::io::savePCDFileBinary(saveMapDirectory + "/CornerMap.pcd", *globalCornerCloud);
-               // save surf cloud
-               pcl::io::savePCDFileBinary(saveMapDirectory + "/SurfMap.pcd", *globalSurfCloud);
-            }
-            // save global point cloud map
-            *globalMapCloud += *globalCornerCloud;
-            *globalMapCloud += *globalSurfCloud;
-            int ret = pcl::io::savePCDFileBinary(saveMapDirectory + "/GlobalMap.pcd", *globalMapCloud);
-            res->success = ret == 0;
-            downSizeFilterCorner.setLeafSize(mappingCornerLeafSize, mappingCornerLeafSize, mappingCornerLeafSize);
-            downSizeFilterSurf.setLeafSize(mappingSurfLeafSize, mappingSurfLeafSize, mappingSurfLeafSize);
-            cout << "****************************************************" << endl;
-            cout << "Saving map to pcd files completed\n" << endl;
-            return;
+            res->success = saveMapToFiles(req);
         };
 
         srvSaveMap = create_service<lio_sam::srv::SaveMap>("lio_sam/save_map", saveMapService);
@@ -333,6 +493,936 @@ public:
         matP.setZero();
     }
 
+    std::filesystem::path resolveSaveMapDirectory(const std::string &destination) const
+    {
+        const char *home = std::getenv("HOME");
+        const std::string homeDirectory = home == nullptr ? std::string() : std::string(home);
+        if (destination.empty())
+            return std::filesystem::path(homeDirectory + savePCDDirectory);
+
+        const std::filesystem::path requestedPath(destination);
+        if (requestedPath.is_absolute())
+            return requestedPath;
+        return std::filesystem::path(homeDirectory + destination);
+    }
+
+    std::vector<ElevationRunningStats> normalizeElevationClusters(std::vector<ElevationRunningStats> clusters) const
+    {
+        clusters.erase(
+            std::remove_if(clusters.begin(), clusters.end(), [](const auto &cluster) { return cluster.count == 0; }),
+            clusters.end());
+        if (clusters.empty())
+            return clusters;
+
+        std::sort(clusters.begin(), clusters.end(), [](const auto &lhs, const auto &rhs) {
+            if (lhs.z_min != rhs.z_min)
+                return lhs.z_min < rhs.z_min;
+            return lhs.z_max < rhs.z_max;
+        });
+
+        std::vector<ElevationRunningStats> mergedClusters;
+        mergedClusters.reserve(clusters.size());
+        for (const auto &cluster : clusters)
+        {
+            if (mergedClusters.empty() || cluster.z_min - mergedClusters.back().z_max > elevationCellZClusterGap)
+            {
+                mergedClusters.push_back(cluster);
+                continue;
+            }
+            auto &target = mergedClusters.back();
+            target.merge(cluster.count, cluster.z_min, cluster.z_max, cluster.z_mean, cluster.z_m2);
+        }
+        return mergedClusters;
+    }
+
+    std::vector<ElevationRunningStats> buildElevationZClusters(std::vector<double> values) const
+    {
+        std::vector<ElevationRunningStats> clusters;
+        if (values.empty())
+            return clusters;
+
+        std::sort(values.begin(), values.end());
+        size_t startIndex = 0;
+        while (startIndex < values.size())
+        {
+            size_t endIndex = startIndex + 1;
+            while (endIndex < values.size() && values[endIndex] - values[endIndex - 1] <= elevationCellZClusterGap)
+                ++endIndex;
+
+            ElevationRunningStats stats;
+            for (size_t i = startIndex; i < endIndex; ++i)
+                stats.add(values[i]);
+            clusters.push_back(stats);
+            startIndex = endIndex;
+        }
+        return normalizeElevationClusters(std::move(clusters));
+    }
+
+    size_t findElevationClusterIndex(const std::vector<ElevationRunningStats> &clusters, double z) const
+    {
+        size_t bestIndex = 0;
+        double bestDistance = std::numeric_limits<double>::infinity();
+        for (size_t i = 0; i < clusters.size(); ++i)
+        {
+            const auto &cluster = clusters[i];
+            if (z >= cluster.z_min - 1.0e-9 && z <= cluster.z_max + 1.0e-9)
+                return i;
+            const double distance = std::min(std::abs(z - cluster.z_min), std::abs(z - cluster.z_max));
+            if (distance < bestDistance)
+            {
+                bestDistance = distance;
+                bestIndex = i;
+            }
+        }
+        return bestIndex;
+    }
+
+    bool elevationClusterOverlaps(const ElevationRunningStats &lhs, const ElevationRunningStats &rhs) const
+    {
+        if (lhs.count == 0 || rhs.count == 0)
+            return false;
+        return lhs.z_min <= rhs.z_max + elevationCellZClusterGap && rhs.z_min <= lhs.z_max + elevationCellZClusterGap;
+    }
+
+    double elevationClusterCenterX(const ElevationGridKey &key) const
+    {
+        return (static_cast<double>(key.ix) + 0.5) * elevationClusterCellSize;
+    }
+
+    double elevationClusterCenterY(const ElevationGridKey &key) const
+    {
+        return (static_cast<double>(key.iy) + 0.5) * elevationClusterCellSize;
+    }
+
+    double elevationClusterXyDistanceSquared(
+        const ElevationGridKey &lhsKey,
+        const ElevationGridKey &rhsKey) const
+    {
+        const double dx = elevationClusterCenterX(lhsKey) - elevationClusterCenterX(rhsKey);
+        const double dy = elevationClusterCenterY(lhsKey) - elevationClusterCenterY(rhsKey);
+        return dx * dx + dy * dy;
+    }
+
+    bool isBetterSelectedElevationCluster(
+        const ElevationRunningStats &candidate,
+        const ElevationRunningStats &current,
+        double seedZ) const
+    {
+        const double candidateDistance = std::abs(candidate.z_mean - seedZ);
+        const double currentDistance = std::abs(current.z_mean - seedZ);
+        if (candidateDistance != currentDistance)
+            return candidateDistance < currentDistance;
+        if (candidate.count != current.count)
+            return candidate.count > current.count;
+        return candidate.z_mean < current.z_mean;
+    }
+
+    std::optional<ElevationClusterNode> findOriginNearestElevationCluster(
+        const std::unordered_map<ElevationGridKey, std::vector<ElevationRunningStats>, ElevationGridKeyHash> &clusterCells) const
+    {
+        std::optional<ElevationClusterNode> bestNode;
+        double bestDistance = std::numeric_limits<double>::infinity();
+        for (const auto &entry : clusterCells)
+        {
+            const auto &key = entry.first;
+            const auto &clusters = entry.second;
+            for (size_t index = 0; index < clusters.size(); ++index)
+            {
+                const auto &cluster = clusters[index];
+                if (cluster.count == 0)
+                    continue;
+                const double x = elevationClusterCenterX(key);
+                const double y = elevationClusterCenterY(key);
+                const double distance = x * x + y * y + cluster.z_mean * cluster.z_mean;
+                if (distance < bestDistance)
+                {
+                    bestDistance = distance;
+                    bestNode = ElevationClusterNode{key, index};
+                }
+            }
+        }
+        return bestNode;
+    }
+
+    std::unordered_map<ElevationGridKey, size_t, ElevationGridKeyHash> selectOriginConnectedElevationClusters(
+        const std::unordered_map<ElevationGridKey, std::vector<ElevationRunningStats>, ElevationGridKeyHash> &clusterCells) const
+    {
+        std::unordered_map<ElevationGridKey, size_t, ElevationGridKeyHash> selected;
+        const auto seedNode = findOriginNearestElevationCluster(clusterCells);
+        if (!seedNode.has_value())
+            return selected;
+
+        const auto seedCellIter = clusterCells.find(seedNode->key);
+        if (seedCellIter == clusterCells.end() || seedNode->cluster_index >= seedCellIter->second.size())
+            return selected;
+        const double seedZ = seedCellIter->second[seedNode->cluster_index].z_mean;
+        const double connectionRadiusSquared = elevationClusterConnectionRadius * elevationClusterConnectionRadius;
+        const int64_t radiusCells = static_cast<int64_t>(std::ceil(elevationClusterConnectionRadius / elevationClusterCellSize));
+        std::vector<ElevationGridKey> neighborOffsets;
+        for (int64_t dx = -radiusCells; dx <= radiusCells; ++dx)
+        {
+            for (int64_t dy = -radiusCells; dy <= radiusCells; ++dy)
+                neighborOffsets.push_back(ElevationGridKey{dx, dy});
+        }
+
+        std::queue<ElevationClusterNode> queue;
+        std::unordered_set<ElevationClusterNode, ElevationClusterNodeHash> visited;
+        std::vector<ElevationClusterNode> connectedNodes;
+        queue.push(*seedNode);
+        visited.insert(*seedNode);
+
+        // 原点最近傍clusterからXY距離と高さ差で到達可能なclusterだけを辿り、天井などの孤立成分を除外する。
+        while (!queue.empty())
+        {
+            const auto node = queue.front();
+            queue.pop();
+            connectedNodes.push_back(node);
+
+            const auto currentCellIter = clusterCells.find(node.key);
+            if (currentCellIter == clusterCells.end() || node.cluster_index >= currentCellIter->second.size())
+                continue;
+            const auto &currentCluster = currentCellIter->second[node.cluster_index];
+
+            for (const auto &offset : neighborOffsets)
+            {
+                const ElevationGridKey neighborKey{node.key.ix + offset.ix, node.key.iy + offset.iy};
+                const auto neighborCellIter = clusterCells.find(neighborKey);
+                if (neighborCellIter == clusterCells.end())
+                    continue;
+
+                const auto &neighborClusters = neighborCellIter->second;
+                for (size_t neighborIndex = 0; neighborIndex < neighborClusters.size(); ++neighborIndex)
+                {
+                    const ElevationClusterNode neighborNode{neighborKey, neighborIndex};
+                    if (visited.find(neighborNode) != visited.end())
+                        continue;
+                    if (elevationClusterXyDistanceSquared(node.key, neighborKey) > connectionRadiusSquared)
+                        continue;
+                    if (std::abs(currentCluster.z_mean - neighborClusters[neighborIndex].z_mean) > elevationClusterConnectionZGap)
+                        continue;
+                    visited.insert(neighborNode);
+                    queue.push(neighborNode);
+                }
+            }
+        }
+
+        selected.reserve(connectedNodes.size());
+        for (const auto &node : connectedNodes)
+        {
+            const auto cellIter = clusterCells.find(node.key);
+            if (cellIter == clusterCells.end() || node.cluster_index >= cellIter->second.size())
+                continue;
+            const auto selectedIter = selected.find(node.key);
+            if (selectedIter == selected.end())
+            {
+                selected.emplace(node.key, node.cluster_index);
+                continue;
+            }
+
+            // 同じ30cm cellで複数clusterが到達した場合は、seedの高さに近いclusterだけを残す。
+            const auto &candidate = cellIter->second[node.cluster_index];
+            const auto &current = cellIter->second[selectedIter->second];
+            if (isBetterSelectedElevationCluster(candidate, current, seedZ))
+                selectedIter->second = node.cluster_index;
+        }
+
+        RCLCPP_INFO(
+            get_logger(),
+            "Origin-connected elevation clusters: seed=(%ld,%ld,%zu) seed_z=%.3f connection_radius=%.3f connection_z_gap=%.3f connected_clusters=%zu selected_cluster_cells=%zu",
+            seedNode->key.ix, seedNode->key.iy, seedNode->cluster_index, seedZ,
+            elevationClusterConnectionRadius, elevationClusterConnectionZGap, connectedNodes.size(), selected.size());
+        return selected;
+    }
+
+    void mergeElevationClusters(
+        std::vector<ElevationRunningStats> &target,
+        const std::vector<ElevationRunningStats> &source) const
+    {
+        if (source.empty())
+            return;
+        target.insert(target.end(), source.begin(), source.end());
+        target = normalizeElevationClusters(std::move(target));
+    }
+
+    void mergeElevationCell(ElevationSubmapCell &target, const ElevationSubmapCell &source) const
+    {
+        mergeElevationClusters(target.z_clusters, source.z_clusters);
+    }
+
+    ElevationGridKey elevationOutputKeyForPoint(const ElevationLocalPoint &point) const
+    {
+        return ElevationGridKey{
+            static_cast<int64_t>(std::floor(point.x / elevationOutputCellSize)),
+            static_cast<int64_t>(std::floor(point.y / elevationOutputCellSize))};
+    }
+
+    ElevationGridKey elevationClusterKeyForPoint(const ElevationLocalPoint &point) const
+    {
+        return ElevationGridKey{
+            static_cast<int64_t>(std::floor(point.x / elevationClusterCellSize)),
+            static_cast<int64_t>(std::floor(point.y / elevationClusterCellSize))};
+    }
+
+    std::vector<ElevationSubmapCell> extractElevationCells(const std::vector<ElevationLocalPoint> &points) const
+    {
+        std::unordered_map<ElevationGridKey, ElevationRawClusterCell, ElevationGridKeyHash> rawClusterCells;
+        rawClusterCells.reserve(points.size());
+
+        // z-layer判定は粗いcluster cellで行い、最終出力用の細かいcellへ点統計だけを振り分ける。
+        for (const auto &point : points)
+        {
+            if (!std::isfinite(point.x) || !std::isfinite(point.y) || !std::isfinite(point.z))
+                continue;
+            auto &clusterCell = rawClusterCells[elevationClusterKeyForPoint(point)];
+            clusterCell.points.push_back(point);
+            clusterCell.z_values.push_back(point.z);
+        }
+
+        std::unordered_map<ElevationGridKey, ElevationSubmapCell, ElevationGridKeyHash> outputCells;
+        outputCells.reserve(points.size());
+        for (auto &entry : rawClusterCells)
+        {
+            auto &rawCell = entry.second;
+            auto clusters = buildElevationZClusters(std::move(rawCell.z_values));
+            if (clusters.empty())
+                continue;
+
+            for (const auto &point : rawCell.points)
+            {
+                const auto outputKey = elevationOutputKeyForPoint(point);
+                auto &outputCell = outputCells[outputKey];
+                outputCell.ix = outputKey.ix;
+                outputCell.iy = outputKey.iy;
+                outputCell.x = (static_cast<double>(outputKey.ix) + 0.5) * elevationOutputCellSize;
+                outputCell.y = (static_cast<double>(outputKey.iy) + 0.5) * elevationOutputCellSize;
+
+                const size_t clusterIndex = findElevationClusterIndex(clusters, point.z);
+                if (outputCell.z_clusters.size() <= clusterIndex)
+                    outputCell.z_clusters.resize(clusterIndex + 1U);
+                outputCell.z_clusters[clusterIndex].add(point.z);
+            }
+        }
+
+        std::vector<ElevationSubmapCell> cells;
+        cells.reserve(outputCells.size());
+        for (auto &entry : outputCells)
+        {
+            auto &cell = entry.second;
+            cell.z_clusters = normalizeElevationClusters(std::move(cell.z_clusters));
+            if (!cell.z_clusters.empty())
+                cells.push_back(std::move(cell));
+        }
+        std::sort(cells.begin(), cells.end(), [](const auto &lhs, const auto &rhs) {
+            if (lhs.ix != rhs.ix)
+                return lhs.ix < rhs.ix;
+            return lhs.iy < rhs.iy;
+        });
+        return cells;
+    }
+
+    LocalizationVoxelKey localizationVoxelKeyForPoint(const Eigen::Vector3f &point) const
+    {
+        return LocalizationVoxelKey{
+            static_cast<int64_t>(std::floor(static_cast<double>(point.x()) / localizationSubmapLeafSize)),
+            static_cast<int64_t>(std::floor(static_cast<double>(point.y()) / localizationSubmapLeafSize)),
+            static_cast<int64_t>(std::floor(static_cast<double>(point.z()) / localizationSubmapLeafSize))};
+    }
+
+    void ensureKeyframeMapSubmap(size_t keyframeIndex)
+    {
+        while (keyframeMapSubmaps.size() <= keyframeIndex)
+        {
+            const size_t index = keyframeMapSubmaps.size();
+            KeyframeMapSubmap submap;
+            submap.keyframe_index = index;
+            if (index < cloudKeyPoses6D->size())
+            {
+                submap.keyframe_time = cloudKeyPoses6D->points[index].time;
+                submap.initial_keyframe_pose = cloudKeyPoses6D->points[index];
+            }
+            keyframeMapSubmaps.push_back(std::move(submap));
+        }
+    }
+
+    void accumulateKeyframeRawSubmap(
+        size_t keyframeCountBeforeSave,
+        size_t keyframeCountAfterSave,
+        const PointTypePose &scanPose)
+    {
+        if (!saveElevationMap)
+            return;
+        if (keyframeCountAfterSave == 0U)
+            return;
+
+        ++keyframeSubmapProcessedScanCount;
+        const bool assignedToNewKeyframe = keyframeCountAfterSave > keyframeCountBeforeSave;
+        const size_t keyframeIndex = keyframeCountAfterSave - 1U;
+        ensureKeyframeMapSubmap(keyframeIndex);
+
+        if (static_cast<uint64_t>(cloudInfo.cloud_deskewed.width) * cloudInfo.cloud_deskewed.height == 0U)
+        {
+            ++keyframeSubmapSkippedEmptyScanCount;
+            RCLCPP_WARN_THROTTLE(
+                get_logger(), *get_clock(), 5000,
+                "Skip keyframe raw submap accumulation because cloud_deskewed is empty: processed_scans=%zu skipped_empty=%zu",
+                keyframeSubmapProcessedScanCount, keyframeSubmapSkippedEmptyScanCount);
+            return;
+        }
+
+        pcl::PointCloud<PointType> deskewedCloud;
+        pcl::fromROSMsg(cloudInfo.cloud_deskewed, deskewedCloud);
+        if (deskewedCloud.empty())
+        {
+            ++keyframeSubmapSkippedEmptyScanCount;
+            return;
+        }
+
+        KeyframeMapSubmap &submap = keyframeMapSubmaps[keyframeIndex];
+        const PointTypePose keyframePose = submap.initial_keyframe_pose;
+        const Eigen::Affine3f mapFromScan = pclPointToAffine3f(scanPose);
+        const Eigen::Affine3f mapFromKeyframe = pclPointToAffine3f(keyframePose);
+        const Eigen::Affine3f keyframeFromScan = mapFromKeyframe.inverse() * mapFromScan;
+        const double cosYaw = std::cos(keyframePose.yaw);
+        const double sinYaw = std::sin(keyframePose.yaw);
+        std::vector<ElevationLocalPoint> elevationPoints;
+        elevationPoints.reserve(deskewedCloud.size());
+        size_t finiteRawPoints = 0;
+        size_t localizationPoints = 0;
+        size_t elevationInputPoints = 0;
+
+        // 1 scanのraw点を、localizationはkeyframe local XYZ、elevationは重力整列keyframe XY/Zへ同時に集約する。
+        for (const auto &point : deskewedCloud.points)
+        {
+            if (!std::isfinite(point.x) || !std::isfinite(point.y) || !std::isfinite(point.z))
+                continue;
+            ++finiteRawPoints;
+
+            const Eigen::Vector3f scanPoint(point.x, point.y, point.z);
+            const Eigen::Vector3f keyframePoint = keyframeFromScan * scanPoint;
+            if (std::isfinite(keyframePoint.x()) && std::isfinite(keyframePoint.y()) && std::isfinite(keyframePoint.z()))
+            {
+                const float intensity = std::isfinite(point.intensity) ? point.intensity : 0.0f;
+                submap.localization_voxels[localizationVoxelKeyForPoint(keyframePoint)].add(keyframePoint, intensity);
+                ++localizationPoints;
+            }
+
+            const double range = std::sqrt(
+                static_cast<double>(point.x) * point.x + static_cast<double>(point.y) * point.y + static_cast<double>(point.z) * point.z);
+            if (range < elevationMinRange || range > elevationMaxRange)
+                continue;
+
+            const Eigen::Vector3f mapPoint = mapFromScan * scanPoint;
+            const double dx = static_cast<double>(mapPoint.x()) - keyframePose.x;
+            const double dy = static_cast<double>(mapPoint.y()) - keyframePose.y;
+            const double localX = cosYaw * dx + sinYaw * dy;
+            const double localY = -sinYaw * dx + cosYaw * dy;
+            const double localZ = static_cast<double>(mapPoint.z()) - keyframePose.z;
+            if (!std::isfinite(localX) || !std::isfinite(localY) || !std::isfinite(localZ))
+                continue;
+            elevationPoints.push_back(ElevationLocalPoint{localX, localY, localZ});
+            ++elevationInputPoints;
+        }
+
+        auto elevationCells = extractElevationCells(elevationPoints);
+        for (const auto &cell : elevationCells)
+        {
+            const ElevationGridKey key{cell.ix, cell.iy};
+            auto &targetCell = submap.elevation_cells[key];
+            targetCell.ix = cell.ix;
+            targetCell.iy = cell.iy;
+            targetCell.x = cell.x;
+            targetCell.y = cell.y;
+            mergeElevationCell(targetCell, cell);
+        }
+
+        ++submap.scan_count;
+        submap.raw_point_count += finiteRawPoints;
+        submap.localization_point_count += localizationPoints;
+        submap.elevation_input_point_count += elevationInputPoints;
+        keyframeSubmapTotalRawPointCount += finiteRawPoints;
+
+        RCLCPP_INFO_THROTTLE(
+            get_logger(), *get_clock(), 5000,
+            "Keyframe raw submap accumulation: processed_scans=%zu keyframe_submaps=%zu raw_points=%zu localization_voxels=%zu elevation_cells=%zu skipped_empty=%zu assigned_new_keyframe=%d",
+            keyframeSubmapProcessedScanCount, keyframeMapSubmaps.size(), keyframeSubmapTotalRawPointCount,
+            totalLocalizationVoxelCount(keyframeMapSubmaps), totalElevationCellCount(keyframeMapSubmaps),
+            keyframeSubmapSkippedEmptyScanCount, assignedToNewKeyframe ? 1 : 0);
+    }
+
+    template <typename PointT>
+    bool savePcdFile(const std::filesystem::path &path, const pcl::PointCloud<PointT> &cloud) const
+    {
+        const int ret = pcl::io::savePCDFileBinary(path.string(), cloud);
+        if (ret != 0)
+            RCLCPP_ERROR(get_logger(), "Failed to save PCD: %s", path.string().c_str());
+        return ret == 0;
+    }
+
+    bool interpolatePoseForStamp(double stamp, const pcl::PointCloud<PointTypePose> &keyPoses, PointTypePose &poseOut) const
+    {
+        if (keyPoses.empty())
+            return false;
+        if (keyPoses.size() == 1U || stamp <= keyPoses.front().time)
+        {
+            poseOut = keyPoses.front();
+            return true;
+        }
+        if (stamp >= keyPoses.back().time)
+        {
+            poseOut = keyPoses.back();
+            return true;
+        }
+
+        // scan時刻を挟む補正後keyframeを探し、位置は線形、姿勢はquaternion slerpで補間する。
+        for (size_t i = 1; i < keyPoses.size(); ++i)
+        {
+            const auto &after = keyPoses.points[i];
+            if (stamp > after.time)
+                continue;
+            const auto &before = keyPoses.points[i - 1];
+            const double duration = std::max(after.time - before.time, 1.0e-9);
+            const double ratio = std::clamp((stamp - before.time) / duration, 0.0, 1.0);
+
+            poseOut = before;
+            poseOut.x = before.x + static_cast<float>((after.x - before.x) * ratio);
+            poseOut.y = before.y + static_cast<float>((after.y - before.y) * ratio);
+            poseOut.z = before.z + static_cast<float>((after.z - before.z) * ratio);
+            poseOut.time = stamp;
+
+            tf2::Quaternion qBefore;
+            tf2::Quaternion qAfter;
+            qBefore.setRPY(before.roll, before.pitch, before.yaw);
+            qAfter.setRPY(after.roll, after.pitch, after.yaw);
+            qBefore.normalize();
+            qAfter.normalize();
+            tf2::Quaternion qInterp = qBefore.slerp(qAfter, ratio);
+            qInterp.normalize();
+            double roll = 0.0;
+            double pitch = 0.0;
+            double yaw = 0.0;
+            tf2::Matrix3x3(qInterp).getRPY(roll, pitch, yaw);
+            poseOut.roll = static_cast<float>(roll);
+            poseOut.pitch = static_cast<float>(pitch);
+            poseOut.yaw = static_cast<float>(yaw);
+            return true;
+        }
+        poseOut = keyPoses.back();
+        return true;
+    }
+
+    std::string currentUtcTimestamp() const
+    {
+        const auto now = std::chrono::system_clock::now();
+        const std::time_t nowTime = std::chrono::system_clock::to_time_t(now);
+        std::tm utcTime{};
+        gmtime_r(&nowTime, &utcTime);
+        std::ostringstream stream;
+        stream << std::put_time(&utcTime, "%FT%TZ");
+        return stream.str();
+    }
+
+    size_t totalLocalizationVoxelCount(const std::vector<KeyframeMapSubmap> &submaps) const
+    {
+        size_t count = 0;
+        for (const auto &submap : submaps)
+            count += submap.localization_voxels.size();
+        return count;
+    }
+
+    size_t totalElevationCellCount(const std::vector<KeyframeMapSubmap> &submaps) const
+    {
+        size_t count = 0;
+        for (const auto &submap : submaps)
+            count += submap.elevation_cells.size();
+        return count;
+    }
+
+    size_t totalAccumulatedSubmapScanCount(const std::vector<KeyframeMapSubmap> &submaps) const
+    {
+        size_t count = 0;
+        for (const auto &submap : submaps)
+            count += submap.scan_count;
+        return count;
+    }
+
+    bool buildLocalizationCloudFromSubmaps(
+        const std::vector<KeyframeMapSubmap> &submaps,
+        const pcl::PointCloud<PointTypePose> &keyPoses,
+        double globalResolution,
+        pcl::PointCloud<PointType> &localizationCloud) const
+    {
+        localizationCloud.clear();
+        if (submaps.size() != keyPoses.size())
+        {
+            RCLCPP_ERROR(
+                get_logger(),
+                "Cannot save localization map: keyframe submap count (%zu) does not match pose count (%zu).",
+                submaps.size(), keyPoses.size());
+            return false;
+        }
+
+        std::unordered_map<LocalizationVoxelKey, LocalizationVoxelStats, LocalizationVoxelKeyHash> globalVoxels;
+        if (globalResolution > 0.0)
+            globalVoxels.reserve(totalLocalizationVoxelCount(submaps));
+
+        // loop closure補正後poseで各keyframe local submapをglobalへ戻し、保存解像度で再voxel化する。
+        for (const auto &submap : submaps)
+        {
+            if (submap.keyframe_index >= keyPoses.size())
+            {
+                RCLCPP_ERROR(get_logger(), "Cannot save localization map: invalid keyframe submap index %zu.", submap.keyframe_index);
+                return false;
+            }
+            const Eigen::Affine3f mapFromKeyframe = pclPointToAffine3f(keyPoses.points[submap.keyframe_index]);
+            for (const auto &entry : submap.localization_voxels)
+            {
+                const PointType localPoint = entry.second.centroidPoint();
+                const Eigen::Vector3f globalPoint = mapFromKeyframe * Eigen::Vector3f(localPoint.x, localPoint.y, localPoint.z);
+                if (!std::isfinite(globalPoint.x()) || !std::isfinite(globalPoint.y()) || !std::isfinite(globalPoint.z()))
+                    continue;
+                if (globalResolution > 0.0)
+                {
+                    const LocalizationVoxelKey key{
+                        static_cast<int64_t>(std::floor(static_cast<double>(globalPoint.x()) / globalResolution)),
+                        static_cast<int64_t>(std::floor(static_cast<double>(globalPoint.y()) / globalResolution)),
+                        static_cast<int64_t>(std::floor(static_cast<double>(globalPoint.z()) / globalResolution))};
+                    globalVoxels[key].addWeighted(globalPoint, entry.second.sum_intensity, entry.second.count);
+                }
+                else
+                {
+                    PointType outputPoint = localPoint;
+                    outputPoint.x = globalPoint.x();
+                    outputPoint.y = globalPoint.y();
+                    outputPoint.z = globalPoint.z();
+                    localizationCloud.push_back(outputPoint);
+                }
+            }
+        }
+
+        if (globalResolution > 0.0)
+        {
+            localizationCloud.reserve(globalVoxels.size());
+            for (const auto &entry : globalVoxels)
+                localizationCloud.push_back(entry.second.centroidPoint());
+        }
+        return true;
+    }
+
+    bool writeElevationManifest(
+        const std::filesystem::path &saveDirectory,
+        size_t processedScanCount,
+        size_t skippedEmptyScanCount,
+        const std::vector<KeyframeMapSubmap> &submaps,
+        size_t keyframeCount,
+        size_t localizationPointCount,
+        size_t globalElevationCellCount) const
+    {
+        const auto manifestPath = saveDirectory / "elevation_manifest.yaml";
+        std::ofstream manifest(manifestPath);
+        if (!manifest)
+        {
+            RCLCPP_ERROR(get_logger(), "Failed to open elevation manifest: %s", manifestPath.string().c_str());
+            return false;
+        }
+
+        // SaveMap responseはsuccessのみのため、成果物の意味と生成時パラメータをmanifestへ集約する。
+        manifest << "format_version: 1\n";
+        manifest << "created_at: " << currentUtcTimestamp() << "\n";
+        manifest << "source: lio_sam/save_map\n";
+        manifest << "localization_source: cloudInfo.cloud_deskewed\n";
+        manifest << "localization_submap_coordinate: keyframe_local_xyz\n";
+        manifest << "elevation_submap_coordinate: gravity_aligned_keyframe_xy_relative_z\n";
+        manifest << "correction: optimized_keyframe_pose_rigid_submap\n";
+        manifest << "save_lio_sam_standard_pcds: " << (saveLioSamStandardPcds ? "true" : "false") << "\n";
+        manifest << "frame_id: " << odometryFrame << "\n";
+        manifest << "localization_pcd: localization_map.pcd\n";
+        manifest << "global_elevation_csv: global_elevation_map.csv\n";
+        manifest << "parameters:\n";
+        manifest << "  localization_submap_leaf_size: " << localizationSubmapLeafSize << "\n";
+        manifest << "  elevation_output_cell_size: " << elevationOutputCellSize << "\n";
+        manifest << "  elevation_cluster_cell_size: " << elevationClusterCellSize << "\n";
+        manifest << "  cell_z_cluster_gap: " << elevationCellZClusterGap << "\n";
+        manifest << "  cluster_connection_radius: " << elevationClusterConnectionRadius << "\n";
+        manifest << "  cluster_connection_z_gap: " << elevationClusterConnectionZGap << "\n";
+        manifest << "  elevation_min_range: " << elevationMinRange << "\n";
+        manifest << "  elevation_max_range: " << elevationMaxRange << "\n";
+        manifest << "counts:\n";
+        manifest << "  keyframes: " << keyframeCount << "\n";
+        manifest << "  processed_scans: " << processedScanCount << "\n";
+        manifest << "  skipped_empty_scans: " << skippedEmptyScanCount << "\n";
+        manifest << "  accumulated_scans: " << totalAccumulatedSubmapScanCount(submaps) << "\n";
+        manifest << "  keyframe_submaps: " << submaps.size() << "\n";
+        manifest << "  localization_submap_voxels: " << totalLocalizationVoxelCount(submaps) << "\n";
+        manifest << "  localization_points: " << localizationPointCount << "\n";
+        manifest << "  elevation_submap_cells: " << totalElevationCellCount(submaps) << "\n";
+        manifest << "  global_elevation_cells: " << globalElevationCellCount << "\n";
+        return static_cast<bool>(manifest);
+    }
+
+    bool writeGlobalElevationMap(
+        const std::filesystem::path &saveDirectory,
+        const std::vector<KeyframeMapSubmap> &submaps,
+        const pcl::PointCloud<PointTypePose> &keyPoses,
+        size_t *globalCellCount) const
+    {
+        std::unordered_map<ElevationGridKey, ElevationSubmapCell, ElevationGridKeyHash> globalCells;
+        globalCells.reserve(totalElevationCellCount(submaps));
+
+        // elevation submapもkeyframe localの剛体mapとして扱い、補正後keyframe poseでglobal cellへ再配置する。
+        for (const auto &submap : submaps)
+        {
+            if (submap.keyframe_index >= keyPoses.size())
+            {
+                RCLCPP_ERROR(get_logger(), "Cannot save elevation map: invalid keyframe submap index %zu.", submap.keyframe_index);
+                return false;
+            }
+            const auto &pose = keyPoses.points[submap.keyframe_index];
+            const double cosYaw = std::cos(pose.yaw);
+            const double sinYaw = std::sin(pose.yaw);
+
+            for (const auto &entry : submap.elevation_cells)
+            {
+                const auto &cell = entry.second;
+                const double globalX = pose.x + cosYaw * cell.x - sinYaw * cell.y;
+                const double globalY = pose.y + sinYaw * cell.x + cosYaw * cell.y;
+                const ElevationGridKey key{
+                    static_cast<int64_t>(std::floor(globalX / elevationOutputCellSize)),
+                    static_cast<int64_t>(std::floor(globalY / elevationOutputCellSize))};
+                ElevationSubmapCell adjustedCell = cell;
+                adjustedCell.ix = key.ix;
+                adjustedCell.iy = key.iy;
+                adjustedCell.x = (static_cast<double>(key.ix) + 0.5) * elevationOutputCellSize;
+                adjustedCell.y = (static_cast<double>(key.iy) + 0.5) * elevationOutputCellSize;
+                for (auto &cluster : adjustedCell.z_clusters)
+                {
+                    cluster.z_min += pose.z;
+                    cluster.z_max += pose.z;
+                    cluster.z_mean += pose.z;
+                }
+
+                auto &targetCell = globalCells[key];
+                targetCell.ix = key.ix;
+                targetCell.iy = key.iy;
+                targetCell.x = adjustedCell.x;
+                targetCell.y = adjustedCell.y;
+                mergeElevationCell(targetCell, adjustedCell);
+            }
+        }
+
+        std::vector<ElevationGridKey> sortedKeys;
+        sortedKeys.reserve(globalCells.size());
+        for (const auto &entry : globalCells)
+            sortedKeys.push_back(entry.first);
+        std::sort(sortedKeys.begin(), sortedKeys.end(), [](const auto &lhs, const auto &rhs) {
+            if (lhs.ix != rhs.ix)
+                return lhs.ix < rhs.ix;
+            return lhs.iy < rhs.iy;
+        });
+
+        const auto csvPath = saveDirectory / "global_elevation_map.csv";
+        std::ofstream csv(csvPath);
+        if (!csv)
+        {
+            RCLCPP_ERROR(get_logger(), "Failed to open global elevation CSV: %s", csvPath.string().c_str());
+            return false;
+        }
+
+        std::unordered_map<ElevationGridKey, std::vector<ElevationRunningStats>, ElevationGridKeyHash> globalClusterCells;
+        globalClusterCells.reserve(globalCells.size());
+        for (const auto &entry : globalCells)
+        {
+            const auto &cell = entry.second;
+            const ElevationGridKey clusterKey{
+                static_cast<int64_t>(std::floor(cell.x / elevationClusterCellSize)),
+                static_cast<int64_t>(std::floor(cell.y / elevationClusterCellSize))};
+            mergeElevationClusters(globalClusterCells[clusterKey], cell.z_clusters);
+        }
+        const auto selectedClusterCells = selectOriginConnectedElevationClusters(globalClusterCells);
+
+        csv << "ix,iy,x,y,count,z_min,z_max,z_mean,z_m2,lowest_cluster_count,lowest_cluster_min,lowest_cluster_max,lowest_cluster_mean,height_range\n";
+        csv << std::fixed << std::setprecision(6);
+        size_t writtenCellCount = 0;
+        for (const auto &key : sortedKeys)
+        {
+            const auto &cell = globalCells.at(key);
+            const ElevationGridKey clusterKey{
+                static_cast<int64_t>(std::floor(cell.x / elevationClusterCellSize)),
+                static_cast<int64_t>(std::floor(cell.y / elevationClusterCellSize))};
+            const auto clusterIter = globalClusterCells.find(clusterKey);
+            if (clusterIter == globalClusterCells.end() || clusterIter->second.empty())
+                continue;
+            const auto selectedIter = selectedClusterCells.find(clusterKey);
+            if (selectedIter == selectedClusterCells.end() || selectedIter->second >= clusterIter->second.size())
+                continue;
+            const auto &selectedGlobalCluster = clusterIter->second[selectedIter->second];
+
+            ElevationRunningStats selectedStats;
+            for (const auto &cluster : cell.z_clusters)
+            {
+                if (elevationClusterOverlaps(cluster, selectedGlobalCluster))
+                    selectedStats.merge(cluster.count, cluster.z_min, cluster.z_max, cluster.z_mean, cluster.z_m2);
+            }
+            if (selectedStats.count == 0)
+                continue;
+            csv << key.ix << ',' << key.iy << ','
+                << (static_cast<double>(key.ix) + 0.5) * elevationOutputCellSize << ','
+                << (static_cast<double>(key.iy) + 0.5) * elevationOutputCellSize << ','
+                << selectedStats.count << ',' << selectedStats.z_min << ',' << selectedStats.z_max << ',' << selectedStats.z_mean << ',' << selectedStats.z_m2 << ','
+                << selectedStats.count << ',' << selectedStats.z_min << ',' << selectedStats.z_max << ',' << selectedStats.z_mean << ','
+                << selectedStats.z_max - selectedStats.z_min << '\n';
+            ++writtenCellCount;
+        }
+        if (!csv)
+        {
+            RCLCPP_ERROR(get_logger(), "Failed to write global elevation CSV: %s", csvPath.string().c_str());
+            return false;
+        }
+
+        if (globalCellCount != nullptr)
+            *globalCellCount = writtenCellCount;
+        RCLCPP_INFO(
+            get_logger(),
+            "Elevation map save stats: keyframe_submaps=%zu elevation_submap_cells=%zu global_output_candidate_cells=%zu global_cluster_cells=%zu selected_cluster_cells=%zu global_elevation_cells=%zu",
+            submaps.size(), totalElevationCellCount(submaps), sortedKeys.size(), globalClusterCells.size(), selectedClusterCells.size(), writtenCellCount);
+        return true;
+    }
+
+    bool saveMapToFiles(const std::shared_ptr<lio_sam::srv::SaveMap::Request> req)
+    {
+        const auto saveDirectory = resolveSaveMapDirectory(req->destination);
+        pcl::PointCloud<PointType>::Ptr keyPoses3D(new pcl::PointCloud<PointType>());
+        pcl::PointCloud<PointTypePose>::Ptr keyPoses6D(new pcl::PointCloud<PointTypePose>());
+        std::vector<pcl::PointCloud<PointType>::Ptr> cornerFrames;
+        std::vector<pcl::PointCloud<PointType>::Ptr> surfFrames;
+        std::vector<KeyframeMapSubmap> submaps;
+        size_t processedScanCount = 0;
+        size_t skippedEmptyScanCount = 0;
+
+        {
+            std::lock_guard<std::mutex> lock(mtx);
+            if (cloudKeyPoses3D->empty() || cloudKeyPoses6D->empty())
+            {
+                RCLCPP_ERROR(get_logger(), "Cannot save map: no LIO-SAM keyframes are available.");
+                return false;
+            }
+
+            // 保存処理中にloop closure threadがkeyframeを更新しても一貫したsnapshotで出力する。
+            *keyPoses3D = *cloudKeyPoses3D;
+            *keyPoses6D = *cloudKeyPoses6D;
+            if (saveLioSamStandardPcds)
+            {
+                cornerFrames.reserve(cornerCloudKeyFrames.size());
+                surfFrames.reserve(surfCloudKeyFrames.size());
+                for (const auto &cloud : cornerCloudKeyFrames)
+                    cornerFrames.push_back(pcl::PointCloud<PointType>::Ptr(new pcl::PointCloud<PointType>(*cloud)));
+                for (const auto &cloud : surfCloudKeyFrames)
+                    surfFrames.push_back(pcl::PointCloud<PointType>::Ptr(new pcl::PointCloud<PointType>(*cloud)));
+            }
+            submaps = keyframeMapSubmaps;
+            processedScanCount = keyframeSubmapProcessedScanCount;
+            skippedEmptyScanCount = keyframeSubmapSkippedEmptyScanCount;
+        }
+
+        if (submaps.size() != keyPoses6D->size())
+        {
+            RCLCPP_ERROR(
+                get_logger(),
+                "Cannot save map: keyframe submap count (%zu) does not match pose count (%zu). Is saveElevationMap enabled from startup?",
+                submaps.size(), keyPoses6D->size());
+            return false;
+        }
+        if (saveLioSamStandardPcds && (cornerFrames.size() != keyPoses6D->size() || surfFrames.size() != keyPoses6D->size()))
+        {
+            RCLCPP_ERROR(get_logger(), "Cannot save map: keyframe cloud count does not match pose count.");
+            return false;
+        }
+
+        try
+        {
+            std::filesystem::remove_all(saveDirectory);
+            std::filesystem::create_directories(saveDirectory);
+        }
+        catch (const std::filesystem::filesystem_error &error)
+        {
+            RCLCPP_ERROR(get_logger(), "Failed to prepare save directory %s: %s", saveDirectory.string().c_str(), error.what());
+            return false;
+        }
+
+        RCLCPP_INFO(get_logger(), "Saving map to %s", saveDirectory.string().c_str());
+        bool ok = true;
+
+        if (saveLioSamStandardPcds)
+        {
+            ok = savePcdFile(saveDirectory / "trajectory.pcd", *keyPoses3D) && ok;
+            ok = savePcdFile(saveDirectory / "transformations.pcd", *keyPoses6D) && ok;
+
+            pcl::PointCloud<PointType>::Ptr globalCornerCloud(new pcl::PointCloud<PointType>());
+            pcl::PointCloud<PointType>::Ptr globalSurfCloud(new pcl::PointCloud<PointType>());
+            pcl::PointCloud<PointType>::Ptr globalMapCloud(new pcl::PointCloud<PointType>());
+            for (size_t i = 0; i < keyPoses6D->size(); ++i)
+            {
+                *globalCornerCloud += *transformPointCloud(cornerFrames[i], &keyPoses6D->points[i]);
+                *globalSurfCloud += *transformPointCloud(surfFrames[i], &keyPoses6D->points[i]);
+            }
+            *globalMapCloud += *globalCornerCloud;
+            *globalMapCloud += *globalSurfCloud;
+
+            if (req->resolution > 0.0)
+            {
+                pcl::VoxelGrid<PointType> cornerFilter;
+                pcl::VoxelGrid<PointType> surfFilter;
+                pcl::PointCloud<PointType>::Ptr globalCornerCloudDS(new pcl::PointCloud<PointType>());
+                pcl::PointCloud<PointType>::Ptr globalSurfCloudDS(new pcl::PointCloud<PointType>());
+                const float leafSize = static_cast<float>(req->resolution);
+
+                // 標準PCD群を明示保存する場合だけ、従来どおりfeature mapを生成してdownsampleする。
+                cornerFilter.setLeafSize(leafSize, leafSize, leafSize);
+                cornerFilter.setInputCloud(globalCornerCloud);
+                cornerFilter.filter(*globalCornerCloudDS);
+                surfFilter.setLeafSize(leafSize, leafSize, leafSize);
+                surfFilter.setInputCloud(globalSurfCloud);
+                surfFilter.filter(*globalSurfCloudDS);
+                ok = savePcdFile(saveDirectory / "CornerMap.pcd", *globalCornerCloudDS) && ok;
+                ok = savePcdFile(saveDirectory / "SurfMap.pcd", *globalSurfCloudDS) && ok;
+            }
+            else
+            {
+                ok = savePcdFile(saveDirectory / "CornerMap.pcd", *globalCornerCloud) && ok;
+                ok = savePcdFile(saveDirectory / "SurfMap.pcd", *globalSurfCloud) && ok;
+            }
+
+            ok = savePcdFile(saveDirectory / "GlobalMap.pcd", *globalMapCloud) && ok;
+        }
+
+        pcl::PointCloud<PointType> localizationCloud;
+        if (!buildLocalizationCloudFromSubmaps(submaps, *keyPoses6D, req->resolution, localizationCloud))
+            return false;
+        if (localizationCloud.empty())
+        {
+            RCLCPP_ERROR(get_logger(), "Cannot save map: localization raw submap is empty.");
+            return false;
+        }
+        ok = savePcdFile(saveDirectory / "localization_map.pcd", localizationCloud) && ok;
+
+        size_t globalElevationCellCount = 0;
+        ok = writeGlobalElevationMap(saveDirectory, submaps, *keyPoses6D, &globalElevationCellCount) && ok;
+        ok = writeElevationManifest(
+            saveDirectory,
+            processedScanCount,
+            skippedEmptyScanCount,
+            submaps,
+            keyPoses6D->size(),
+            localizationCloud.size(),
+            globalElevationCellCount) && ok;
+
+        RCLCPP_INFO(
+            get_logger(),
+            "Map save completed: success=%d keyframes=%zu keyframe_submaps=%zu localization_points=%zu elevation_cells=%zu output=%s",
+            ok ? 1 : 0, keyPoses6D->size(), submaps.size(), localizationCloud.size(), globalElevationCellCount,
+            saveDirectory.string().c_str());
+        return ok;
+    }
+
     void laserCloudInfoHandler(const lio_sam::msg::CloudInfo::SharedPtr msgIn)
     {
         // extract time stamp
@@ -359,7 +1449,12 @@ public:
 
             scan2MapOptimization();
 
+            const size_t keyframeCountBeforeSave = cloudKeyPoses6D->size();
+            const PointTypePose scanPoseAfterOptimization = trans2PointTypePose(transformTobeMapped);
+
             saveKeyFramesAndFactor();
+
+            accumulateKeyframeRawSubmap(keyframeCountBeforeSave, cloudKeyPoses6D->size(), scanPoseAfterOptimization);
 
             correctPoses();
 
@@ -442,17 +1537,17 @@ public:
                                   gtsam::Point3(transformIn[3], transformIn[4], transformIn[5]));
     }
 
-    Eigen::Affine3f pclPointToAffine3f(PointTypePose thisPoint)
+    Eigen::Affine3f pclPointToAffine3f(PointTypePose thisPoint) const
     {
         return pcl::getTransformation(thisPoint.x, thisPoint.y, thisPoint.z, thisPoint.roll, thisPoint.pitch, thisPoint.yaw);
     }
 
-    Eigen::Affine3f trans2Affine3f(float transformIn[])
+    Eigen::Affine3f trans2Affine3f(float transformIn[]) const
     {
         return pcl::getTransformation(transformIn[3], transformIn[4], transformIn[5], transformIn[0], transformIn[1], transformIn[2]);
     }
 
-    PointTypePose trans2PointTypePose(float transformIn[])
+    PointTypePose trans2PointTypePose(float transformIn[]) const
     {
         PointTypePose thisPose6D;
         thisPose6D.x = transformIn[3];

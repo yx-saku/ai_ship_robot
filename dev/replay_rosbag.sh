@@ -11,7 +11,6 @@ SLAM_RVIZ_CONFIG="${WORKSPACE_ROOT}/ros2_ws/src/ai_ship_robot_slam/rviz/lio_sam.
 SIMULATION_RVIZ_CONFIG="${SIM_ROOT}/ros2_ws/src/ai_ship_robot_gazebo/config/mid360_points.rviz"
 ROSBAG_PID=""
 RVIZ_PID=""
-MAP_SAVER_PID=""
 POINTCLOUD_BRIDGE_PID=""
 ROSBAG_ROOT="${WORKSPACE_ROOT}/outputs/rosbag2"
 
@@ -28,7 +27,10 @@ Options:
   --rate VALUE         Set rosbag playback rate. Default: 1.0
   --start-offset SEC   Start playback after the given offset. Default: 0
   --loop               Loop rosbag playback.
-  --map                Save accumulated map outputs by calling /save_maps after replay.
+  --map                Save map outputs by calling /lio_sam/save_map after replay.
+                       Requires a LIO-SAM mapping launch to be running separately.
+  --destination PATH   Save map outputs to PATH. Default: outputs/cloud_map/map_YYYYmmdd_HHMMSS
+  --resolution N       Downsample resolution passed to /lio_sam/save_map. Default: 0.10
   -h, --help           Show this help.
 EOF
 }
@@ -163,10 +165,6 @@ cleanup_background_processes() {
     kill -INT "${RVIZ_PID}" 2>/dev/null || kill -TERM "${RVIZ_PID}" 2>/dev/null || true
     wait "${RVIZ_PID}" 2>/dev/null || true
   fi
-  if [[ -n "${MAP_SAVER_PID}" ]] && kill -0 "${MAP_SAVER_PID}" 2>/dev/null; then
-    kill -INT "${MAP_SAVER_PID}" 2>/dev/null || kill -TERM "${MAP_SAVER_PID}" 2>/dev/null || true
-    wait "${MAP_SAVER_PID}" 2>/dev/null || true
-  fi
   if [[ -n "${POINTCLOUD_BRIDGE_PID}" ]] && kill -0 "${POINTCLOUD_BRIDGE_PID}" 2>/dev/null; then
     kill -INT "${POINTCLOUD_BRIDGE_PID}" 2>/dev/null || kill -TERM "${POINTCLOUD_BRIDGE_PID}" 2>/dev/null || true
     wait "${POINTCLOUD_BRIDGE_PID}" 2>/dev/null || true
@@ -182,6 +180,8 @@ PLAY_RATE="1.0"
 START_OFFSET="0"
 LOOP_PLAYBACK=false
 SAVE_MAP=false
+MAP_DESTINATION=""
+MAP_RESOLUTION="0.10"
 
 if [[ $# -gt 0 && "$1" != "-h" && "$1" != "--help" ]]; then
   if [[ "$1" == "--mode" || "$1" == --mode=* ]]; then
@@ -239,6 +239,20 @@ while [[ $# -gt 0 ]]; do
     --map)
       SAVE_MAP=true
       ;;
+    --destination=*)
+      MAP_DESTINATION="${1#*=}"
+      ;;
+    --destination)
+      shift
+      MAP_DESTINATION="$(require_value --destination "${1:-}")"
+      ;;
+    --resolution=*)
+      MAP_RESOLUTION="${1#*=}"
+      ;;
+    --resolution)
+      shift
+      MAP_RESOLUTION="$(require_value --resolution "${1:-}")"
+      ;;
     *:=*)
       echo "Do not use ROS 2 launch argument syntax here: $1" >&2
       echo "Use shell options instead. Run with --help to see available options." >&2
@@ -291,11 +305,6 @@ echo "Rosbag replay: ${BAG_PATH}" >&2
 ros2 run ai_ship_robot_slam livox_custommsg_to_pointcloud2_node --ros-args -p use_sim_time:=true &
 POINTCLOUD_BRIDGE_PID=$!
 sleep 1
-if [[ "${SAVE_MAP}" == "true" ]]; then
-  ros2 run ai_ship_robot_slam map_saver_node --ros-args -p use_sim_time:=true &
-  MAP_SAVER_PID=$!
-  sleep 1
-fi
 rviz2 -d "${RVIZ_CONFIG}" &
 RVIZ_PID=$!
 sleep 2
@@ -312,7 +321,12 @@ if [[ "${play_status}" -ne 0 ]]; then
 fi
 
 if [[ "${SAVE_MAP}" == "true" ]]; then
-  ros2 service call /save_maps std_srvs/srv/Trigger '{}'
+  save_script="save_maps.sh"
+  save_args=(--resolution "${MAP_RESOLUTION}")
+  if [[ -n "${MAP_DESTINATION}" ]]; then
+    save_args+=(--destination "${MAP_DESTINATION}")
+  fi
+  bash "${WORKSPACE_ROOT}/scripts/${save_script}" "${save_args[@]}"
 fi
 
 # 再生完了後もRVizを残し、結果確認中にwindowが自動で閉じないようにする。

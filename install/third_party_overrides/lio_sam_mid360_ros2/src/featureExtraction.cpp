@@ -264,8 +264,9 @@ public:
     {
         // free cloud info memory
         freeCloudInfoMemory();
-        // mapOptimizationのscan matchingにはfeature点群だけを渡すため、全点deskew済み点群だけを落とす。
-        cloudInfo.cloud_deskewed = sensor_msgs::msg::PointCloud2();
+        // map保存用raw submap蓄積またはraw publishで後段が必要な場合だけ、重いdeskew済み全点群を残す。
+        if (!publishCloudRegisteredRaw && !saveElevationMap)
+            cloudInfo.cloud_deskewed = sensor_msgs::msg::PointCloud2();
         // save newly extracted features
         // mapOptimizationへ渡すCloudInfo点群は常に作り、外部feature topicは診断時だけpublishする。
         pcl::toROSMsg(*cornerCloud, cloudInfo.cloud_corner);

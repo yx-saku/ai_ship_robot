@@ -6,26 +6,30 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 WORKSPACE_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
 SIM_ROOT="${WORKSPACE_ROOT}/sim"
 THIRD_PARTY_UNDERLAY_SETUP="/opt/ai_ship_robot/ros_underlay/${ROS_DISTRO}/third_party_ws/install/setup.bash"
-SERVICE_NAME="/save_maps"
-SERVICE_TYPE="std_srvs/srv/Trigger"
-SERVICE_REQUEST='{}'
+SERVICE_NAME="/lio_sam/save_map"
+SERVICE_TYPE="lio_sam/srv/SaveMap"
+CLOUD_MAP_ROOT="${WORKSPACE_ROOT}/outputs/cloud_map"
+MAP_DESTINATION="${MAP_DESTINATION:-}"
+MAP_RESOLUTION="${MAP_RESOLUTION:-0.10}"
 WAIT_TIMEOUT_SECONDS="${WAIT_FOR_MAP_SAVE_SERVICE_TIMEOUT_SECONDS:-30}"
 CALL_TIMEOUT_SECONDS="${SAVE_MAPS_TIMEOUT_SECONDS:-300}"
 
 usage() {
   cat <<'EOF'
-Usage: bash scripts/save_maps.sh [OPTIONS]
+Usage: bash <this script> [OPTIONS]
 
 Options:
-  --wait-timeout SEC   Max seconds to wait for /save_maps service. Default: 30
+  --destination PATH   Save map outputs to PATH. Default: outputs/cloud_map/map_YYYYmmdd_HHMMSS
+  --resolution N       Downsample resolution passed to /lio_sam/save_map. Default: 0.10
+  --wait-timeout SEC   Max seconds to wait for /lio_sam/save_map service. Default: 30
                        Use 0 to wait without timeout.
   --call-timeout SEC   Max seconds to wait for the save request itself. Default: 300
                        Use 0 to wait without timeout.
   -h, --help           Show this help.
 
 Examples:
-  bash scripts/save_maps.sh
-  bash scripts/save_maps.sh --wait-timeout 60 --call-timeout 600
+  bash <this script>
+  bash <this script> --destination outputs/cloud_map/manual_map --resolution 0.10
 EOF
 }
 
@@ -72,13 +76,29 @@ source_runtime_environment() {
   fi
 }
 
+default_map_output_dir() {
+  printf '%s/map_%s' "${CLOUD_MAP_ROOT}" "$(date +%Y%m%d_%H%M%S)"
+}
+
+resolve_map_destination() {
+  local destination="${MAP_DESTINATION}"
+
+  if [[ -z "${destination}" ]]; then
+    destination="$(default_map_output_dir)"
+  fi
+  if [[ "${destination}" != /* ]]; then
+    destination="${WORKSPACE_ROOT}/${destination}"
+  fi
+  printf '%s' "${destination}"
+}
+
 wait_for_service() {
   local started_seconds=${SECONDS}
   local elapsed_seconds=0
   local last_log_seconds=0
   local service_list=""
 
-  echo "Waiting for map saver service ${SERVICE_NAME}..." >&2
+  echo "Waiting for LIO-SAM save_map service ${SERVICE_NAME}..." >&2
   while true; do
     service_list="$(timeout 5s ros2 service list --no-daemon 2>/dev/null || true)"
     if grep -Fxq "${SERVICE_NAME}" <<< "${service_list}"; then
@@ -89,13 +109,13 @@ wait_for_service() {
     if [[ "${WAIT_TIMEOUT_SECONDS}" != "0" &&
           "${WAIT_TIMEOUT_SECONDS}" != "0.0" &&
           "${elapsed_seconds}" -ge "${WAIT_TIMEOUT_SECONDS}" ]]; then
-      echo "Timed out waiting for map saver service after ${elapsed_seconds}s." >&2
+      echo "Timed out waiting for LIO-SAM save_map service after ${elapsed_seconds}s." >&2
       return 1
     fi
 
     # 長時間待機時も進捗を出し、停止ではなく待機中だと判別できるようにする。
     if (( SECONDS - last_log_seconds >= 5 )); then
-      echo "Still waiting for map saver service ${SERVICE_NAME}." >&2
+      echo "Still waiting for LIO-SAM save_map service ${SERVICE_NAME}." >&2
       last_log_seconds=${SECONDS}
     fi
     sleep 0.5
@@ -103,11 +123,16 @@ wait_for_service() {
 }
 
 request_map_save() {
+  local destination="$(resolve_map_destination)"
+  local localization_pcd="${destination}/localization_map.pcd"
+  local elevation_manifest="${destination}/elevation_manifest.yaml"
+  local elevation_csv="${destination}/global_elevation_map.csv"
+  local service_request="{resolution: ${MAP_RESOLUTION}, destination: \"${destination}\"}"
   local call_output=""
   local call_status=0
-  local call_cmd=(ros2 service call "${SERVICE_NAME}" "${SERVICE_TYPE}" "${SERVICE_REQUEST}")
+  local call_cmd=(ros2 service call "${SERVICE_NAME}" "${SERVICE_TYPE}" "${service_request}")
 
-  echo "Starting map outputs save request." >&2
+  echo "Starting map outputs save request: destination=${destination} resolution=${MAP_RESOLUTION}" >&2
   set +e
   if [[ "${CALL_TIMEOUT_SECONDS}" == "0" || "${CALL_TIMEOUT_SECONDS}" == "0.0" ]]; then
     call_output="$("${call_cmd[@]}" 2>&1)"
@@ -124,6 +149,10 @@ request_map_save() {
           "${call_output}" == *"success: true"* ||
           "${call_output}" == *"success: True"* ) ]]; then
     echo "Map outputs save completed: ${call_output//$'\n'/ }" >&2
+    echo "output_dir=${destination}" >&2
+    echo "localization_map=${localization_pcd}" >&2
+    echo "elevation_manifest=${elevation_manifest}" >&2
+    echo "global_elevation_csv=${elevation_csv}" >&2
     return 0
   fi
 
@@ -137,6 +166,22 @@ parse_args() {
       --wait-timeout)
         WAIT_TIMEOUT_SECONDS="$(require_value "$1" "${2:-}")"
         shift 2
+        ;;
+      --destination)
+        MAP_DESTINATION="$(require_value "$1" "${2:-}")"
+        shift 2
+        ;;
+      --destination=*)
+        MAP_DESTINATION="${1#*=}"
+        shift
+        ;;
+      --resolution)
+        MAP_RESOLUTION="$(require_value "$1" "${2:-}")"
+        shift 2
+        ;;
+      --resolution=*)
+        MAP_RESOLUTION="${1#*=}"
+        shift
         ;;
       --call-timeout)
         CALL_TIMEOUT_SECONDS="$(require_value "$1" "${2:-}")"
