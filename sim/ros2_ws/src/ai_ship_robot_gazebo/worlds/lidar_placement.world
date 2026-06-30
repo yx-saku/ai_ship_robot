@@ -399,16 +399,68 @@
 
     <model name="dock_wall_north">
       <static>true</static>
-      <pose>0 5.0 1.0 0 0 0</pose>
-      <link name="link">
+      <!-- ロボット側の壁面が連続するよう、外側へ底辺約1.0m・奥行き約0.5mの三角形くぼみを作る。 -->
+      <link name="left_straight_link">
+        <pose>-3.25 5.0 1.0 0 0 0</pose>
         <collision name="collision">
           <geometry>
-            <box><size>12.0 0.25 2.0</size></box>
+            <box><size>5.50 0.25 2.0</size></box>
           </geometry>
         </collision>
         <visual name="visual">
           <geometry>
-            <box><size>12.0 0.25 2.0</size></box>
+            <box><size>5.50 0.25 2.0</size></box>
+          </geometry>
+          <material>
+            <ambient>0.45 0.42 0.38 1</ambient>
+            <diffuse>0.45 0.42 0.38 1</diffuse>
+          </material>
+        </visual>
+      </link>
+      <link name="right_straight_link">
+        <pose>3.25 5.0 1.0 0 0 0</pose>
+        <collision name="collision">
+          <geometry>
+            <box><size>5.50 0.25 2.0</size></box>
+          </geometry>
+        </collision>
+        <visual name="visual">
+          <geometry>
+            <box><size>5.50 0.25 2.0</size></box>
+          </geometry>
+          <material>
+            <ambient>0.45 0.42 0.38 1</ambient>
+            <diffuse>0.45 0.42 0.38 1</diffuse>
+          </material>
+        </visual>
+      </link>
+      <link name="triangular_notch_left_link">
+        <pose>-0.338388 5.213388 1.0 0 0 0.78539816339</pose>
+        <collision name="collision">
+          <geometry>
+            <box><size>0.707107 0.25 2.0</size></box>
+          </geometry>
+        </collision>
+        <visual name="visual">
+          <geometry>
+            <box><size>0.707107 0.25 2.0</size></box>
+          </geometry>
+          <material>
+            <ambient>0.45 0.42 0.38 1</ambient>
+            <diffuse>0.45 0.42 0.38 1</diffuse>
+          </material>
+        </visual>
+      </link>
+      <link name="triangular_notch_right_link">
+        <pose>0.338388 5.213388 1.0 0 0 -0.78539816339</pose>
+        <collision name="collision">
+          <geometry>
+            <box><size>0.707107 0.25 2.0</size></box>
+          </geometry>
+        </collision>
+        <visual name="visual">
+          <geometry>
+            <box><size>0.707107 0.25 2.0</size></box>
           </geometry>
           <material>
             <ambient>0.45 0.42 0.38 1</ambient>

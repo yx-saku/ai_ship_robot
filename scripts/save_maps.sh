@@ -9,40 +9,35 @@ THIRD_PARTY_UNDERLAY_SETUP="/opt/ai_ship_robot/ros_underlay/${ROS_DISTRO}/third_
 SERVICE_NAME="/lio_sam/save_map"
 SERVICE_TYPE="lio_sam/srv/SaveMap"
 CLOUD_MAP_ROOT="${WORKSPACE_ROOT}/outputs/cloud_map"
-MAP_DESTINATION="${MAP_DESTINATION:-}"
-MAP_RESOLUTION="${MAP_RESOLUTION:-0.10}"
+GROUND_CANDIDATE_CLOUD_NAME="ground_candidate_cloud.pcd"
+GROUND_CANDIDATE_MAP_NAME="ground_candidate_map.pgm"
+GROUND_CANDIDATE_PNG_NAME="ground_candidate_map.png"
+GROUND_CANDIDATE_YAML_NAME="ground_candidate_map.yaml"
+GROUND_COARSE_CLOUD_NAME="ground_coarse_cloud.pcd"
+GROUND_COARSE_MAP_NAME="ground_coarse_map.pgm"
+GROUND_COARSE_PNG_NAME="ground_coarse_map.png"
+GROUND_COARSE_YAML_NAME="ground_coarse_map.yaml"
+GROUND_CANDIDATE_CONFIG_PATH="${GROUND_CANDIDATE_CONFIG_PATH:-${WORKSPACE_ROOT}/ros2_ws/src/ai_ship_robot_slam/config/lio_sam_mid360.yaml}"
+MAP_DESTINATION=""
+SAVE_MAP_REQUEST_RESOLUTION="0.0"
 WAIT_TIMEOUT_SECONDS="${WAIT_FOR_MAP_SAVE_SERVICE_TIMEOUT_SECONDS:-30}"
 CALL_TIMEOUT_SECONDS="${SAVE_MAPS_TIMEOUT_SECONDS:-300}"
 
 usage() {
   cat <<'EOF'
-Usage: bash <this script> [OPTIONS]
+Usage: bash <this script> [DESTINATION]
+
+Arguments:
+  DESTINATION   Save map outputs to this directory.
+                Default: outputs/cloud_map/map_YYYYmmdd_HHMMSS
 
 Options:
-  --destination PATH   Save map outputs to PATH. Default: outputs/cloud_map/map_YYYYmmdd_HHMMSS
-  --resolution N       Downsample resolution passed to /lio_sam/save_map. Default: 0.10
-  --wait-timeout SEC   Max seconds to wait for /lio_sam/save_map service. Default: 30
-                       Use 0 to wait without timeout.
-  --call-timeout SEC   Max seconds to wait for the save request itself. Default: 300
-                       Use 0 to wait without timeout.
-  -h, --help           Show this help.
+  -h, --help    Show this help.
 
 Examples:
   bash <this script>
-  bash <this script> --destination outputs/cloud_map/manual_map --resolution 0.10
+  bash <this script> outputs/cloud_map/manual_map
 EOF
-}
-
-require_value() {
-  local option="$1"
-  local value="${2:-}"
-
-  if [[ -z "${value}" || "${value}" == --* ]]; then
-    echo "${option} requires a value." >&2
-    exit 2
-  fi
-
-  printf '%s' "${value}"
 }
 
 source_overlay_if_present() {
@@ -122,17 +117,60 @@ wait_for_service() {
   done
 }
 
+generate_ground_candidate_outputs() {
+  local map_dir="$1"
+  local ground_cloud="${map_dir}/${GROUND_CANDIDATE_CLOUD_NAME}"
+  local ground_map="${map_dir}/${GROUND_CANDIDATE_MAP_NAME}"
+  local ground_png="${map_dir}/${GROUND_CANDIDATE_PNG_NAME}"
+  local ground_yaml="${map_dir}/${GROUND_CANDIDATE_YAML_NAME}"
+  local coarse_cloud="${map_dir}/${GROUND_COARSE_CLOUD_NAME}"
+  local coarse_map="${map_dir}/${GROUND_COARSE_MAP_NAME}"
+  local coarse_png="${map_dir}/${GROUND_COARSE_PNG_NAME}"
+  local coarse_yaml="${map_dir}/${GROUND_COARSE_YAML_NAME}"
+  local generator_output=""
+  local generator_status=0
+  local generator_cmd=(
+    ros2 run ai_ship_robot_slam ground_candidate_map_generator
+    --map-dir "${map_dir}"
+  )
+
+  if [[ -f "${GROUND_CANDIDATE_CONFIG_PATH}" ]]; then
+    generator_cmd+=(--config "${GROUND_CANDIDATE_CONFIG_PATH}")
+  fi
+
+  echo "Starting ground candidate generation: map_dir=${map_dir} config=${GROUND_CANDIDATE_CONFIG_PATH}" >&2
+  set +e
+  generator_output="$("${generator_cmd[@]}" 2>&1)"
+  generator_status=$?
+  set -e
+
+  if [[ "${generator_status}" -ne 0 ]]; then
+    echo "Ground candidate generation failed: ${generator_output//$'\n'/ }" >&2
+    return 1
+  fi
+
+  # save_map成果物として扱えるよう、生成ログと主要ファイルパスを保存処理のログへ明示する。
+  echo "Ground candidate generation completed: ${generator_output//$'\n'/ }" >&2
+  echo "ground_candidate_cloud=${ground_cloud}" >&2
+  echo "ground_candidate_map=${ground_map}" >&2
+  echo "ground_candidate_png=${ground_png}" >&2
+  echo "ground_candidate_yaml=${ground_yaml}" >&2
+  echo "ground_coarse_cloud=${coarse_cloud}" >&2
+  echo "ground_coarse_map=${coarse_map}" >&2
+  echo "ground_coarse_png=${coarse_png}" >&2
+  echo "ground_coarse_yaml=${coarse_yaml}" >&2
+}
+
 request_map_save() {
   local destination="$(resolve_map_destination)"
   local localization_pcd="${destination}/localization_map.pcd"
-  local elevation_manifest="${destination}/elevation_manifest.yaml"
-  local elevation_csv="${destination}/global_elevation_map.csv"
-  local service_request="{resolution: ${MAP_RESOLUTION}, destination: \"${destination}\"}"
+  local seed_ring_pcd="${destination}/trajectory_seed_ring_cloud.pcd"
+  local service_request="{resolution: ${SAVE_MAP_REQUEST_RESOLUTION}, destination: \"${destination}\"}"
   local call_output=""
   local call_status=0
   local call_cmd=(ros2 service call "${SERVICE_NAME}" "${SERVICE_TYPE}" "${service_request}")
 
-  echo "Starting map outputs save request: destination=${destination} resolution=${MAP_RESOLUTION}" >&2
+  echo "Starting map outputs save request: destination=${destination}" >&2
   set +e
   if [[ "${CALL_TIMEOUT_SECONDS}" == "0" || "${CALL_TIMEOUT_SECONDS}" == "0.0" ]]; then
     call_output="$("${call_cmd[@]}" 2>&1)"
@@ -151,8 +189,10 @@ request_map_save() {
     echo "Map outputs save completed: ${call_output//$'\n'/ }" >&2
     echo "output_dir=${destination}" >&2
     echo "localization_map=${localization_pcd}" >&2
-    echo "elevation_manifest=${elevation_manifest}" >&2
-    echo "global_elevation_csv=${elevation_csv}" >&2
+    echo "trajectory_seed_ring_cloud=${seed_ring_pcd}" >&2
+    if ! generate_ground_candidate_outputs "${destination}"; then
+      return 1
+    fi
     return 0
   fi
 
@@ -161,43 +201,24 @@ request_map_save() {
 }
 
 parse_args() {
-  while [[ $# -gt 0 ]]; do
-    case "$1" in
-      --wait-timeout)
-        WAIT_TIMEOUT_SECONDS="$(require_value "$1" "${2:-}")"
-        shift 2
-        ;;
-      --destination)
-        MAP_DESTINATION="$(require_value "$1" "${2:-}")"
-        shift 2
-        ;;
-      --destination=*)
-        MAP_DESTINATION="${1#*=}"
-        shift
-        ;;
-      --resolution)
-        MAP_RESOLUTION="$(require_value "$1" "${2:-}")"
-        shift 2
-        ;;
-      --resolution=*)
-        MAP_RESOLUTION="${1#*=}"
-        shift
-        ;;
-      --call-timeout)
-        CALL_TIMEOUT_SECONDS="$(require_value "$1" "${2:-}")"
-        shift 2
-        ;;
-      -h|--help)
-        usage
-        exit 0
-        ;;
-      *)
-        echo "Unknown option: $1" >&2
-        usage >&2
-        exit 2
-        ;;
-    esac
-  done
+  if [[ $# -eq 0 ]]; then
+    return 0
+  fi
+  if [[ "$1" == "-h" || "$1" == "--help" ]]; then
+    usage
+    exit 0
+  fi
+  if [[ "$1" == --* ]]; then
+    echo "Unknown option: $1" >&2
+    usage >&2
+    exit 2
+  fi
+  if [[ $# -gt 1 ]]; then
+    echo "Only one destination path can be specified." >&2
+    usage >&2
+    exit 2
+  fi
+  MAP_DESTINATION="$1"
 }
 
 main() {

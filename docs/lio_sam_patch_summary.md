@@ -77,7 +77,7 @@
 | deskew切替 | `imu_angular`, `odom_interpolation`, `off` を選択可能化 | `utility.hpp`, `imageProjection.cpp`, config |
 | QoS強化 | LiDARとCloudInfoのqueue depthを増やし、CloudInfoをreliable化 | `utility.hpp`, `imageProjection.cpp`, `featureExtraction.cpp`, `mapOptmization.cpp` |
 | TF/frame整理 | `odometryFrame -> lidarFrame` をLIO-SAM推定TFにし、base接続はproject側static TFに分離 | `mapOptmization.cpp`, `imuPreintegration.cpp`, launch/config |
-| map保存拡張 | `/lio_sam/save_map` でlocalization PCDと2.5D global elevation mapを保存する | `mapOptmization.cpp`, `featureExtraction.cpp` |
+| map保存拡張 | `/lio_sam/save_map` でlocalization PCD、trajectory seed ring PCD、ground candidateを保存する | `mapOptmization.cpp`, `featureExtraction.cpp`, `ground_candidate_map_generator.cpp` |
 
 ## 追加パラメータ
 
@@ -114,16 +114,22 @@
 | `publishMapLocalCloud` | `/lio_sam/mapping/map_local` のpublish | `false` | `false` | `false` |
 | `publishTrajectoryCloud` | `/lio_sam/mapping/trajectory` のpublish | `false` | `false` | `false` |
 | `publishCloudRegistered` | `/lio_sam/mapping/cloud_registered` のpublish | `false` | `false` | `false` |
-| `saveElevationMap` | `/lio_sam/save_map` 保存時にlocalization/elevation用のdeskew済み全点群を内部保持する | `false` | `false` | `false` |
+| `saveMapOutputs` | `/lio_sam/save_map` 保存時にmap出力用のdeskew済み全点群を内部保持する | `false` | `false` | `false` |
 | `localizationSubmapLeafSize` | localization用keyframe raw submapの内部voxel leaf size | `0.10` | `0.10` | `0.10` |
 | `saveLioSamStandardPcds` | LIO-SAM標準PCD群を `/lio_sam/save_map` で追加保存する | `false` | `false` | `false` |
-| `elevationOutputCellSize` | 最終CSV出力用2.5D gridのセルサイズ | `0.01` | `0.01` | `0.01` |
-| `elevationClusterCellSize` | z-cluster判定・global layer選択用gridのセルサイズ | `0.30` | `0.30` | `0.30` |
-| `elevationCellZClusterGap` | セル内zクラスタの連続判定幅 | `0.05` | `0.05` | `0.05` |
-| `elevationClusterConnectionRadius` | seed clusterから接続するglobal clusterのXY半径 | `0.45` | `0.45` | `0.45` |
-| `elevationClusterConnectionZGap` | seed clusterから接続するglobal clusterの代表高さ差 | `0.15` | `0.15` | `0.15` |
-| `elevationMinRange` | 2.5D抽出に使うLiDAR点の最小距離 | `0.0` | `0.0` | `0.0` |
-| `elevationMaxRange` | 2.5D抽出に使うLiDAR点の最大距離 | `1000.0` | `1000.0` | `1000.0` |
+| `groundGridResolution` | ground candidate抽出用XY grid解像度 | `0.10` | `0.30` | `0.20` |
+| `groundConnectionZWindow` | seedまたは接続済み平面から支持点として採用するz方向許容幅 | `0.25` | `0.25` | `0.25` |
+| `groundMaxNeighborHeightGap` | region growing時の隣接セル境界高さ差しきい値 | `0.08` | `0.08` | `0.20` |
+| `groundMaxNormalDiffDeg` | region growing時の隣接セル法線差しきい値 | `12.0` | `12.0` | `30.0` |
+| `groundMaxSlopeDeg` | 地面として許容する局所平面傾き | `20.0` | `20.0` | `30.0` |
+| `groundMaxPlaneRmse` | 地面として許容する局所平面fit RMSE | `0.03` | `0.03` | `0.10` |
+| `groundWriteDebugPng` | `ground_candidate_map.pgm` と同内容のPNG確認画像を出力するか | `false` | `true` | `true` |
+| `groundFineEnabled` | coarse地面をseedにしたfine地面抽出を実行するか | `true` | `true` | `true` |
+| `groundFineGridResolution` | fine地面抽出用XY grid解像度 | `0.05` | `0.05` | `0.05` |
+| `groundFineSearchMarginCells` | coarse地面セル周辺でfine探索を許可するcoarse cell余白 | `1` | `1` | `1` |
+| `groundFineConnectionZWindow` | fine段階で接続済み平面から支持点として採用するz方向許容幅 | `0.10` | `0.10` | `0.10` |
+| `groundFinePlaneFitRadius` | fine段階の局所平面推定に使う周辺fine cell半径 | `2` | `2` | `2` |
+| `groundFineMaxPlaneRmse` | fine段階で許容する局所平面fit RMSE | `0.05` | `0.05` | `0.05` |
 | `publishCloudRegisteredRaw` | `/lio_sam/mapping/cloud_registered_raw` の外部publish。map保存には不要 | `false` | `false` | `false` |
 | `publishLoopClosureClouds` | loop closure可視化用点群/markerのpublish | `false` | `false` | `false` |
 
@@ -284,13 +290,13 @@ scan開始時刻の補間poseは、`CloudInfo.initial_guess_*` に格納してma
 
 `mapOptmization.cpp` は、既存の `/lio_sam/save_map` serviceを拡張し、`cloudInfo.cloud_deskewed` 由来のkeyframe raw submapから `localization_map.pcd` を保存する。`destination` が絶対パスならそのまま使い、相対パスなら従来互換として `$HOME + destination` へ保存する。
 
-`featureExtraction.cpp` は `publishCloudRegisteredRaw || saveElevationMap` の場合だけ `cloudInfo.cloud_deskewed` を後段へ残す。通常運用では従来どおり空にしてCloudInfo通信量を抑える。
+`featureExtraction.cpp` は `publishCloudRegisteredRaw || saveMapOutputs` の場合だけ `cloudInfo.cloud_deskewed` を後段へ残す。通常運用では従来どおり空にしてCloudInfo通信量を抑える。
 
-`mapOptmization.cpp` は各scan処理後に `cloudInfo.cloud_deskewed` を直近または新規keyframe submapへ集約し、raw点群そのものは保持しない。localizationはkeyframe local XYZ voxel、elevationはgravity-aligned keyframe XY/relative Z cellごとの複数z-cluster統計として保持する。保存時はloop closure補正後keyframe poseで各clusterをglobalへ剛体再配置し、global 30cm cell内で同じ高さ帯のclusterを再結合する。その後、3D原点最近傍clusterをseedにして、XY半径0.45m以内かつ代表高さ差0.15m以内で接続するclusterだけを辿り、各30cm cellではseed高さに最も近いclusterを1つ採用する。最終CSVには、採用clusterと対応する1cm output cellの統計だけを出力する。
+`mapOptmization.cpp` は各scan処理後に `cloudInfo.cloud_deskewed` を直近または新規keyframe submapへ集約し、raw点群そのものは保持しない。localizationはkeyframe local XYZ voxel、trajectory seed ringはscanまたはsubmap単位で保持し、保存時はloop closure補正後keyframe poseでglobal PCDへ変換する。
 
 localization用PCDは、submap内部で `localizationSubmapLeafSize` により0.10m voxel統計へ集約し、保存時に `SaveMap.request.resolution` でglobal voxel downsampleしたraw downsample mapを `localization_map.pcd` としてbinary PCDで保存する。
 
-2.5D mapは単一の `global_elevation_map.csv` と `elevation_manifest.yaml` として保存する。CSVの `count,z_min,z_max,z_mean,z_m2,height_range` は、原点最近傍seedから接続するglobal clusterのうち、各30cm cellで採用されたcluster由来である。CSV列は `ix,iy,x,y,count,z_min,z_max,z_mean,z_m2,lowest_cluster_count,lowest_cluster_min,lowest_cluster_max,lowest_cluster_mean,height_range` である。
+地面候補は `ground_candidate_map_generator` が `localization_map.pcd` と `trajectory_seed_ring_cloud.pcd` から生成する。まずcoarse段階で `ground_coarse_cloud.pcd` と `ground_coarse_map.pgm/yaml` を保存し、次にcoarse地面をseedとしてfine段階をcoarse周辺だけで実行し、最終結果を `ground_candidate_cloud.pcd` と `ground_candidate_map.pgm/yaml` として保存する。PGMは地面セルを白、それ以外を黒にした二値画像で、設定有効時は対応するPNGも保存する。
 
 `saveLioSamStandardPcds=false` の既定では、`GlobalMap.pcd` / `CornerMap.pcd` / `SurfMap.pcd` / `trajectory.pcd` / `transformations.pcd` は生成しない。デバッグでfeature mapが必要な場合だけ `saveLioSamStandardPcds=true` にする。
 

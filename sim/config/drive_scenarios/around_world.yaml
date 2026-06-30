@@ -2,7 +2,7 @@ vars:
   pi: 3.14159265359
 
 steps:
-  - duration_sec: 10.0
+  - duration_sec: 5.0
     commands:
       - type: stop
 
@@ -23,6 +23,6 @@ steps:
       - type: yaw_left
         speed: ${pi / 10}
         
-  - duration_sec: 10.0
+  - duration_sec: 5.0
     commands:
       - type: stop

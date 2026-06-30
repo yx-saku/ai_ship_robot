@@ -48,7 +48,7 @@ def generate_launch_description():
             "baselinkFrame": base_frame,
             "odometryFrame": lidar_init_frame,
             "mapFrame": map_frame,
-            "saveElevationMap": ParameterValue(use_map_saver, value_type=bool),
+            "saveMapOutputs": ParameterValue(use_map_saver, value_type=bool),
         },
     ]
 

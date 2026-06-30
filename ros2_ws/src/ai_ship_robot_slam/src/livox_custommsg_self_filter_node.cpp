@@ -135,6 +135,8 @@ private:
   struct Channel
   {
     std::string output_topic;
+    std::string lidar_frame;
+    std::optional<tf2::Transform> filter_from_lidar;
     rclcpp::Publisher<CustomMsg>::SharedPtr publisher;
     rclcpp::Subscription<CustomMsg>::SharedPtr subscription;
   };
@@ -296,26 +298,35 @@ private:
       return;
     }
 
-    const auto filter_from_lidar = lookup_filter_transform(message->header.frame_id, input_topic);
-    if (!filter_from_lidar.has_value()) {
+    auto & channel = channel_iter->second;
+    if (!ensure_filter_transform(channel, message->header.frame_id, input_topic)) {
       if (!drop_on_tf_failure_) {
-        channel_iter->second.publisher->publish(*message);
+        channel.publisher->publish(*message);
       }
       return;
     }
 
-    auto output = filter_message(*message, filter_from_lidar.value());
-    channel_iter->second.publisher->publish(std::move(output));
+    auto output = filter_message(*message, channel.filter_from_lidar.value());
+    channel.publisher->publish(std::move(output));
   }
 
-  std::optional<tf2::Transform> lookup_filter_transform(
-    const std::string & lidar_frame, const std::string & input_topic)
+  bool ensure_filter_transform(
+    Channel & channel, const std::string & lidar_frame, const std::string & input_topic)
   {
+    if (channel.filter_from_lidar.has_value() && channel.lidar_frame == lidar_frame) {
+      return true;
+    }
+
     try {
-      // LiDARとbaseの固定関係を使うため、scan時刻ではなく最新利用可能TFで起動直後の欠落を避ける。
+      // LiDARとbaseの静的関係を一度だけ取得し、以後は固定行列でfusion前の各点をbase判定する。
       const auto transform_message = tf_buffer_.lookupTransform(
         filter_frame_, lidar_frame, tf2::TimePointZero, tf2::durationFromSec(tf_timeout_sec_));
-      return transform_from_message(transform_message.transform);
+      channel.lidar_frame = lidar_frame;
+      channel.filter_from_lidar = transform_from_message(transform_message.transform);
+      RCLCPP_INFO(
+        get_logger(), "Cached self filter TF %s -> %s for %s",
+        filter_frame_.c_str(), lidar_frame.c_str(), input_topic.c_str());
+      return true;
     } catch (const tf2::TransformException & error) {
       RCLCPP_WARN_THROTTLE(
         get_logger(), *get_clock(), 2000, "Waiting for TF %s -> %s for %s: %s",
@@ -325,7 +336,7 @@ private:
         get_logger(), *get_clock(), 2000, "Invalid TF %s -> %s for %s: %s",
         filter_frame_.c_str(), lidar_frame.c_str(), input_topic.c_str(), error.what());
     }
-    return std::nullopt;
+    return false;
   }
 
   CustomMsg filter_message(

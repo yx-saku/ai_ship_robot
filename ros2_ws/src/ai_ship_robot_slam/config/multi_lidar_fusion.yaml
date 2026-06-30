@@ -13,22 +13,22 @@ livox_custommsg_self_filter_node:
       - /lidar1/livox/lidar_filtered
       - /lidar2/livox/lidar_filtered
     filter_frame: base_footprint
-    margin: 0.03
+    margin: 0.10
     tf_timeout_sec: 0.1
     drop_on_tf_failure: true
     # boxes.<name> は6値で1boxを表す: [x_min, x_max, y_min, y_max, z_min, z_max]
     boxes:
-      # 台車ロボット本体（車輪なども含む）
-      robot_body: [-0.360, 0.360, -0.420, 0.420, 0.000, 0.400]
+      # lidar_pattern_dual_opposit使用時の台車本体と支持ホイールをbase_footprint基準で外接する。
+      robot_body: [-0.360, 0.360, -0.360, 0.360, 0.000, 0.330]
 
-      # LiDAR 1
-      lidar1: [0.350, 0.430, -0.045, 0.045, 0.235, 0.330]
+      # lidar_pattern_dual_oppositの上段Mid-360 collision box。
+      lidar1: [0.428, 0.493, -0.033, 0.033, 0.145, 0.205]
 
-      # LiDAR 2
-      lidar2: [0.350, 0.430, -0.045, 0.045, 0.165, 0.260]
+      # lidar_pattern_dual_oppositの下段Mid-360 collision box。
+      lidar2: [0.428, 0.493, -0.033, 0.033, 0.075, 0.135]
 
-      # 溶接ロボット（アーム含む全体）
-      welding_robot: [-0.310, 1.250, -0.310, 0.310, 0.400, 1.250]
+      # Gazeboモデルの固定アーム上物全体を簡易外接boxで除去する。
+      welding_robot: [-0.310, 1.250, -0.310, 0.310, 0.330, 1.200]
 
 lio_sam_imageProjection:
   ros__parameters:

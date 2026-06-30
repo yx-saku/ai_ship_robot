@@ -15,11 +15,20 @@ RUN_MODE=""
 PCD_MAP_PATH=""
 SIM_MODE=false
 DEFAULT_SIM_PARAMS_FILE="${WORKSPACE_ROOT}/ros2_ws/src/ai_ship_robot_slam/config/lio_sam_mid360_sim.yaml"
+DEFAULT_PARAMS_FILE="${WORKSPACE_ROOT}/ros2_ws/src/ai_ship_robot_slam/config/lio_sam_mid360.yaml"
 ROSBAG_PID=""
 ROSBAG_PLAY_PID=""
 SLAM_PID=""
 ROSBAG_ROOT="${WORKSPACE_ROOT}/outputs/rosbag2"
 CLOUD_MAP_ROOT="${WORKSPACE_ROOT}/outputs/cloud_map"
+GROUND_CANDIDATE_CLOUD_NAME="ground_candidate_cloud.pcd"
+GROUND_CANDIDATE_MAP_NAME="ground_candidate_map.pgm"
+GROUND_CANDIDATE_PNG_NAME="ground_candidate_map.png"
+GROUND_CANDIDATE_YAML_NAME="ground_candidate_map.yaml"
+GROUND_COARSE_CLOUD_NAME="ground_coarse_cloud.pcd"
+GROUND_COARSE_MAP_NAME="ground_coarse_map.pgm"
+GROUND_COARSE_PNG_NAME="ground_coarse_map.png"
+GROUND_COARSE_YAML_NAME="ground_coarse_map.yaml"
 SHUTDOWN_SIGNAL_RECEIVED=false
 SHUTDOWN_SIGNAL_NAME=""
 SHUTDOWN_SIGNAL_COUNT=0
@@ -31,7 +40,8 @@ MAP_SAVE_PID=""
 MAP_SAVE_CANCEL_REQUESTED=false
 AUTO_SAVE_MAPS_ON_SHUTDOWN=true
 MAP_SAVE_DESTINATION="${MAP_SAVE_DESTINATION:-}"
-MAP_SAVE_RESOLUTION="${MAP_SAVE_RESOLUTION:-0.10}"
+MAP_OUTPUT_CONFIG_PATH=""
+SAVE_MAP_REQUEST_RESOLUTION="0.0"
 # bag再生ではSLAM入力に必要なLiDAR/IMUと静的TFだけを流し、sim由来の動的/tf競合を避ける。
 DEFAULT_BAG_PLAY_TOPICS=(
   /tf_static
@@ -95,7 +105,6 @@ Options:
   --no-save-map-on-shutdown
                         Do not auto-save map outputs when mapping mode exits.
   --map-output PATH     Save map outputs to PATH. Default: outputs/cloud_map/map_YYYYmmdd_HHMMSS
-  --map-resolution N    Downsample resolution passed to /lio_sam/save_map. Default: 0.10
   --no-auto-exit     Keep SLAM and recording running after rosbag playback finishes.
   --rviz-config PATH Use a workspace RViz config file for LIO-SAM.
   --pcd [PATH]       Fixed PCD map path for loc mode.
@@ -503,7 +512,7 @@ print_map_outputs_save_start_banner() {
   else
     echo "bag再生完了後の自動停止前にmap成果物を保存しています。" >&2
   fi
-  echo "localization_map.pcd と global_elevation_map.csv を出力します。" >&2
+  echo "localization_map.pcd、trajectory_seed_ring_cloud.pcd、ground_candidate出力を生成します。" >&2
   echo "大きなマップでは数分かかる場合があります。" >&2
   echo "保存を中断して終了するには、もう一度 Ctrl+C を押してください。" >&2
   echo "======================================================================" >&2
@@ -853,6 +862,79 @@ wait_for_save_maps_service() {
   done
 }
 
+generate_ground_candidate_outputs() {
+  local map_dir="$1"
+  local ground_cloud="${map_dir}/${GROUND_CANDIDATE_CLOUD_NAME}"
+  local ground_map="${map_dir}/${GROUND_CANDIDATE_MAP_NAME}"
+  local ground_png="${map_dir}/${GROUND_CANDIDATE_PNG_NAME}"
+  local ground_yaml="${map_dir}/${GROUND_CANDIDATE_YAML_NAME}"
+  local coarse_cloud="${map_dir}/${GROUND_COARSE_CLOUD_NAME}"
+  local coarse_map="${map_dir}/${GROUND_COARSE_MAP_NAME}"
+  local coarse_png="${map_dir}/${GROUND_COARSE_PNG_NAME}"
+  local coarse_yaml="${map_dir}/${GROUND_COARSE_YAML_NAME}"
+  local output_file=""
+  local generator_output=""
+  local generator_status=0
+  local generator_cmd=(
+    ros2 run ai_ship_robot_slam ground_candidate_map_generator
+    --map-dir "${map_dir}"
+  )
+
+  if [[ -n "${MAP_OUTPUT_CONFIG_PATH}" && -f "${MAP_OUTPUT_CONFIG_PATH}" ]]; then
+    generator_cmd+=(--config "${MAP_OUTPUT_CONFIG_PATH}")
+  fi
+
+  echo "----------------------------------------------------------------------" >&2
+  echo "ground candidate生成を開始しました。" >&2
+  echo "対象mapディレクトリ: ${map_dir}" >&2
+  if [[ -n "${MAP_OUTPUT_CONFIG_PATH}" ]]; then
+    echo "ground candidate設定: ${MAP_OUTPUT_CONFIG_PATH}" >&2
+  fi
+  echo "----------------------------------------------------------------------" >&2
+
+  # 地面候補生成もmap保存処理の一部として扱い、保存中の再Ctrl+Cで中断できるよう同じPID管理に載せる。
+  MAP_SAVE_IN_PROGRESS=true
+  MAP_SAVE_CANCEL_REQUESTED=false
+  output_file="$(mktemp -t ai_ship_robot_ground_candidate.XXXXXX.log)"
+  set +e
+  setsid "${generator_cmd[@]}" >"${output_file}" 2>&1 &
+  MAP_SAVE_PID=$!
+  wait "${MAP_SAVE_PID}"
+  generator_status=$?
+  set -e
+  generator_output="$(<"${output_file}")"
+  rm -f "${output_file}"
+  MAP_SAVE_PID=""
+  MAP_SAVE_IN_PROGRESS=false
+
+  if [[ "${MAP_SAVE_CANCEL_REQUESTED}" == "true" || "${generator_status}" -eq 130 ]]; then
+    echo "----------------------------------------------------------------------" >&2
+    echo "Ground candidate generation cancelled by user." >&2
+    echo "----------------------------------------------------------------------" >&2
+    return 1
+  fi
+
+  if [[ "${generator_status}" -ne 0 ]]; then
+    echo "----------------------------------------------------------------------" >&2
+    echo "Ground candidate generation failed: ${generator_output//$'\n'/ }" >&2
+    echo "----------------------------------------------------------------------" >&2
+    return 1
+  fi
+
+  echo "----------------------------------------------------------------------" >&2
+  echo "ground candidate生成が完了しました。" >&2
+  echo "Ground candidate generator output: ${generator_output//$'\n'/ }" >&2
+  echo "ground candidate cloud: ${ground_cloud}" >&2
+  echo "ground candidate map: ${ground_map}" >&2
+  echo "ground candidate png: ${ground_png}" >&2
+  echo "ground candidate yaml: ${ground_yaml}" >&2
+  echo "ground coarse cloud: ${coarse_cloud}" >&2
+  echo "ground coarse map: ${coarse_map}" >&2
+  echo "ground coarse png: ${coarse_png}" >&2
+  echo "ground coarse yaml: ${coarse_yaml}" >&2
+  echo "----------------------------------------------------------------------" >&2
+}
+
 save_maps_if_requested() {
   local save_reason="${1:-manual}"
   local service_name="/lio_sam/save_map"
@@ -864,8 +946,15 @@ save_maps_if_requested() {
   local call_cmd=()
   local output_file=""
   local saved_pcd_path=""
-  local saved_manifest_path=""
-  local saved_elevation_csv_path=""
+  local saved_seed_ring_pcd_path=""
+  local saved_ground_candidate_cloud_path=""
+  local saved_ground_candidate_map_path=""
+  local saved_ground_candidate_png_path=""
+  local saved_ground_candidate_yaml_path=""
+  local saved_ground_coarse_cloud_path=""
+  local saved_ground_coarse_map_path=""
+  local saved_ground_coarse_png_path=""
+  local saved_ground_coarse_yaml_path=""
 
   if [[ "${RUN_MODE}" != "map" ]]; then
     return 0
@@ -887,14 +976,20 @@ save_maps_if_requested() {
 
   saved_output_dir="$(resolve_map_save_destination)"
   saved_pcd_path="${saved_output_dir}/localization_map.pcd"
-  saved_manifest_path="${saved_output_dir}/elevation_manifest.yaml"
-  saved_elevation_csv_path="${saved_output_dir}/global_elevation_map.csv"
-  service_request="{resolution: ${MAP_SAVE_RESOLUTION}, destination: \"${saved_output_dir}\"}"
+  saved_seed_ring_pcd_path="${saved_output_dir}/trajectory_seed_ring_cloud.pcd"
+  saved_ground_candidate_cloud_path="${saved_output_dir}/${GROUND_CANDIDATE_CLOUD_NAME}"
+  saved_ground_candidate_map_path="${saved_output_dir}/${GROUND_CANDIDATE_MAP_NAME}"
+  saved_ground_candidate_png_path="${saved_output_dir}/${GROUND_CANDIDATE_PNG_NAME}"
+  saved_ground_candidate_yaml_path="${saved_output_dir}/${GROUND_CANDIDATE_YAML_NAME}"
+  saved_ground_coarse_cloud_path="${saved_output_dir}/${GROUND_COARSE_CLOUD_NAME}"
+  saved_ground_coarse_map_path="${saved_output_dir}/${GROUND_COARSE_MAP_NAME}"
+  saved_ground_coarse_png_path="${saved_output_dir}/${GROUND_COARSE_PNG_NAME}"
+  saved_ground_coarse_yaml_path="${saved_output_dir}/${GROUND_COARSE_YAML_NAME}"
+  service_request="{resolution: ${SAVE_MAP_REQUEST_RESOLUTION}, destination: \"${saved_output_dir}\"}"
   call_cmd=(ros2 service call "${service_name}" "${service_type}" "${service_request}")
 
   print_map_outputs_save_start_banner "${save_reason}"
   echo "保存先ディレクトリ: ${saved_output_dir}" >&2
-  echo "SaveMap resolution: ${MAP_SAVE_RESOLUTION}" >&2
 
   MAP_SAVE_IN_PROGRESS=true
   MAP_SAVE_CANCEL_REQUESTED=false
@@ -922,14 +1017,32 @@ save_maps_if_requested() {
         ( "${call_output}" == *"success=True"* ||
          "${call_output}" == *"success: true"* ||
             "${call_output}" == *"success: True"* ) ]]; then
-    MAP_SAVE_SUCCEEDED=true
     echo "----------------------------------------------------------------------" >&2
-    echo "map成果物保存が完了しました。" >&2
+    echo "LIO-SAM map成果物保存が完了しました。ground candidate生成へ進みます。" >&2
     echo "保存先ディレクトリ: ${saved_output_dir}" >&2
     echo "localization PCD: ${saved_pcd_path}" >&2
-    echo "elevation manifest: ${saved_manifest_path}" >&2
-    echo "global elevation CSV: ${saved_elevation_csv_path}" >&2
+    echo "trajectory seed ring PCD: ${saved_seed_ring_pcd_path}" >&2
     echo "Map outputs save service response: ${call_output//$'\n'/ }" >&2
+    echo "----------------------------------------------------------------------" >&2
+    if ! generate_ground_candidate_outputs "${saved_output_dir}"; then
+      echo "Continuing with SLAM shutdown after failed ground candidate generation." >&2
+      return 1
+    fi
+
+    MAP_SAVE_SUCCEEDED=true
+    echo "----------------------------------------------------------------------" >&2
+    echo "map成果物保存とground candidate生成が完了しました。" >&2
+    echo "保存先ディレクトリ: ${saved_output_dir}" >&2
+    echo "localization PCD: ${saved_pcd_path}" >&2
+    echo "trajectory seed ring PCD: ${saved_seed_ring_pcd_path}" >&2
+    echo "ground candidate cloud: ${saved_ground_candidate_cloud_path}" >&2
+    echo "ground candidate map: ${saved_ground_candidate_map_path}" >&2
+    echo "ground candidate png: ${saved_ground_candidate_png_path}" >&2
+    echo "ground candidate yaml: ${saved_ground_candidate_yaml_path}" >&2
+    echo "ground coarse cloud: ${saved_ground_coarse_cloud_path}" >&2
+    echo "ground coarse map: ${saved_ground_coarse_map_path}" >&2
+    echo "ground coarse png: ${saved_ground_coarse_png_path}" >&2
+    echo "ground coarse yaml: ${saved_ground_coarse_yaml_path}" >&2
     echo "----------------------------------------------------------------------" >&2
     echo "Continuing with the remaining shutdown sequence." >&2
     return 0
@@ -1248,6 +1361,7 @@ run_bag_play_lio_sam() {
   mapfile -t slam_args < <(build_passthrough_args)
   if ! has_config_arg; then
     slam_args+=(--config "${DEFAULT_SIM_PARAMS_FILE}")
+    MAP_OUTPUT_CONFIG_PATH="${DEFAULT_SIM_PARAMS_FILE}"
   fi
   run_slam_launch \
     --use-sim-time \
@@ -1755,15 +1869,17 @@ while [[ $# -gt 0 ]]; do
       shift
       MAP_SAVE_DESTINATION="$(require_value --map-output "${1:-}")"
       ;;
-    --map-resolution=*)
-      MAP_SAVE_RESOLUTION="${1#*=}"
-      ;;
-    --map-resolution)
-      shift
-      MAP_SAVE_RESOLUTION="$(require_value --map-resolution "${1:-}")"
-      ;;
     --no-save-map-on-shutdown)
       AUTO_SAVE_MAPS_ON_SHUTDOWN=false
+      ;;
+    --config=*)
+      MAP_OUTPUT_CONFIG_PATH="${1#*=}"
+      FORWARD_ARGS+=("$1")
+      ;;
+    --config)
+      shift
+      MAP_OUTPUT_CONFIG_PATH="$(require_value --config "${1:-}")"
+      FORWARD_ARGS+=(--config "${MAP_OUTPUT_CONFIG_PATH}")
       ;;
     --no-auto-exit)
       BAG_AUTO_EXIT=false
@@ -1799,6 +1915,13 @@ fi
 if [[ "${RUN_MODE}" == "loc" && "${SIM_MODE}" == "true" ]]; then
   echo "loc mode does not support --sim." >&2
   exit 2
+fi
+if [[ -z "${MAP_OUTPUT_CONFIG_PATH}" ]]; then
+  if [[ "${SIM_MODE}" == "true" || "${BAG_PLAY_REQUESTED}" == "true" ]]; then
+    MAP_OUTPUT_CONFIG_PATH="${DEFAULT_SIM_PARAMS_FILE}"
+  else
+    MAP_OUTPUT_CONFIG_PATH="${DEFAULT_PARAMS_FILE}"
+  fi
 fi
 
 if [[ "${SIM_MODE}" == "true" ]]; then

@@ -100,17 +100,15 @@ public:
     // Save pcd
     bool savePCD;
     string savePCDDirectory;
-    // AI_SHIP_ROBOT_BEGIN: 2.5D map保存時だけdeskew済み全点群を後段へ残す。
-    bool saveElevationMap;
+    // AI_SHIP_ROBOT_BEGIN: map保存時だけdeskew済み全点群を後段へ残す。
+    bool saveMapOutputs;
     double localizationSubmapLeafSize;
     bool saveLioSamStandardPcds;
-    double elevationOutputCellSize;
-    double elevationClusterCellSize;
-    double elevationCellZClusterGap;
-    double elevationClusterConnectionRadius;
-    double elevationClusterConnectionZGap;
-    double elevationMinRange;
-    double elevationMaxRange;
+    double trajectorySeedRingMinRadius;
+    double trajectorySeedRingMaxRadius;
+    string trajectorySeedRingAccumulationMode;
+    double trajectorySeedRingSubmapVoxelSize;
+    double trajectorySeedRingGlobalVoxelSize;
     // AI_SHIP_ROBOT_END
 
     // Lidar Sensor Configuration
@@ -271,32 +269,28 @@ public:
         declare_parameter("savePCDDirectory", "/Downloads/LOAM/");
         get_parameter("savePCDDirectory", savePCDDirectory);
         // AI_SHIP_ROBOT_BEGIN: 保存API拡張のraw submap保持をpublish制御から分離する。
-        declare_parameter("saveElevationMap", false);
-        get_parameter("saveElevationMap", saveElevationMap);
+        declare_parameter("saveMapOutputs", false);
+        get_parameter("saveMapOutputs", saveMapOutputs);
         declare_parameter("localizationSubmapLeafSize", 0.10);
         get_parameter("localizationSubmapLeafSize", localizationSubmapLeafSize);
         declare_parameter("saveLioSamStandardPcds", false);
         get_parameter("saveLioSamStandardPcds", saveLioSamStandardPcds);
-        declare_parameter("elevationOutputCellSize", 0.01);
-        get_parameter("elevationOutputCellSize", elevationOutputCellSize);
-        declare_parameter("elevationClusterCellSize", 0.30);
-        get_parameter("elevationClusterCellSize", elevationClusterCellSize);
-        declare_parameter("elevationCellZClusterGap", 0.05);
-        get_parameter("elevationCellZClusterGap", elevationCellZClusterGap);
-        declare_parameter("elevationClusterConnectionRadius", 0.45);
-        get_parameter("elevationClusterConnectionRadius", elevationClusterConnectionRadius);
-        declare_parameter("elevationClusterConnectionZGap", 0.15);
-        get_parameter("elevationClusterConnectionZGap", elevationClusterConnectionZGap);
-        declare_parameter("elevationMinRange", 0.0);
-        get_parameter("elevationMinRange", elevationMinRange);
-        declare_parameter("elevationMaxRange", 1000.0);
-        get_parameter("elevationMaxRange", elevationMaxRange);
-        if (localizationSubmapLeafSize <= 0.0 || elevationOutputCellSize <= 0.0 || elevationClusterCellSize <= 0.0 ||
-            elevationOutputCellSize > elevationClusterCellSize || elevationCellZClusterGap < 0.0 ||
-            elevationClusterConnectionRadius <= 0.0 || elevationClusterConnectionZGap < 0.0 ||
-            elevationMinRange < 0.0 || elevationMaxRange <= elevationMinRange)
+        declare_parameter("trajectorySeedRingMinRadius", 0.30);
+        get_parameter("trajectorySeedRingMinRadius", trajectorySeedRingMinRadius);
+        declare_parameter("trajectorySeedRingMaxRadius", 0.80);
+        get_parameter("trajectorySeedRingMaxRadius", trajectorySeedRingMaxRadius);
+        declare_parameter("trajectorySeedRingAccumulationMode", "submap");
+        get_parameter("trajectorySeedRingAccumulationMode", trajectorySeedRingAccumulationMode);
+        declare_parameter("trajectorySeedRingSubmapVoxelSize", 0.001);
+        get_parameter("trajectorySeedRingSubmapVoxelSize", trajectorySeedRingSubmapVoxelSize);
+        declare_parameter("trajectorySeedRingGlobalVoxelSize", 0.001);
+        get_parameter("trajectorySeedRingGlobalVoxelSize", trajectorySeedRingGlobalVoxelSize);
+        if (localizationSubmapLeafSize <= 0.0 ||
+            trajectorySeedRingMinRadius < 0.0 || trajectorySeedRingMaxRadius <= trajectorySeedRingMinRadius ||
+            (trajectorySeedRingAccumulationMode != "submap" && trajectorySeedRingAccumulationMode != "scan") ||
+            trajectorySeedRingSubmapVoxelSize <= 0.0 || trajectorySeedRingGlobalVoxelSize < 0.0)
         {
-            RCLCPP_ERROR(get_logger(), "Invalid elevation map save parameters.");
+            RCLCPP_ERROR(get_logger(), "Invalid map output parameters.");
             rclcpp::shutdown();
         }
         // AI_SHIP_ROBOT_END

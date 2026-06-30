@@ -265,7 +265,7 @@ public:
         // free cloud info memory
         freeCloudInfoMemory();
         // map保存用raw submap蓄積またはraw publishで後段が必要な場合だけ、重いdeskew済み全点群を残す。
-        if (!publishCloudRegisteredRaw && !saveElevationMap)
+        if (!publishCloudRegisteredRaw && !saveMapOutputs)
             cloudInfo.cloud_deskewed = sensor_msgs::msg::PointCloud2();
         // save newly extracted features
         // mapOptimizationへ渡すCloudInfo点群は常に作り、外部feature topicは診断時だけpublishする。

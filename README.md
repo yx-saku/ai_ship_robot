@@ -90,21 +90,12 @@ bash scripts/run_slam.sh \
 - `--sim` によるシミュレーション同時起動
 - `--bag-play` による rosbag 再生入力
 - `--record-bag` による rosbag 記録
-- `--map` による LIO-SAM map保存拡張の有効化
+- `map` モードによる LIO-SAM map保存拡張の有効化
 - `--cloud-queue-drain-timeout` による bag 再生後の cloudQueue 待機上限指定
 
-`--map` を付けた場合は、LIO-SAM本体の `/lio_sam/save_map` を使って timestamp ディレクトリへmap成果物を保存します。必須成果物は、`cloudInfo.cloud_deskewed` をkeyframe local submapへ集約した localization 用の `localization_map.pcd`、2.5D elevation map の `global_elevation_map.csv`、生成条件を記録した `elevation_manifest.yaml` です。`GlobalMap.pcd` / `CornerMap.pcd` / `SurfMap.pcd` / `trajectory.pcd` / `transformations.pcd` は `saveLioSamStandardPcds=true` の場合だけ追加出力します。
+`map` モードでは、LIO-SAM本体の `/lio_sam/save_map` を使って timestamp ディレクトリへmap成果物を保存します。必須成果物は、`cloudInfo.cloud_deskewed` をkeyframe local submapへ集約した localization 用の `localization_map.pcd`、ロボット近傍seed用の `trajectory_seed_ring_cloud.pcd`、20cm程度の粗い地面候補 `ground_coarse_cloud.pcd` / `ground_coarse_map.pgm` / `ground_coarse_map.png` / `ground_coarse_map.yaml`、5cm程度へ細分化した最終地面候補 `ground_candidate_cloud.pcd` / `ground_candidate_map.pgm` / `ground_candidate_map.png` / `ground_candidate_map.yaml` です。`GlobalMap.pcd` / `CornerMap.pcd` / `SurfMap.pcd` / `trajectory.pcd` / `transformations.pcd` は `saveLioSamStandardPcds=true` の場合だけ追加出力します。
 
-CPU/DDS 負荷を抑えるため、`/lio_sam/deskew/cloud_deskewed`、`/lio_sam/feature/cloud_corner`、`/lio_sam/feature/cloud_surface`、`/lio_sam/mapping/map_global`、`/lio_sam/mapping/map_local`、`/lio_sam/mapping/trajectory`、`/lio_sam/mapping/cloud_registered_raw` は既定では publish しません。map保存時は外部raw publishではなく、LIO-SAM内部の `cloudInfo.cloud_deskewed` を保持してlocalization mapと2.5D elevation mapのsubmap蓄積に使います。
-
-保存済みの `global_elevation_map.csv` をRVizで確認する場合は、`z_max` をPointCloud2としてpublishし、RVizを自動起動できます。
-
-```bash
-bash scripts/view_elevation_map.sh
-bash scripts/view_elevation_map.sh outputs/cloud_map/map_YYYYmmdd_HHMMSS
-```
-
-RVizには `/elevation_map/z_max_points` の `PointCloud2` displayが入った状態で開きます。引数を省略した場合は `outputs/cloud_map/map_*` の最新結果を使用し、指定した場合はそのディレクトリ配下の `global_elevation_map.csv` と `elevation_manifest.yaml` を固定で使用します。
+CPU/DDS 負荷を抑えるため、`/lio_sam/deskew/cloud_deskewed`、`/lio_sam/feature/cloud_corner`、`/lio_sam/feature/cloud_surface`、`/lio_sam/mapping/map_global`、`/lio_sam/mapping/map_local`、`/lio_sam/mapping/trajectory`、`/lio_sam/mapping/cloud_registered_raw` は既定では publish しません。map保存時は外部raw publishではなく、LIO-SAM内部の `cloudInfo.cloud_deskewed` を保持してlocalization mapとtrajectory seed ringのsubmap蓄積に使います。
 
 rosbag を記録する例です。
 
