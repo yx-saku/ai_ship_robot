@@ -52,8 +52,8 @@ Options:
   --no-gui            Disable Gazebo Classic GUI.
   --rviz              Enable RViz2.
   --no-rviz           Disable RViz2.
-  --odom-tf           Publish Gazebo odom -> base_footprint TF. Default: enabled.
-  --no-odom-tf        Do not publish Gazebo odom -> base_footprint TF.
+  --odom-tf           Publish sim odom -> base_footprint TF. Default: enabled.
+  --no-odom-tf        Do not publish sim odom -> base_footprint TF.
   -4, --quarter-resolution
                       Use quarter LiDAR sample density.
   -2, --half-resolution
@@ -154,7 +154,7 @@ validate_non_negative_double() {
 }
 
 default_world_file() {
-  printf '%s/ros2_ws/src/ai_ship_robot_gazebo/worlds/shipyard_indoor_100x50.world' "${SIM_ROOT}"
+  printf '%s/ros2_ws/src/ai_ship_robot_gazebo/worlds/shipyard_indoor_100x50_light.world' "${SIM_ROOT}"
 }
 
 make_real_time_factor_world() {
@@ -376,7 +376,7 @@ wait_for_topic_subscribers() {
   while true; do
     ensure_simulation_process_running
 
-    # 走行pluginの購読開始を確認し、シナリオ先頭のcmd_velがGazebo側で捨てられないようにする。
+    # cmd_vel adapter の購読開始を確認し、シナリオ先頭のcmd_velが内部制御へ届く前に捨てられないようにする。
     if topic_info="$(timeout 5s ros2 topic info --no-daemon --spin-time 2 "${topic}" 2>/dev/null)"; then
       subscription_count="$(awk '/Subscription count:/ { print $3; exit }' <<< "${topic_info}")"
       if [[ "${subscription_count}" =~ ^[0-9]+$ && "${subscription_count}" -ge "${min_subscribers}" ]]; then
@@ -467,10 +467,12 @@ start_scripted_drive() {
 
 start_custommsg_pointcloud_bridge() {
   # 変換nodeは入力topic末尾に/pointsを付けて出力するため、RViz購読名の親topicを渡す。
+  # reliable subscriber とQoS互換を取れるよう、RViz向け出力側も reliable で起動する。
   local bridge_cmd=(
     ros2 run ai_ship_robot_slam livox_custommsg_to_pointcloud2_node --ros-args
     -p use_sim_time:=true
     -p input_topics:="['/lidar1/livox/lidar','/lidar2/livox/lidar','/lidar3/livox/lidar','/lidar4/livox/lidar']"
+    -p qos_reliable:=true
   )
 
   echo "Starting CustomMsg->PointCloud2 bridge for RViz..." >&2

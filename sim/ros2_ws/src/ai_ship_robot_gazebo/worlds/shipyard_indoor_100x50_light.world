@@ -1,0 +1,587 @@
+<?xml version="1.0" ?>
+<sdf version="1.6">
+  <world name="shipyard_indoor_100x50">
+    <gravity>0 0 -9.80511</gravity>
+    <magnetic_field>6.0e-6 2.3e-5 -4.2e-5</magnetic_field>
+    <atmosphere type="adiabatic" />
+    <!-- /clock の更新粒度を維持し、既存 launch の時刻前提を崩さない。 -->
+    <physics type="ode">
+      <real_time_update_rate>1000</real_time_update_rate>
+      <max_step_size>0.001</max_step_size>
+      <real_time_factor>1.0</real_time_factor>
+    </physics>
+
+    <light name="sun" type="directional">
+      <cast_shadows>false</cast_shadows>
+      <pose>0 0 30 0 0 0</pose>
+      <diffuse>0.85 0.85 0.85 1</diffuse>
+      <specular>0.20 0.20 0.20 1</specular>
+      <attenuation>
+        <range>1200</range>
+        <constant>0.9</constant>
+        <linear>0.01</linear>
+        <quadratic>0.001</quadratic>
+      </attenuation>
+      <direction>-0.35 0.2 -0.9</direction>
+    </light>
+
+    <model name="shipyard_shell">
+      <static>true</static>
+      <link name="structure">
+        <!-- 中央 1/3 だけ 5 度の山形勾配に分け、両端の平坦部と連続する基準床を作る。 -->
+        <collision name="floor_west_flat_collision">
+          <pose>-33.33335 0 -0.05 0 0 0</pose>
+          <geometry><box><size>33.3333 50 0.1</size></box></geometry>
+        </collision>
+        <visual name="floor_west_flat_visual">
+          <pose>-33.33335 0 -0.05 0 0 0</pose>
+          <geometry><box><size>33.3333 50 0.1</size></box></geometry>
+          <material>
+            <ambient>0.22 0.22 0.22 1</ambient>
+            <diffuse>0.42 0.42 0.42 1</diffuse>
+          </material>
+        </visual>
+        <collision name="floor_left_slope_collision">
+          <pose>-8.33335 0 0.679170273206564 0 -0.0872664625997165 0</pose>
+          <geometry><box><size>16.6667 50 0.1</size></box></geometry>
+        </collision>
+        <visual name="floor_left_slope_visual">
+          <pose>-8.33335 0 0.679170273206564 0 -0.0872664625997165 0</pose>
+          <geometry><box><size>16.6667 50 0.1</size></box></geometry>
+          <material>
+            <ambient>0.22 0.22 0.22 1</ambient>
+            <diffuse>0.42 0.42 0.42 1</diffuse>
+          </material>
+        </visual>
+        <collision name="floor_right_slope_collision">
+          <pose>8.33335 0 0.679170273206564 0 0.0872664625997165 0</pose>
+          <geometry><box><size>16.6667 50 0.1</size></box></geometry>
+        </collision>
+        <visual name="floor_right_slope_visual">
+          <pose>8.33335 0 0.679170273206564 0 0.0872664625997165 0</pose>
+          <geometry><box><size>16.6667 50 0.1</size></box></geometry>
+          <material>
+            <ambient>0.22 0.22 0.22 1</ambient>
+            <diffuse>0.42 0.42 0.42 1</diffuse>
+          </material>
+        </visual>
+        <collision name="floor_east_flat_collision">
+          <pose>33.33335 0 -0.05 0 0 0</pose>
+          <geometry><box><size>33.3333 50 0.1</size></box></geometry>
+        </collision>
+        <visual name="floor_east_flat_visual">
+          <pose>33.33335 0 -0.05 0 0 0</pose>
+          <geometry><box><size>33.3333 50 0.1</size></box></geometry>
+          <material>
+            <ambient>0.22 0.22 0.22 1</ambient>
+            <diffuse>0.42 0.42 0.42 1</diffuse>
+          </material>
+        </visual>
+
+        <!-- 床勾配と平行な天井面へ分割し、どの位置でも床から天井下面まで 2m を維持する。 -->
+        <collision name="ceiling_west_flat_collision">
+          <pose>-33.33335 0 1.95 0 0 0</pose>
+          <geometry><box><size>33.3333 50 0.1</size></box></geometry>
+        </collision>
+        <collision name="ceiling_left_slope_collision">
+          <pose>-8.33335 0 2.67917027320656 0 -0.0872664625997165 0</pose>
+          <geometry><box><size>16.6667 50 0.1</size></box></geometry>
+        </collision>
+        <collision name="ceiling_right_slope_collision">
+          <pose>8.33335 0 2.67917027320656 0 0.0872664625997165 0</pose>
+          <geometry><box><size>16.6667 50 0.1</size></box></geometry>
+        </collision>
+        <collision name="ceiling_east_flat_collision">
+          <pose>33.33335 0 1.95 0 0 0</pose>
+          <geometry><box><size>33.3333 50 0.1</size></box></geometry>
+        </collision>
+
+        <!-- 外周壁は床区画ごとに分割し、各位置の床面から天井下面まで不透明な面を連続させる。 -->
+        <collision name="north_wall_west_flat_collision">
+          <pose>-33.33335 25 0.95 0 0 0</pose>
+          <geometry><box><size>33.3333 0.3 1.9</size></box></geometry>
+        </collision>
+        <visual name="north_wall_west_flat_visual">
+          <pose>-33.33335 25 0.95 0 0 0</pose>
+          <geometry><box><size>33.3333 0.3 1.9</size></box></geometry>
+          <material><ambient>0.40 0.42 0.45 1</ambient><diffuse>0.62 0.64 0.67 1</diffuse></material>
+        </visual>
+        <collision name="north_wall_left_slope_collision">
+          <pose>-8.33335 25 1.62917027320656 0 -0.0872664625997165 0</pose>
+          <geometry><box><size>16.6667 0.3 1.9</size></box></geometry>
+        </collision>
+        <visual name="north_wall_left_slope_visual">
+          <pose>-8.33335 25 1.62917027320656 0 -0.0872664625997165 0</pose>
+          <geometry><box><size>16.6667 0.3 1.9</size></box></geometry>
+          <material><ambient>0.40 0.42 0.45 1</ambient><diffuse>0.62 0.64 0.67 1</diffuse></material>
+        </visual>
+        <collision name="north_wall_right_slope_collision">
+          <pose>8.33335 25 1.62917027320656 0 0.0872664625997165 0</pose>
+          <geometry><box><size>16.6667 0.3 1.9</size></box></geometry>
+        </collision>
+        <visual name="north_wall_right_slope_visual">
+          <pose>8.33335 25 1.62917027320656 0 0.0872664625997165 0</pose>
+          <geometry><box><size>16.6667 0.3 1.9</size></box></geometry>
+          <material><ambient>0.40 0.42 0.45 1</ambient><diffuse>0.62 0.64 0.67 1</diffuse></material>
+        </visual>
+        <collision name="north_wall_east_flat_collision">
+          <pose>33.33335 25 0.95 0 0 0</pose>
+          <geometry><box><size>33.3333 0.3 1.9</size></box></geometry>
+        </collision>
+        <visual name="north_wall_east_flat_visual">
+          <pose>33.33335 25 0.95 0 0 0</pose>
+          <geometry><box><size>33.3333 0.3 1.9</size></box></geometry>
+          <material><ambient>0.40 0.42 0.45 1</ambient><diffuse>0.62 0.64 0.67 1</diffuse></material>
+        </visual>
+        <collision name="south_wall_west_flat_collision">
+          <pose>-33.33335 -25 0.95 0 0 0</pose>
+          <geometry><box><size>33.3333 0.3 1.9</size></box></geometry>
+        </collision>
+        <visual name="south_wall_west_flat_visual">
+          <pose>-33.33335 -25 0.95 0 0 0</pose>
+          <geometry><box><size>33.3333 0.3 1.9</size></box></geometry>
+          <material><ambient>0.38 0.40 0.43 1</ambient><diffuse>0.58 0.60 0.63 1</diffuse></material>
+        </visual>
+        <collision name="south_wall_left_slope_collision">
+          <pose>-8.33335 -25 1.62917027320656 0 -0.0872664625997165 0</pose>
+          <geometry><box><size>16.6667 0.3 1.9</size></box></geometry>
+        </collision>
+        <visual name="south_wall_left_slope_visual">
+          <pose>-8.33335 -25 1.62917027320656 0 -0.0872664625997165 0</pose>
+          <geometry><box><size>16.6667 0.3 1.9</size></box></geometry>
+          <material><ambient>0.38 0.40 0.43 1</ambient><diffuse>0.58 0.60 0.63 1</diffuse></material>
+        </visual>
+        <collision name="south_wall_right_slope_collision">
+          <pose>8.33335 -25 1.62917027320656 0 0.0872664625997165 0</pose>
+          <geometry><box><size>16.6667 0.3 1.9</size></box></geometry>
+        </collision>
+        <visual name="south_wall_right_slope_visual">
+          <pose>8.33335 -25 1.62917027320656 0 0.0872664625997165 0</pose>
+          <geometry><box><size>16.6667 0.3 1.9</size></box></geometry>
+          <material><ambient>0.38 0.40 0.43 1</ambient><diffuse>0.58 0.60 0.63 1</diffuse></material>
+        </visual>
+        <collision name="south_wall_east_flat_collision">
+          <pose>33.33335 -25 0.95 0 0 0</pose>
+          <geometry><box><size>33.3333 0.3 1.9</size></box></geometry>
+        </collision>
+        <visual name="south_wall_east_flat_visual">
+          <pose>33.33335 -25 0.95 0 0 0</pose>
+          <geometry><box><size>33.3333 0.3 1.9</size></box></geometry>
+          <material><ambient>0.38 0.40 0.43 1</ambient><diffuse>0.58 0.60 0.63 1</diffuse></material>
+        </visual>
+        <collision name="west_wall_collision">
+          <pose>-50 0 0.95 0 0 0</pose>
+          <geometry><box><size>0.3 50 1.9</size></box></geometry>
+        </collision>
+        <visual name="west_wall_visual">
+          <pose>-50 0 0.95 0 0 0</pose>
+          <geometry><box><size>0.3 50 1.9</size></box></geometry>
+          <material><ambient>0.40 0.40 0.42 1</ambient><diffuse>0.64 0.64 0.66 1</diffuse></material>
+        </visual>
+        <collision name="east_wall_collision">
+          <pose>50 0 0.95 0 0 0</pose>
+          <geometry><box><size>0.3 50 1.9</size></box></geometry>
+        </collision>
+        <visual name="east_wall_visual">
+          <pose>50 0 0.95 0 0 0</pose>
+          <geometry><box><size>0.3 50 1.9</size></box></geometry>
+          <material><ambient>0.42 0.41 0.39 1</ambient><diffuse>0.66 0.64 0.60 1</diffuse></material>
+        </visual>
+      </link>
+    </model>
+
+    <model name="spawn_lane_markers">
+      <static>true</static>
+      <link name="markers">
+        <!-- 長尺マーキングは床区画ごとに分け、見た目だけを傾斜へ追従させる。 -->
+        <visual name="spawn_pad_left_slope_visual">
+          <pose>-8.33335 0 0.680170273206564 0 -0.0872664625997165 0</pose>
+          <geometry><box><size>13.3333 8 0.002</size></box></geometry>
+          <material>
+            <ambient>0.18 0.22 0.18 1</ambient>
+            <diffuse>0.24 0.34 0.24 1</diffuse>
+          </material>
+        </visual>
+        <visual name="spawn_pad_right_slope_visual">
+          <pose>1.5 0 1.41034054641313 0 0.0872664625997165 0</pose>
+          <geometry><box><size>3 8 0.002</size></box></geometry>
+          <material>
+            <ambient>0.18 0.22 0.18 1</ambient>
+            <diffuse>0.24 0.34 0.24 1</diffuse>
+          </material>
+        </visual>
+        <visual name="main_lane_west_flat_visual">
+          <pose>-29.33335 0 0.002 0 0 0</pose>
+          <geometry><box><size>13.3333 6 0.002</size></box></geometry>
+          <material>
+            <ambient>0.24 0.24 0.18 1</ambient>
+            <diffuse>0.42 0.42 0.20 1</diffuse>
+          </material>
+        </visual>
+        <visual name="main_lane_left_slope_visual">
+          <pose>-8.33335 0 0.680170273206564 0 -0.0872664625997165 0</pose>
+          <geometry><box><size>16.6667 6 0.002</size></box></geometry>
+          <material>
+            <ambient>0.24 0.24 0.18 1</ambient>
+            <diffuse>0.42 0.42 0.20 1</diffuse>
+          </material>
+        </visual>
+        <visual name="main_lane_right_slope_visual">
+          <pose>8.33335 0 0.680170273206564 0 0.0872664625997165 0</pose>
+          <geometry><box><size>16.6667 6 0.002</size></box></geometry>
+          <material>
+            <ambient>0.24 0.24 0.18 1</ambient>
+            <diffuse>0.42 0.42 0.20 1</diffuse>
+          </material>
+        </visual>
+        <visual name="main_lane_east_flat_visual">
+          <pose>33.33335 0 0.002 0 0 0</pose>
+          <geometry><box><size>5.3333 6 0.002</size></box></geometry>
+          <material>
+            <ambient>0.24 0.24 0.18 1</ambient>
+            <diffuse>0.42 0.42 0.20 1</diffuse>
+          </material>
+        </visual>
+      </link>
+    </model>
+
+    <model name="column_rows">
+      <static>true</static>
+      <link name="columns">
+        <!-- 柱は常に鉛直を保ち、各設置点の床面から天井下面まで届く高さへ個別調整する。 -->
+        <collision name="north_col_1_collision"><pose>-30 15 0.95 0 0 0</pose><geometry><box><size>1.0 1.0 1.9</size></box></geometry></collision>
+        <visual name="north_col_1_visual"><pose>-30 15 0.95 0 0 0</pose><geometry><box><size>1.0 1.0 1.9</size></box></geometry><material><ambient>0.50 0.50 0.52 1</ambient><diffuse>0.75 0.75 0.78 1</diffuse></material></visual>
+        <collision name="north_col_2_collision"><pose>-12 14 1.48336816155618 0 0 0</pose><geometry><box><size>1.1 1.1 2.96673632311236</size></box></geometry></collision>
+        <visual name="north_col_2_visual"><pose>-12 14 1.48336816155618 0 0 0</pose><geometry><box><size>1.1 1.1 2.96673632311236</size></box></geometry><material><ambient>0.50 0.50 0.52 1</ambient><diffuse>0.75 0.75 0.78 1</diffuse></material></visual>
+        <collision name="north_col_3_collision"><pose>8 16 1.64993151634126 0 0 0</pose><geometry><box><size>1.0 1.0 3.29986303268252</size></box></geometry></collision>
+        <visual name="north_col_3_visual"><pose>8 16 1.64993151634126 0 0 0</pose><geometry><box><size>1.0 1.0 3.29986303268252</size></box></geometry><material><ambient>0.50 0.50 0.52 1</ambient><diffuse>0.75 0.75 0.78 1</diffuse></material></visual>
+        <collision name="north_col_4_collision"><pose>28 13.5 0.95 0 0 0</pose><geometry><box><size>1.2 1.0 1.9</size></box></geometry></collision>
+        <visual name="north_col_4_visual"><pose>28 13.5 0.95 0 0 0</pose><geometry><box><size>1.2 1.0 1.9</size></box></geometry><material><ambient>0.50 0.50 0.52 1</ambient><diffuse>0.75 0.75 0.78 1</diffuse></material></visual>
+        <collision name="south_col_1_collision"><pose>-24 -14 0.95 0 0 0</pose><geometry><box><size>1.0 1.0 1.9</size></box></geometry></collision>
+        <visual name="south_col_1_visual"><pose>-24 -14 0.95 0 0 0</pose><geometry><box><size>1.0 1.0 1.9</size></box></geometry><material><ambient>0.46 0.48 0.50 1</ambient><diffuse>0.70 0.72 0.75 1</diffuse></material></visual>
+        <collision name="south_col_2_collision"><pose>-2 -15.5 1.91673632311236 0 0 0</pose><geometry><box><size>1.1 1.0 3.83347264622472</size></box></geometry></collision>
+        <visual name="south_col_2_visual"><pose>-2 -15.5 1.91673632311236 0 0 0</pose><geometry><box><size>1.1 1.0 3.83347264622472</size></box></geometry><material><ambient>0.46 0.48 0.50 1</ambient><diffuse>0.70 0.72 0.75 1</diffuse></material></visual>
+        <collision name="south_col_3_collision"><pose>18 -13 0.95 0 0 0</pose><geometry><box><size>1.0 1.2 1.9</size></box></geometry></collision>
+        <visual name="south_col_3_visual"><pose>18 -13 0.95 0 0 0</pose><geometry><box><size>1.0 1.2 1.9</size></box></geometry><material><ambient>0.46 0.48 0.50 1</ambient><diffuse>0.70 0.72 0.75 1</diffuse></material></visual>
+        <collision name="south_col_4_collision"><pose>36 -16 0.95 0 0 0</pose><geometry><box><size>1.0 1.0 1.9</size></box></geometry></collision>
+        <visual name="south_col_4_visual"><pose>36 -16 0.95 0 0 0</pose><geometry><box><size>1.0 1.0 1.9</size></box></geometry><material><ambient>0.46 0.48 0.50 1</ambient><diffuse>0.70 0.72 0.75 1</diffuse></material></visual>
+      </link>
+    </model>
+
+    <model name="ceiling_beams_and_lights">
+      <static>true</static>
+      <link name="overhead_features">
+        <!-- 梁は天井形状に概ね沿わせつつ、中央梁のみ坂道通過のため上方へ退避する。 -->
+        <collision name="beam_west_collision"><pose>-20 0 1.87 0 0 0</pose><geometry><box><size>1.0 42 0.16</size></box></geometry></collision>
+        <visual name="beam_west_visual"><pose>-20 0 1.87 0 0 0</pose><geometry><box><size>1.0 42 0.16</size></box></geometry><material><ambient>0.25 0.22 0.18 1</ambient><diffuse>0.45 0.39 0.30 1</diffuse></material></visual>
+        <collision name="beam_center_collision"><pose>6 0 2.8 0 0.0872664625997165 0</pose><geometry><box><size>1.0 38 0.16</size></box></geometry></collision>
+        <visual name="beam_center_visual"><pose>6 0 2.8 0 0.0872664625997165 0</pose><geometry><box><size>1.0 38 0.16</size></box></geometry><material><ambient>0.25 0.22 0.18 1</ambient><diffuse>0.45 0.39 0.30 1</diffuse></material></visual>
+        <collision name="beam_east_collision"><pose>32 2 1.87 0 0 0</pose><geometry><box><size>1.0 34 0.16</size></box></geometry></collision>
+        <visual name="beam_east_visual"><pose>32 2 1.87 0 0 0</pose><geometry><box><size>1.0 34 0.16</size></box></geometry><material><ambient>0.25 0.22 0.18 1</ambient><diffuse>0.45 0.39 0.30 1</diffuse></material></visual>
+        <visual name="light_strip_north"><pose>-8 9 1.66 0 0 0</pose><geometry><box><size>18 0.35 0.15</size></box></geometry><material><ambient>0.7 0.7 0.5 1</ambient><diffuse>0.9 0.9 0.6 1</diffuse></material></visual>
+        <visual name="light_strip_south"><pose>20 -8 1.92040272064102 0 0 0</pose><geometry><box><size>22 0.35 0.15</size></box></geometry><material><ambient>0.7 0.7 0.5 1</ambient><diffuse>0.9 0.9 0.6 1</diffuse></material></visual>
+      </link>
+    </model>
+
+    <model name="north_material_zone">
+      <static>true</static>
+      <link name="materials">
+        <!-- 北側はパレットと鋼材塊を分散配置し、対称性を避けながら遮蔽を作る。 -->
+        <collision name="pallet_stack_a_collision"><pose>-34 19 0.45 0 0 0</pose><geometry><box><size>3.0 2.0 0.9</size></box></geometry></collision>
+        <visual name="pallet_stack_a_visual"><pose>-34 19 0.45 0 0 0</pose><geometry><box><size>3.0 2.0 0.9</size></box></geometry><material><ambient>0.35 0.24 0.16 1</ambient><diffuse>0.58 0.41 0.28 1</diffuse></material></visual>
+        <collision name="steel_block_a_collision"><pose>-22 18 0.9 0 0 0</pose><geometry><box><size>5.5 2.5 1.8</size></box></geometry></collision>
+        <visual name="steel_block_a_visual"><pose>-22 18 0.9 0 0 0</pose><geometry><box><size>5.5 2.5 1.8</size></box></geometry><material><ambient>0.18 0.25 0.35 1</ambient><diffuse>0.28 0.40 0.54 1</diffuse></material></visual>
+        <collision name="pallet_stack_b_collision"><pose>-6 20 1.19995124101477 0 -0.0872664625997165 0</pose><geometry><box><size>2.4 2.4 0.6</size></box></geometry></collision>
+        <visual name="pallet_stack_b_visual"><pose>-6 20 1.19995124101477 0 -0.0872664625997165 0</pose><geometry><box><size>2.4 2.4 0.6</size></box></geometry><material><ambient>0.35 0.24 0.16 1</ambient><diffuse>0.58 0.41 0.28 1</diffuse></material></visual>
+        <collision name="steel_block_b_collision"><pose>10 18.5 1.39996517215437 0 0.0872664625997165 0</pose><geometry><box><size>4.0 3.5 1.5</size></box></geometry></collision>
+        <visual name="steel_block_b_visual"><pose>10 18.5 1.39996517215437 0 0.0872664625997165 0</pose><geometry><box><size>4.0 3.5 1.5</size></box></geometry><material><ambient>0.18 0.25 0.35 1</ambient><diffuse>0.28 0.40 0.54 1</diffuse></material></visual>
+        <collision name="pipe_bundle_collision"><pose>27 20 0.55 0 0 0</pose><geometry><box><size>8.0 1.6 1.1</size></box></geometry></collision>
+        <visual name="pipe_bundle_visual"><pose>27 20 0.55 0 0 0</pose><geometry><box><size>8.0 1.6 1.1</size></box></geometry><material><ambient>0.24 0.18 0.16 1</ambient><diffuse>0.47 0.31 0.26 1</diffuse></material></visual>
+        <collision name="crate_wall_collision"><pose>41 17.5 1.2 0 0 0</pose><geometry><box><size>5.0 3.0 2.4</size></box></geometry></collision>
+        <visual name="crate_wall_visual"><pose>41 17.5 1.2 0 0 0</pose><geometry><box><size>5.0 3.0 2.4</size></box></geometry><material><ambient>0.30 0.26 0.20 1</ambient><diffuse>0.52 0.45 0.34 1</diffuse></material></visual>
+      </link>
+    </model>
+
+    <model name="south_temporary_zone">
+      <static>true</static>
+      <link name="temporary_structures">
+        <!-- 南側は狭通路と遮蔽物を作り、手動走行時の見え隠れを増やす。 -->
+        <collision name="scaffold_lane_1_collision"><pose>-18 -20 1.0 0 0 0</pose><geometry><box><size>10 1.2 2.0</size></box></geometry></collision>
+        <visual name="scaffold_lane_1_visual"><pose>-18 -20 1.0 0 0 0</pose><geometry><box><size>10 1.2 2.0</size></box></geometry><material><ambient>0.25 0.25 0.16 1</ambient><diffuse>0.52 0.52 0.28 1</diffuse></material></visual>
+        <collision name="scaffold_lane_2_collision"><pose>-10 -15.5 1.53336816155618 0 -0.0872664625997165 0</pose><geometry><box><size>6 1.2 2.0</size></box></geometry></collision>
+        <visual name="scaffold_lane_2_visual"><pose>-10 -15.5 1.53336816155618 0 -0.0872664625997165 0</pose><geometry><box><size>6 1.2 2.0</size></box></geometry><material><ambient>0.25 0.25 0.16 1</ambient><diffuse>0.52 0.52 0.28 1</diffuse></material></visual>
+        <!-- 上部クリアランスを確保したので、大型障害物は既存高さのままレイアウトを維持する。 -->
+        <collision name="container_a_collision"><pose>4 -19 1.99991641316914 0 0.0872664625997165 0</pose><geometry><box><size>8 2.8 1.9</size></box></geometry></collision>
+        <visual name="container_a_visual"><pose>4 -19 1.99991641316914 0 0.0872664625997165 0</pose><geometry><box><size>8 2.8 1.9</size></box></geometry><material><ambient>0.18 0.33 0.24 1</ambient><diffuse>0.28 0.56 0.40 1</diffuse></material></visual>
+        <collision name="barrier_cluster_collision"><pose>16 -17 0.6 0 0 0</pose><geometry><box><size>5.5 1.0 1.2</size></box></geometry></collision>
+        <visual name="barrier_cluster_visual"><pose>16 -17 0.6 0 0 0</pose><geometry><box><size>5.5 1.0 1.2</size></box></geometry><material><ambient>0.45 0.20 0.18 1</ambient><diffuse>0.75 0.34 0.28 1</diffuse></material></visual>
+        <collision name="container_b_collision"><pose>30 -19.5 0.95 0 0 0</pose><geometry><box><size>6 3.0 1.9</size></box></geometry></collision>
+        <visual name="container_b_visual"><pose>30 -19.5 0.95 0 0 0</pose><geometry><box><size>6 3.0 1.9</size></box></geometry><material><ambient>0.18 0.24 0.36 1</ambient><diffuse>0.28 0.41 0.62 1</diffuse></material></visual>
+        <collision name="panel_stack_collision"><pose>42 -15 0.8 0 0 0</pose><geometry><box><size>4 2.2 1.6</size></box></geometry></collision>
+        <visual name="panel_stack_visual"><pose>42 -15 0.8 0 0 0</pose><geometry><box><size>4 2.2 1.6</size></box></geometry><material><ambient>0.36 0.28 0.18 1</ambient><diffuse>0.62 0.48 0.31 1</diffuse></material></visual>
+      </link>
+    </model>
+
+    <model name="wall_side_features">
+      <static>true</static>
+      <link name="side_features">
+        <!-- 壁沿いに低い構造物を足し、遠距離でも壁だけにならない輪郭を作る。 -->
+        <collision name="west_rack_collision"><pose>-44 10 0.95 0 0 0</pose><geometry><box><size>2.0 8.0 1.9</size></box></geometry></collision>
+        <visual name="west_rack_visual"><pose>-44 10 0.95 0 0 0</pose><geometry><box><size>2.0 8.0 1.9</size></box></geometry><material><ambient>0.26 0.20 0.14 1</ambient><diffuse>0.48 0.38 0.26 1</diffuse></material></visual>
+        <collision name="west_machine_collision"><pose>-42 -8 1.0 0 0 0</pose><geometry><box><size>3.5 4.0 2.0</size></box></geometry></collision>
+        <visual name="west_machine_visual"><pose>-42 -8 1.0 0 0 0</pose><geometry><box><size>3.5 4.0 2.0</size></box></geometry><material><ambient>0.22 0.28 0.32 1</ambient><diffuse>0.36 0.46 0.52 1</diffuse></material></visual>
+        <collision name="east_rack_collision"><pose>45 9 0.95 0 0 0</pose><geometry><box><size>2.0 7.0 1.9</size></box></geometry></collision>
+        <visual name="east_rack_visual"><pose>45 9 0.95 0 0 0</pose><geometry><box><size>2.0 7.0 1.9</size></box></geometry><material><ambient>0.28 0.22 0.16 1</ambient><diffuse>0.50 0.40 0.28 1</diffuse></material></visual>
+        <collision name="east_cabinet_collision"><pose>46 -10 0.95 0 0 0</pose><geometry><box><size>1.8 5.0 1.9</size></box></geometry></collision>
+        <visual name="east_cabinet_visual"><pose>46 -10 0.95 0 0 0</pose><geometry><box><size>1.8 5.0 1.9</size></box></geometry><material><ambient>0.26 0.18 0.18 1</ambient><diffuse>0.52 0.32 0.32 1</diffuse></material></visual>
+      </link>
+    </model>
+
+    <model name="east_evaluation_zone">
+      <static>true</static>
+      <link name="evaluation_features">
+        <!-- 東側だけ床を分割し、段差・溝・穴・スロープを同居させて観測対象をまとめる。 -->
+        <collision name="eval_floor_left_collision"><pose>39 -2 -0.05 0 0 0</pose><geometry><box><size>18 20 0.1</size></box></geometry></collision>
+        <visual name="eval_floor_left_visual"><pose>39 -2 -0.05 0 0 0</pose><geometry><box><size>18 20 0.1</size></box></geometry><material><ambient>0.24 0.24 0.24 1</ambient><diffuse>0.40 0.40 0.40 1</diffuse></material></visual>
+        <collision name="eval_floor_upper_collision"><pose>48 6.75 -0.05 0 0 0</pose><geometry><box><size>18 6.5 0.1</size></box></geometry></collision>
+        <visual name="eval_floor_upper_visual"><pose>48 6.75 -0.05 0 0 0</pose><geometry><box><size>18 6.5 0.1</size></box></geometry><material><ambient>0.24 0.24 0.24 1</ambient><diffuse>0.40 0.40 0.40 1</diffuse></material></visual>
+        <collision name="eval_floor_lower_collision"><pose>48 -10.5 -0.05 0 0 0</pose><geometry><box><size>18 9.0 0.1</size></box></geometry></collision>
+        <visual name="eval_floor_lower_visual"><pose>48 -10.5 -0.05 0 0 0</pose><geometry><box><size>18 9.0 0.1</size></box></geometry><material><ambient>0.24 0.24 0.24 1</ambient><diffuse>0.40 0.40 0.40 1</diffuse></material></visual>
+
+        <!-- 小段差は可走行性を残しつつ床法線の変化を作る。 -->
+        <collision name="step_platform_collision"><pose>38 8 0.04 0 0 0</pose><geometry><box><size>6 4 0.08</size></box></geometry></collision>
+        <visual name="step_platform_visual"><pose>38 8 0.04 0 0 0</pose><geometry><box><size>6 4 0.08</size></box></geometry><material><ambient>0.42 0.32 0.20 1</ambient><diffuse>0.64 0.49 0.32 1</diffuse></material></visual>
+
+        <!-- 2本の細い shoulder で溝の輪郭だけを残し、中央は非接触領域にする。 -->
+        <collision name="groove_lower_shoulder_collision"><pose>42.5 1.65 -0.05 0 0 0</pose><geometry><box><size>7.0 0.25 0.1</size></box></geometry></collision>
+        <visual name="groove_lower_shoulder_visual"><pose>42.5 1.65 -0.05 0 0 0</pose><geometry><box><size>7.0 0.25 0.1</size></box></geometry><material><ambient>0.32 0.26 0.18 1</ambient><diffuse>0.55 0.44 0.30 1</diffuse></material></visual>
+        <collision name="groove_upper_shoulder_collision"><pose>42.5 3.35 -0.05 0 0 0</pose><geometry><box><size>7.0 0.25 0.1</size></box></geometry></collision>
+        <visual name="groove_upper_shoulder_visual"><pose>42.5 3.35 -0.05 0 0 0</pose><geometry><box><size>7.0 0.25 0.1</size></box></geometry><material><ambient>0.32 0.26 0.18 1</ambient><diffuse>0.55 0.44 0.30 1</diffuse></material></visual>
+
+        <!-- 正方形の穴は床タイルを抜いた周囲だけを残し、下向き観測で欠損を見えるようにする。 -->
+        <collision name="hole_left_collision"><pose>46.2 -4.1 -0.05 0 0 0</pose><geometry><box><size>2.4 6.8 0.1</size></box></geometry></collision>
+        <visual name="hole_left_visual"><pose>46.2 -4.1 -0.05 0 0 0</pose><geometry><box><size>2.4 6.8 0.1</size></box></geometry><material><ambient>0.24 0.24 0.24 1</ambient><diffuse>0.40 0.40 0.40 1</diffuse></material></visual>
+        <collision name="hole_right_collision"><pose>50.8 -4.1 -0.05 0 0 0</pose><geometry><box><size>2.4 6.8 0.1</size></box></geometry></collision>
+        <visual name="hole_right_visual"><pose>50.8 -4.1 -0.05 0 0 0</pose><geometry><box><size>2.4 6.8 0.1</size></box></geometry><material><ambient>0.24 0.24 0.24 1</ambient><diffuse>0.40 0.40 0.40 1</diffuse></material></visual>
+        <collision name="hole_top_collision"><pose>48.5 -0.8 -0.05 0 0 0</pose><geometry><box><size>4.6 0.2 0.1</size></box></geometry></collision>
+        <visual name="hole_top_visual"><pose>48.5 -0.8 -0.05 0 0 0</pose><geometry><box><size>4.6 0.2 0.1</size></box></geometry><material><ambient>0.24 0.24 0.24 1</ambient><diffuse>0.40 0.40 0.40 1</diffuse></material></visual>
+        <collision name="hole_bottom_collision"><pose>48.5 -7.4 -0.05 0 0 0</pose><geometry><box><size>4.6 0.2 0.1</size></box></geometry></collision>
+        <visual name="hole_bottom_visual"><pose>48.5 -7.4 -0.05 0 0 0</pose><geometry><box><size>4.6 0.2 0.1</size></box></geometry><material><ambient>0.24 0.24 0.24 1</ambient><diffuse>0.40 0.40 0.40 1</diffuse></material></visual>
+
+        <!-- スロープは東端へ向かう緩い傾斜にして、坂面の点群取得を確認しやすくする。 -->
+        <collision name="ramp_collision"><pose>40 -10 0.225 0 -0.149 0</pose><geometry><box><size>8 4 0.2</size></box></geometry></collision>
+        <visual name="ramp_visual"><pose>40 -10 0.225 0 -0.149 0</pose><geometry><box><size>8 4 0.2</size></box></geometry><material><ambient>0.20 0.26 0.32 1</ambient><diffuse>0.34 0.48 0.60 1</diffuse></material></visual>
+      </link>
+    </model>
+
+    <model name="central_floor_irregularities">
+      <static>true</static>
+      <link name="central_features">
+        <!-- 固定 seed 20260625 の中央矩形配置をまとめ、斜面追従と接触形状を一体で固定する。 -->
+        <visual name="hemisphere_dent_visual_01"><pose>-18.20 -7.60 0.000 0 0 0.00</pose><geometry><mesh><uri>model://ai_ship_robot_gazebo/meshes/floor_irregularities/hemisphere_dent.obj</uri></mesh></geometry><material><ambient>0.16 0.16 0.16 1</ambient><diffuse>0.12 0.12 0.12 1</diffuse></material></visual>
+        <collision name="hemisphere_dent_collision_01"><pose>-18.20 -7.60 -0.020 0 0 0.00</pose><geometry><cylinder><radius>0.17</radius><length>0.04</length></cylinder></geometry></collision>
+        <visual name="hemisphere_dent_visual_02"><pose>-13.40 6.20 0.437 0 -0.087266 0.52</pose><geometry><mesh><uri>model://ai_ship_robot_gazebo/meshes/floor_irregularities/hemisphere_dent.obj</uri></mesh></geometry><material><ambient>0.16 0.16 0.16 1</ambient><diffuse>0.12 0.12 0.12 1</diffuse></material></visual>
+        <collision name="hemisphere_dent_collision_02"><pose>-13.40 6.20 0.417 0 -0.087266 0.52</pose><geometry><cylinder><radius>0.17</radius><length>0.04</length></cylinder></geometry></collision>
+        <visual name="hemisphere_dent_visual_03"><pose>-9.10 -1.80 0.814 0 -0.087266 1.05</pose><geometry><mesh><uri>model://ai_ship_robot_gazebo/meshes/floor_irregularities/hemisphere_dent.obj</uri></mesh></geometry><material><ambient>0.16 0.16 0.16 1</ambient><diffuse>0.12 0.12 0.12 1</diffuse></material></visual>
+        <collision name="hemisphere_dent_collision_03"><pose>-9.10 -1.80 0.794 0 -0.087266 1.05</pose><geometry><cylinder><radius>0.17</radius><length>0.04</length></cylinder></geometry></collision>
+        <visual name="hemisphere_dent_visual_04"><pose>-5.60 8.40 1.120 0 -0.087266 1.57</pose><geometry><mesh><uri>model://ai_ship_robot_gazebo/meshes/floor_irregularities/hemisphere_dent.obj</uri></mesh></geometry><material><ambient>0.16 0.16 0.16 1</ambient><diffuse>0.12 0.12 0.12 1</diffuse></material></visual>
+        <collision name="hemisphere_dent_collision_04"><pose>-5.60 8.40 1.100 0 -0.087266 1.57</pose><geometry><cylinder><radius>0.17</radius><length>0.04</length></cylinder></geometry></collision>
+        <visual name="hemisphere_dent_visual_05"><pose>-1.20 -6.40 1.505 0 -0.087266 2.09</pose><geometry><mesh><uri>model://ai_ship_robot_gazebo/meshes/floor_irregularities/hemisphere_dent.obj</uri></mesh></geometry><material><ambient>0.16 0.16 0.16 1</ambient><diffuse>0.12 0.12 0.12 1</diffuse></material></visual>
+        <collision name="hemisphere_dent_collision_05"><pose>-1.20 -6.40 1.485 0 -0.087266 2.09</pose><geometry><cylinder><radius>0.17</radius><length>0.04</length></cylinder></geometry></collision>
+        <visual name="hemisphere_dent_visual_06"><pose>2.40 4.60 1.610 0 0.087266 2.62</pose><geometry><mesh><uri>model://ai_ship_robot_gazebo/meshes/floor_irregularities/hemisphere_dent.obj</uri></mesh></geometry><material><ambient>0.16 0.16 0.16 1</ambient><diffuse>0.12 0.12 0.12 1</diffuse></material></visual>
+        <collision name="hemisphere_dent_collision_06"><pose>2.40 4.60 1.590 0 0.087266 2.62</pose><geometry><cylinder><radius>0.17</radius><length>0.04</length></cylinder></geometry></collision>
+        <visual name="hemisphere_dent_visual_07"><pose>6.80 -8.10 1.225 0 0.087266 0.35</pose><geometry><mesh><uri>model://ai_ship_robot_gazebo/meshes/floor_irregularities/hemisphere_dent.obj</uri></mesh></geometry><material><ambient>0.16 0.16 0.16 1</ambient><diffuse>0.12 0.12 0.12 1</diffuse></material></visual>
+        <collision name="hemisphere_dent_collision_07"><pose>6.80 -8.10 1.205 0 0.087266 0.35</pose><geometry><cylinder><radius>0.17</radius><length>0.04</length></cylinder></geometry></collision>
+        <visual name="hemisphere_dent_visual_08"><pose>10.60 1.70 0.892 0 0.087266 0.87</pose><geometry><mesh><uri>model://ai_ship_robot_gazebo/meshes/floor_irregularities/hemisphere_dent.obj</uri></mesh></geometry><material><ambient>0.16 0.16 0.16 1</ambient><diffuse>0.12 0.12 0.12 1</diffuse></material></visual>
+        <collision name="hemisphere_dent_collision_08"><pose>10.60 1.70 0.872 0 0.087266 0.87</pose><geometry><cylinder><radius>0.17</radius><length>0.04</length></cylinder></geometry></collision>
+        <visual name="hemisphere_dent_visual_09"><pose>15.20 -3.80 0.490 0 0.087266 1.40</pose><geometry><mesh><uri>model://ai_ship_robot_gazebo/meshes/floor_irregularities/hemisphere_dent.obj</uri></mesh></geometry><material><ambient>0.16 0.16 0.16 1</ambient><diffuse>0.12 0.12 0.12 1</diffuse></material></visual>
+        <collision name="hemisphere_dent_collision_09"><pose>15.20 -3.80 0.470 0 0.087266 1.40</pose><geometry><cylinder><radius>0.17</radius><length>0.04</length></cylinder></geometry></collision>
+        <visual name="hemisphere_dent_visual_10"><pose>19.10 7.10 0.000 0 0 1.92</pose><geometry><mesh><uri>model://ai_ship_robot_gazebo/meshes/floor_irregularities/hemisphere_dent.obj</uri></mesh></geometry><material><ambient>0.16 0.16 0.16 1</ambient><diffuse>0.12 0.12 0.12 1</diffuse></material></visual>
+        <collision name="hemisphere_dent_collision_10"><pose>19.10 7.10 -0.020 0 0 1.92</pose><geometry><cylinder><radius>0.17</radius><length>0.04</length></cylinder></geometry></collision>
+
+        <!-- 中央の立方体窪みは 5cm 開口と 20cm 局所パネルの組み合わせで接触抜けを抑える。 -->
+        <visual name="cube_dent_visual_01"><pose>-19.00 2.50 0.000 0 0 0.00</pose><geometry><mesh><uri>model://ai_ship_robot_gazebo/meshes/floor_irregularities/cube_dent.obj</uri></mesh></geometry><material><ambient>0.16 0.16 0.16 1</ambient><diffuse>0.12 0.12 0.12 1</diffuse></material></visual>
+        <collision name="cube_dent_collision_01"><pose>-19.00 2.50 -0.020 0 0 0.00</pose><geometry><box><size>0.22 0.22 0.04</size></box></geometry></collision>
+        <visual name="cube_dent_visual_02"><pose>-16.20 -5.30 0.192 0 -0.087266 0.79</pose><geometry><mesh><uri>model://ai_ship_robot_gazebo/meshes/floor_irregularities/cube_dent.obj</uri></mesh></geometry><material><ambient>0.16 0.16 0.16 1</ambient><diffuse>0.12 0.12 0.12 1</diffuse></material></visual>
+        <collision name="cube_dent_collision_02"><pose>-16.20 -5.30 0.172 0 -0.087266 0.79</pose><geometry><box><size>0.22 0.22 0.04</size></box></geometry></collision>
+        <visual name="cube_dent_visual_03"><pose>-14.00 8.60 0.385 0 -0.087266 1.57</pose><geometry><mesh><uri>model://ai_ship_robot_gazebo/meshes/floor_irregularities/cube_dent.obj</uri></mesh></geometry><material><ambient>0.16 0.16 0.16 1</ambient><diffuse>0.12 0.12 0.12 1</diffuse></material></visual>
+        <collision name="cube_dent_collision_03"><pose>-14.00 8.60 0.365 0 -0.087266 1.57</pose><geometry><box><size>0.22 0.22 0.04</size></box></geometry></collision>
+        <visual name="cube_dent_visual_04"><pose>-11.10 -8.70 0.639 0 -0.087266 2.36</pose><geometry><mesh><uri>model://ai_ship_robot_gazebo/meshes/floor_irregularities/cube_dent.obj</uri></mesh></geometry><material><ambient>0.16 0.16 0.16 1</ambient><diffuse>0.12 0.12 0.12 1</diffuse></material></visual>
+        <collision name="cube_dent_collision_04"><pose>-11.10 -8.70 0.619 0 -0.087266 2.36</pose><geometry><box><size>0.22 0.22 0.04</size></box></geometry></collision>
+        <visual name="cube_dent_visual_05"><pose>-8.40 3.40 0.875 0 -0.087266 0.52</pose><geometry><mesh><uri>model://ai_ship_robot_gazebo/meshes/floor_irregularities/cube_dent.obj</uri></mesh></geometry><material><ambient>0.16 0.16 0.16 1</ambient><diffuse>0.12 0.12 0.12 1</diffuse></material></visual>
+        <collision name="cube_dent_collision_05"><pose>-8.40 3.40 0.855 0 -0.087266 0.52</pose><geometry><box><size>0.22 0.22 0.04</size></box></geometry></collision>
+        <visual name="cube_dent_visual_06"><pose>-6.10 -1.00 1.076 0 -0.087266 1.31</pose><geometry><mesh><uri>model://ai_ship_robot_gazebo/meshes/floor_irregularities/cube_dent.obj</uri></mesh></geometry><material><ambient>0.16 0.16 0.16 1</ambient><diffuse>0.12 0.12 0.12 1</diffuse></material></visual>
+        <collision name="cube_dent_collision_06"><pose>-6.10 -1.00 1.056 0 -0.087266 1.31</pose><geometry><box><size>0.22 0.22 0.04</size></box></geometry></collision>
+        <visual name="cube_dent_visual_07"><pose>-3.30 9.10 1.321 0 -0.087266 2.09</pose><geometry><mesh><uri>model://ai_ship_robot_gazebo/meshes/floor_irregularities/cube_dent.obj</uri></mesh></geometry><material><ambient>0.16 0.16 0.16 1</ambient><diffuse>0.12 0.12 0.12 1</diffuse></material></visual>
+        <collision name="cube_dent_collision_07"><pose>-3.30 9.10 1.301 0 -0.087266 2.09</pose><geometry><box><size>0.22 0.22 0.04</size></box></geometry></collision>
+        <visual name="cube_dent_visual_08"><pose>-0.80 -4.20 1.539 0 -0.087266 2.88</pose><geometry><mesh><uri>model://ai_ship_robot_gazebo/meshes/floor_irregularities/cube_dent.obj</uri></mesh></geometry><material><ambient>0.16 0.16 0.16 1</ambient><diffuse>0.12 0.12 0.12 1</diffuse></material></visual>
+        <collision name="cube_dent_collision_08"><pose>-0.80 -4.20 1.519 0 -0.087266 2.88</pose><geometry><box><size>0.22 0.22 0.04</size></box></geometry></collision>
+        <visual name="cube_dent_visual_09"><pose>1.80 7.50 1.663 0 0.087266 0.35</pose><geometry><mesh><uri>model://ai_ship_robot_gazebo/meshes/floor_irregularities/cube_dent.obj</uri></mesh></geometry><material><ambient>0.16 0.16 0.16 1</ambient><diffuse>0.12 0.12 0.12 1</diffuse></material></visual>
+        <collision name="cube_dent_collision_09"><pose>1.80 7.50 1.643 0 0.087266 0.35</pose><geometry><box><size>0.22 0.22 0.04</size></box></geometry></collision>
+        <visual name="cube_dent_visual_10"><pose>4.70 -7.40 1.409 0 0.087266 1.13</pose><geometry><mesh><uri>model://ai_ship_robot_gazebo/meshes/floor_irregularities/cube_dent.obj</uri></mesh></geometry><material><ambient>0.16 0.16 0.16 1</ambient><diffuse>0.12 0.12 0.12 1</diffuse></material></visual>
+        <collision name="cube_dent_collision_10"><pose>4.70 -7.40 1.389 0 0.087266 1.13</pose><geometry><box><size>0.22 0.22 0.04</size></box></geometry></collision>
+        <visual name="cube_dent_visual_11"><pose>7.90 0.90 1.129 0 0.087266 1.92</pose><geometry><mesh><uri>model://ai_ship_robot_gazebo/meshes/floor_irregularities/cube_dent.obj</uri></mesh></geometry><material><ambient>0.16 0.16 0.16 1</ambient><diffuse>0.12 0.12 0.12 1</diffuse></material></visual>
+        <collision name="cube_dent_collision_11"><pose>7.90 0.90 1.109 0 0.087266 1.92</pose><geometry><box><size>0.22 0.22 0.04</size></box></geometry></collision>
+        <visual name="cube_dent_visual_12"><pose>11.30 8.20 0.831 0 0.087266 2.71</pose><geometry><mesh><uri>model://ai_ship_robot_gazebo/meshes/floor_irregularities/cube_dent.obj</uri></mesh></geometry><material><ambient>0.16 0.16 0.16 1</ambient><diffuse>0.12 0.12 0.12 1</diffuse></material></visual>
+        <collision name="cube_dent_collision_12"><pose>11.30 8.20 0.811 0 0.087266 2.71</pose><geometry><box><size>0.22 0.22 0.04</size></box></geometry></collision>
+        <visual name="cube_dent_visual_13"><pose>14.80 -6.00 0.525 0 0.087266 0.61</pose><geometry><mesh><uri>model://ai_ship_robot_gazebo/meshes/floor_irregularities/cube_dent.obj</uri></mesh></geometry><material><ambient>0.16 0.16 0.16 1</ambient><diffuse>0.12 0.12 0.12 1</diffuse></material></visual>
+        <collision name="cube_dent_collision_13"><pose>14.80 -6.00 0.505 0 0.087266 0.61</pose><geometry><box><size>0.22 0.22 0.04</size></box></geometry></collision>
+        <visual name="cube_dent_visual_14"><pose>17.40 2.80 0.000 0 0 1.40</pose><geometry><mesh><uri>model://ai_ship_robot_gazebo/meshes/floor_irregularities/cube_dent.obj</uri></mesh></geometry><material><ambient>0.16 0.16 0.16 1</ambient><diffuse>0.12 0.12 0.12 1</diffuse></material></visual>
+        <collision name="cube_dent_collision_14"><pose>17.40 2.80 -0.020 0 0 1.40</pose><geometry><box><size>0.22 0.22 0.04</size></box></geometry></collision>
+        <visual name="cube_dent_visual_15"><pose>19.40 -9.10 0.000 0 0 2.18</pose><geometry><mesh><uri>model://ai_ship_robot_gazebo/meshes/floor_irregularities/cube_dent.obj</uri></mesh></geometry><material><ambient>0.16 0.16 0.16 1</ambient><diffuse>0.12 0.12 0.12 1</diffuse></material></visual>
+        <collision name="cube_dent_collision_15"><pose>19.40 -9.10 -0.020 0 0 2.18</pose><geometry><box><size>0.22 0.22 0.04</size></box></geometry></collision>
+
+        <!-- 中央の出っ張りは主通路を完全閉塞しないよう互い違いで配置する。 -->
+        <collision name="hemisphere_bump_collision_01"><pose>-17.10 -1.90 0.030 0 0 0.17</pose><geometry><sphere><radius>0.03</radius></sphere></geometry></collision>
+        <visual name="hemisphere_bump_visual_01"><pose>-17.10 -1.90 0.030 0 0 0.17</pose><geometry><sphere><radius>0.03</radius></sphere></geometry><material><ambient>0.42 0.20 0.18 1</ambient><diffuse>0.64 0.30 0.28 1</diffuse></material></visual>
+        <collision name="hemisphere_bump_collision_02"><pose>-12.80 9.20 0.490 0 -0.087266 0.70</pose><geometry><sphere><radius>0.03</radius></sphere></geometry></collision>
+        <visual name="hemisphere_bump_visual_02"><pose>-12.80 9.20 0.490 0 -0.087266 0.70</pose><geometry><sphere><radius>0.03</radius></sphere></geometry><material><ambient>0.42 0.20 0.18 1</ambient><diffuse>0.64 0.30 0.28 1</diffuse></material></visual>
+        <collision name="hemisphere_bump_collision_03"><pose>-9.70 -6.70 0.761 0 -0.087266 1.22</pose><geometry><sphere><radius>0.03</radius></sphere></geometry></collision>
+        <visual name="hemisphere_bump_visual_03"><pose>-9.70 -6.70 0.761 0 -0.087266 1.22</pose><geometry><sphere><radius>0.03</radius></sphere></geometry><material><ambient>0.42 0.20 0.18 1</ambient><diffuse>0.64 0.30 0.28 1</diffuse></material></visual>
+        <collision name="hemisphere_bump_collision_04"><pose>-4.90 1.80 1.181 0 -0.087266 1.75</pose><geometry><sphere><radius>0.03</radius></sphere></geometry></collision>
+        <visual name="hemisphere_bump_visual_04"><pose>-4.90 1.80 1.181 0 -0.087266 1.75</pose><geometry><sphere><radius>0.03</radius></sphere></geometry><material><ambient>0.42 0.20 0.18 1</ambient><diffuse>0.64 0.30 0.28 1</diffuse></material></visual>
+        <collision name="hemisphere_bump_collision_05"><pose>-0.40 6.40 1.575 0 -0.087266 2.27</pose><geometry><sphere><radius>0.03</radius></sphere></geometry></collision>
+        <visual name="hemisphere_bump_visual_05"><pose>-0.40 6.40 1.575 0 -0.087266 2.27</pose><geometry><sphere><radius>0.03</radius></sphere></geometry><material><ambient>0.42 0.20 0.18 1</ambient><diffuse>0.64 0.30 0.28 1</diffuse></material></visual>
+        <collision name="hemisphere_bump_collision_06"><pose>3.60 -3.60 1.505 0 0.087266 2.80</pose><geometry><sphere><radius>0.03</radius></sphere></geometry></collision>
+        <visual name="hemisphere_bump_visual_06"><pose>3.60 -3.60 1.505 0 0.087266 2.80</pose><geometry><sphere><radius>0.03</radius></sphere></geometry><material><ambient>0.42 0.20 0.18 1</ambient><diffuse>0.64 0.30 0.28 1</diffuse></material></visual>
+        <collision name="hemisphere_bump_collision_07"><pose>8.80 8.70 1.050 0 0.087266 0.44</pose><geometry><sphere><radius>0.03</radius></sphere></geometry></collision>
+        <visual name="hemisphere_bump_visual_07"><pose>8.80 8.70 1.050 0 0.087266 0.44</pose><geometry><sphere><radius>0.03</radius></sphere></geometry><material><ambient>0.42 0.20 0.18 1</ambient><diffuse>0.64 0.30 0.28 1</diffuse></material></visual>
+        <collision name="hemisphere_bump_collision_08"><pose>12.10 -0.80 0.761 0 0.087266 0.96</pose><geometry><sphere><radius>0.03</radius></sphere></geometry></collision>
+        <visual name="hemisphere_bump_visual_08"><pose>12.10 -0.80 0.761 0 0.087266 0.96</pose><geometry><sphere><radius>0.03</radius></sphere></geometry><material><ambient>0.42 0.20 0.18 1</ambient><diffuse>0.64 0.30 0.28 1</diffuse></material></visual>
+        <collision name="hemisphere_bump_collision_09"><pose>16.40 5.30 0.030 0 0 1.48</pose><geometry><sphere><radius>0.03</radius></sphere></geometry></collision>
+        <visual name="hemisphere_bump_visual_09"><pose>16.40 5.30 0.030 0 0 1.48</pose><geometry><sphere><radius>0.03</radius></sphere></geometry><material><ambient>0.42 0.20 0.18 1</ambient><diffuse>0.64 0.30 0.28 1</diffuse></material></visual>
+        <collision name="hemisphere_bump_collision_10"><pose>18.70 -7.20 0.030 0 0 2.01</pose><geometry><sphere><radius>0.03</radius></sphere></geometry></collision>
+        <visual name="hemisphere_bump_visual_10"><pose>18.70 -7.20 0.030 0 0 2.01</pose><geometry><sphere><radius>0.03</radius></sphere></geometry><material><ambient>0.42 0.20 0.18 1</ambient><diffuse>0.64 0.30 0.28 1</diffuse></material></visual>
+
+        <collision name="cube_bump_collision_01"><pose>-18.60 7.80 0.025 0 0 0.26</pose><geometry><box><size>0.05 0.05 0.05</size></box></geometry></collision>
+        <visual name="cube_bump_visual_01"><pose>-18.60 7.80 0.025 0 0 0.26</pose><geometry><box><size>0.05 0.05 0.05</size></box></geometry><material><ambient>0.20 0.28 0.42 1</ambient><diffuse>0.30 0.44 0.64 1</diffuse></material></visual>
+        <collision name="cube_bump_collision_02"><pose>-15.20 -8.80 0.280 0 -0.087266 1.05</pose><geometry><box><size>0.05 0.05 0.05</size></box></geometry></collision>
+        <visual name="cube_bump_visual_02"><pose>-15.20 -8.80 0.280 0 -0.087266 1.05</pose><geometry><box><size>0.05 0.05 0.05</size></box></geometry><material><ambient>0.20 0.28 0.42 1</ambient><diffuse>0.30 0.44 0.64 1</diffuse></material></visual>
+        <collision name="cube_bump_collision_03"><pose>-13.10 0.40 0.464 0 -0.087266 1.83</pose><geometry><box><size>0.05 0.05 0.05</size></box></geometry></collision>
+        <visual name="cube_bump_visual_03"><pose>-13.10 0.40 0.464 0 -0.087266 1.83</pose><geometry><box><size>0.05 0.05 0.05</size></box></geometry><material><ambient>0.20 0.28 0.42 1</ambient><diffuse>0.30 0.44 0.64 1</diffuse></material></visual>
+        <collision name="cube_bump_collision_04"><pose>-10.40 5.60 0.700 0 -0.087266 2.62</pose><geometry><box><size>0.05 0.05 0.05</size></box></geometry></collision>
+        <visual name="cube_bump_visual_04"><pose>-10.40 5.60 0.700 0 -0.087266 2.62</pose><geometry><box><size>0.05 0.05 0.05</size></box></geometry><material><ambient>0.20 0.28 0.42 1</ambient><diffuse>0.30 0.44 0.64 1</diffuse></material></visual>
+        <collision name="cube_bump_collision_05"><pose>-7.30 -4.40 0.971 0 -0.087266 0.52</pose><geometry><box><size>0.05 0.05 0.05</size></box></geometry></collision>
+        <visual name="cube_bump_visual_05"><pose>-7.30 -4.40 0.971 0 -0.087266 0.52</pose><geometry><box><size>0.05 0.05 0.05</size></box></geometry><material><ambient>0.20 0.28 0.42 1</ambient><diffuse>0.30 0.44 0.64 1</diffuse></material></visual>
+        <collision name="cube_bump_collision_06"><pose>-5.00 9.00 1.172 0 -0.087266 1.31</pose><geometry><box><size>0.05 0.05 0.05</size></box></geometry></collision>
+        <visual name="cube_bump_visual_06"><pose>-5.00 9.00 1.172 0 -0.087266 1.31</pose><geometry><box><size>0.05 0.05 0.05</size></box></geometry><material><ambient>0.20 0.28 0.42 1</ambient><diffuse>0.30 0.44 0.64 1</diffuse></material></visual>
+        <collision name="cube_bump_collision_07"><pose>-2.20 -9.10 1.417 0 -0.087266 2.09</pose><geometry><box><size>0.05 0.05 0.05</size></box></geometry></collision>
+        <visual name="cube_bump_visual_07"><pose>-2.20 -9.10 1.417 0 -0.087266 2.09</pose><geometry><box><size>0.05 0.05 0.05</size></box></geometry><material><ambient>0.20 0.28 0.42 1</ambient><diffuse>0.30 0.44 0.64 1</diffuse></material></visual>
+        <collision name="cube_bump_collision_08"><pose>0.90 2.20 1.742 0 0.087266 2.88</pose><geometry><box><size>0.05 0.05 0.05</size></box></geometry></collision>
+        <visual name="cube_bump_visual_08"><pose>0.90 2.20 1.742 0 0.087266 2.88</pose><geometry><box><size>0.05 0.05 0.05</size></box></geometry><material><ambient>0.20 0.28 0.42 1</ambient><diffuse>0.30 0.44 0.64 1</diffuse></material></visual>
+        <collision name="cube_bump_collision_09"><pose>3.10 8.90 1.549 0 0.087266 0.17</pose><geometry><box><size>0.05 0.05 0.05</size></box></geometry></collision>
+        <visual name="cube_bump_visual_09"><pose>3.10 8.90 1.549 0 0.087266 0.17</pose><geometry><box><size>0.05 0.05 0.05</size></box></geometry><material><ambient>0.20 0.28 0.42 1</ambient><diffuse>0.30 0.44 0.64 1</diffuse></material></visual>
+        <collision name="cube_bump_collision_10"><pose>5.90 -6.20 1.304 0 0.087266 0.96</pose><geometry><box><size>0.05 0.05 0.05</size></box></geometry></collision>
+        <visual name="cube_bump_visual_10"><pose>5.90 -6.20 1.304 0 0.087266 0.96</pose><geometry><box><size>0.05 0.05 0.05</size></box></geometry><material><ambient>0.20 0.28 0.42 1</ambient><diffuse>0.30 0.44 0.64 1</diffuse></material></visual>
+        <collision name="cube_bump_collision_11"><pose>9.60 4.20 0.980 0 0.087266 1.75</pose><geometry><box><size>0.05 0.05 0.05</size></box></geometry></collision>
+        <visual name="cube_bump_visual_11"><pose>9.60 4.20 0.980 0 0.087266 1.75</pose><geometry><box><size>0.05 0.05 0.05</size></box></geometry><material><ambient>0.20 0.28 0.42 1</ambient><diffuse>0.30 0.44 0.64 1</diffuse></material></visual>
+        <collision name="cube_bump_collision_12"><pose>13.40 -9.00 0.648 0 0.087266 2.53</pose><geometry><box><size>0.05 0.05 0.05</size></box></geometry></collision>
+        <visual name="cube_bump_visual_12"><pose>13.40 -9.00 0.648 0 0.087266 2.53</pose><geometry><box><size>0.05 0.05 0.05</size></box></geometry><material><ambient>0.20 0.28 0.42 1</ambient><diffuse>0.30 0.44 0.64 1</diffuse></material></visual>
+        <collision name="cube_bump_collision_13"><pose>16.90 0.60 0.025 0 0 0.44</pose><geometry><box><size>0.05 0.05 0.05</size></box></geometry></collision>
+        <visual name="cube_bump_visual_13"><pose>16.90 0.60 0.025 0 0 0.44</pose><geometry><box><size>0.05 0.05 0.05</size></box></geometry><material><ambient>0.20 0.28 0.42 1</ambient><diffuse>0.30 0.44 0.64 1</diffuse></material></visual>
+        <collision name="cube_bump_collision_14"><pose>18.30 9.10 0.025 0 0 1.22</pose><geometry><box><size>0.05 0.05 0.05</size></box></geometry></collision>
+        <visual name="cube_bump_visual_14"><pose>18.30 9.10 0.025 0 0 1.22</pose><geometry><box><size>0.05 0.05 0.05</size></box></geometry><material><ambient>0.20 0.28 0.42 1</ambient><diffuse>0.30 0.44 0.64 1</diffuse></material></visual>
+        <collision name="cube_bump_collision_15"><pose>19.60 -3.00 0.025 0 0 2.01</pose><geometry><box><size>0.05 0.05 0.05</size></box></geometry></collision>
+        <visual name="cube_bump_visual_15"><pose>19.60 -3.00 0.025 0 0 2.01</pose><geometry><box><size>0.05 0.05 0.05</size></box></geometry><material><ambient>0.20 0.28 0.42 1</ambient><diffuse>0.30 0.44 0.64 1</diffuse></material></visual>
+
+        <collision name="bar_bump_collision_01"><pose>-17.80 -9.00 0.025 0 0 0.03</pose><geometry><box><size>1.00 0.05 0.05</size></box></geometry></collision>
+        <visual name="bar_bump_visual_01"><pose>-17.80 -9.00 0.025 0 0 0.03</pose><geometry><box><size>1.00 0.05 0.05</size></box></geometry><material><ambient>0.30 0.24 0.14 1</ambient><diffuse>0.54 0.42 0.24 1</diffuse></material></visual>
+        <collision name="bar_bump_collision_02"><pose>-16.40 9.10 0.175 0 -0.087266 0.18</pose><geometry><box><size>1.00 0.05 0.05</size></box></geometry></collision>
+        <visual name="bar_bump_visual_02"><pose>-16.40 9.10 0.175 0 -0.087266 0.18</pose><geometry><box><size>1.00 0.05 0.05</size></box></geometry><material><ambient>0.30 0.24 0.14 1</ambient><diffuse>0.54 0.42 0.24 1</diffuse></material></visual>
+        <collision name="bar_bump_collision_03"><pose>-13.20 -2.60 0.455 0 -0.087266 -0.09</pose><geometry><box><size>1.00 0.05 0.05</size></box></geometry></collision>
+        <visual name="bar_bump_visual_03"><pose>-13.20 -2.60 0.455 0 -0.087266 -0.09</pose><geometry><box><size>1.00 0.05 0.05</size></box></geometry><material><ambient>0.30 0.24 0.14 1</ambient><diffuse>0.54 0.42 0.24 1</diffuse></material></visual>
+        <collision name="bar_bump_collision_04"><pose>-10.10 6.80 0.726 0 -0.087266 0.12</pose><geometry><box><size>1.00 0.05 0.05</size></box></geometry></collision>
+        <visual name="bar_bump_visual_04"><pose>-10.10 6.80 0.726 0 -0.087266 0.12</pose><geometry><box><size>1.00 0.05 0.05</size></box></geometry><material><ambient>0.30 0.24 0.14 1</ambient><diffuse>0.54 0.42 0.24 1</diffuse></material></visual>
+        <collision name="bar_bump_collision_05"><pose>-7.00 -7.40 0.997 0 -0.087266 -0.15</pose><geometry><box><size>1.00 0.05 0.05</size></box></geometry></collision>
+        <visual name="bar_bump_visual_05"><pose>-7.00 -7.40 0.997 0 -0.087266 -0.15</pose><geometry><box><size>1.00 0.05 0.05</size></box></geometry><material><ambient>0.30 0.24 0.14 1</ambient><diffuse>0.54 0.42 0.24 1</diffuse></material></visual>
+        <collision name="bar_bump_collision_06"><pose>-3.80 1.20 1.277 0 -0.087266 0.21</pose><geometry><box><size>1.00 0.05 0.05</size></box></geometry></collision>
+        <visual name="bar_bump_visual_06"><pose>-3.80 1.20 1.277 0 -0.087266 0.21</pose><geometry><box><size>1.00 0.05 0.05</size></box></geometry><material><ambient>0.30 0.24 0.14 1</ambient><diffuse>0.54 0.42 0.24 1</diffuse></material></visual>
+        <collision name="bar_bump_collision_07"><pose>-0.60 8.60 1.557 0 -0.087266 -0.04</pose><geometry><box><size>1.00 0.05 0.05</size></box></geometry></collision>
+        <visual name="bar_bump_visual_07"><pose>-0.60 8.60 1.557 0 -0.087266 -0.04</pose><geometry><box><size>1.00 0.05 0.05</size></box></geometry><material><ambient>0.30 0.24 0.14 1</ambient><diffuse>0.54 0.42 0.24 1</diffuse></material></visual>
+        <collision name="bar_bump_collision_08"><pose>2.60 -8.80 1.593 0 0.087266 0.10</pose><geometry><box><size>1.00 0.05 0.05</size></box></geometry></collision>
+        <visual name="bar_bump_visual_08"><pose>2.60 -8.80 1.593 0 0.087266 0.10</pose><geometry><box><size>1.00 0.05 0.05</size></box></geometry><material><ambient>0.30 0.24 0.14 1</ambient><diffuse>0.54 0.42 0.24 1</diffuse></material></visual>
+        <collision name="bar_bump_collision_09"><pose>5.80 3.00 1.313 0 0.087266 -0.18</pose><geometry><box><size>1.00 0.05 0.05</size></box></geometry></collision>
+        <visual name="bar_bump_visual_09"><pose>5.80 3.00 1.313 0 0.087266 -0.18</pose><geometry><box><size>1.00 0.05 0.05</size></box></geometry><material><ambient>0.30 0.24 0.14 1</ambient><diffuse>0.54 0.42 0.24 1</diffuse></material></visual>
+        <collision name="bar_bump_collision_10"><pose>9.00 -1.20 1.033 0 0.087266 0.05</pose><geometry><box><size>1.00 0.05 0.05</size></box></geometry></collision>
+        <visual name="bar_bump_visual_10"><pose>9.00 -1.20 1.033 0 0.087266 0.05</pose><geometry><box><size>1.00 0.05 0.05</size></box></geometry><material><ambient>0.30 0.24 0.14 1</ambient><diffuse>0.54 0.42 0.24 1</diffuse></material></visual>
+        <collision name="bar_bump_collision_11"><pose>12.20 8.80 0.753 0 0.087266 -0.12</pose><geometry><box><size>1.00 0.05 0.05</size></box></geometry></collision>
+        <visual name="bar_bump_visual_11"><pose>12.20 8.80 0.753 0 0.087266 -0.12</pose><geometry><box><size>1.00 0.05 0.05</size></box></geometry><material><ambient>0.30 0.24 0.14 1</ambient><diffuse>0.54 0.42 0.24 1</diffuse></material></visual>
+        <collision name="bar_bump_collision_12"><pose>15.40 -5.00 0.473 0 0.087266 0.16</pose><geometry><box><size>1.00 0.05 0.05</size></box></geometry></collision>
+        <visual name="bar_bump_visual_12"><pose>15.40 -5.00 0.473 0 0.087266 0.16</pose><geometry><box><size>1.00 0.05 0.05</size></box></geometry><material><ambient>0.30 0.24 0.14 1</ambient><diffuse>0.54 0.42 0.24 1</diffuse></material></visual>
+        <collision name="bar_bump_collision_13"><pose>17.60 2.40 0.025 0 0 -0.07</pose><geometry><box><size>1.00 0.05 0.05</size></box></geometry></collision>
+        <visual name="bar_bump_visual_13"><pose>17.60 2.40 0.025 0 0 -0.07</pose><geometry><box><size>1.00 0.05 0.05</size></box></geometry><material><ambient>0.30 0.24 0.14 1</ambient><diffuse>0.54 0.42 0.24 1</diffuse></material></visual>
+        <collision name="bar_bump_collision_14"><pose>18.90 -9.20 0.025 0 0 0.08</pose><geometry><box><size>1.00 0.05 0.05</size></box></geometry></collision>
+        <visual name="bar_bump_visual_14"><pose>18.90 -9.20 0.025 0 0 0.08</pose><geometry><box><size>1.00 0.05 0.05</size></box></geometry><material><ambient>0.30 0.24 0.14 1</ambient><diffuse>0.54 0.42 0.24 1</diffuse></material></visual>
+        <collision name="bar_bump_collision_15"><pose>19.40 9.20 0.025 0 0 -0.20</pose><geometry><box><size>1.00 0.05 0.05</size></box></geometry></collision>
+        <visual name="bar_bump_visual_15"><pose>19.40 9.20 0.025 0 0 -0.20</pose><geometry><box><size>1.00 0.05 0.05</size></box></geometry><material><ambient>0.30 0.24 0.14 1</ambient><diffuse>0.54 0.42 0.24 1</diffuse></material></visual>
+      </link>
+    </model>
+
+    <model name="peripheral_floor_irregularities">
+      <static>true</static>
+      <link name="peripheral_features">
+        <!-- 周辺帯は壁際観測の変化だけを残し、mesh と小物の総数を大きく削減する。 -->
+        <visual name="peripheral_hemisphere_dent_visual_01"><pose>-42.00 17.00 0.000 0 0 0.35</pose><geometry><mesh><uri>model://ai_ship_robot_gazebo/meshes/floor_irregularities/hemisphere_dent.obj</uri></mesh></geometry><material><ambient>0.16 0.16 0.16 1</ambient><diffuse>0.12 0.12 0.12 1</diffuse></material></visual>
+        <collision name="peripheral_hemisphere_dent_collision_01"><pose>-42.00 17.00 -0.020 0 0 0.35</pose><geometry><cylinder><radius>0.17</radius><length>0.04</length></cylinder></geometry></collision>
+        <visual name="peripheral_hemisphere_dent_visual_02"><pose>-31.00 8.50 0.000 0 0 1.75</pose><geometry><mesh><uri>model://ai_ship_robot_gazebo/meshes/floor_irregularities/hemisphere_dent.obj</uri></mesh></geometry><material><ambient>0.16 0.16 0.16 1</ambient><diffuse>0.12 0.12 0.12 1</diffuse></material></visual>
+        <collision name="peripheral_hemisphere_dent_collision_02"><pose>-31.00 8.50 -0.020 0 0 1.75</pose><geometry><cylinder><radius>0.17</radius><length>0.04</length></cylinder></geometry></collision>
+        <visual name="peripheral_hemisphere_dent_visual_03"><pose>26.00 -21.50 0.000 0 0 1.92</pose><geometry><mesh><uri>model://ai_ship_robot_gazebo/meshes/floor_irregularities/hemisphere_dent.obj</uri></mesh></geometry><material><ambient>0.16 0.16 0.16 1</ambient><diffuse>0.12 0.12 0.12 1</diffuse></material></visual>
+        <collision name="peripheral_hemisphere_dent_collision_03"><pose>26.00 -21.50 -0.020 0 0 1.92</pose><geometry><cylinder><radius>0.17</radius><length>0.04</length></cylinder></geometry></collision>
+        <visual name="peripheral_hemisphere_dent_visual_04"><pose>34.50 -6.00 0.000 0 0 0.79</pose><geometry><mesh><uri>model://ai_ship_robot_gazebo/meshes/floor_irregularities/hemisphere_dent.obj</uri></mesh></geometry><material><ambient>0.16 0.16 0.16 1</ambient><diffuse>0.12 0.12 0.12 1</diffuse></material></visual>
+        <collision name="peripheral_hemisphere_dent_collision_04"><pose>34.50 -6.00 -0.020 0 0 0.79</pose><geometry><cylinder><radius>0.17</radius><length>0.04</length></cylinder></geometry></collision>
+
+        <!-- 周辺の代表 bump だけを残し、隅と壁沿いの単調化を避ける。 -->
+        <collision name="peripheral_hemisphere_bump_collision_01"><pose>-39.00 14.50 0.030 0 0 0.96</pose><geometry><sphere><radius>0.03</radius></sphere></geometry></collision>
+        <visual name="peripheral_hemisphere_bump_visual_01"><pose>-39.00 14.50 0.030 0 0 0.96</pose><geometry><sphere><radius>0.03</radius></sphere></geometry><material><ambient>0.42 0.20 0.18 1</ambient><diffuse>0.64 0.30 0.28 1</diffuse></material></visual>
+        <collision name="peripheral_hemisphere_bump_collision_02"><pose>-23.00 -8.50 0.030 0 0 3.05</pose><geometry><sphere><radius>0.03</radius></sphere></geometry></collision>
+        <visual name="peripheral_hemisphere_bump_visual_02"><pose>-23.00 -8.50 0.030 0 0 3.05</pose><geometry><sphere><radius>0.03</radius></sphere></geometry><material><ambient>0.42 0.20 0.18 1</ambient><diffuse>0.64 0.30 0.28 1</diffuse></material></visual>
+        <collision name="peripheral_hemisphere_bump_collision_03"><pose>27.00 -18.50 0.030 0 0 1.31</pose><geometry><sphere><radius>0.03</radius></sphere></geometry></collision>
+        <visual name="peripheral_hemisphere_bump_visual_03"><pose>27.00 -18.50 0.030 0 0 1.31</pose><geometry><sphere><radius>0.03</radius></sphere></geometry><material><ambient>0.42 0.20 0.18 1</ambient><diffuse>0.64 0.30 0.28 1</diffuse></material></visual>
+        <collision name="peripheral_hemisphere_bump_collision_04"><pose>36.50 -2.50 0.030 0 0 2.71</pose><geometry><sphere><radius>0.03</radius></sphere></geometry></collision>
+        <visual name="peripheral_hemisphere_bump_visual_04"><pose>36.50 -2.50 0.030 0 0 2.71</pose><geometry><sphere><radius>0.03</radius></sphere></geometry><material><ambient>0.42 0.20 0.18 1</ambient><diffuse>0.64 0.30 0.28 1</diffuse></material></visual>
+
+        <collision name="peripheral_bar_bump_collision_01"><pose>-41.00 11.50 0.025 0 0 0.14</pose><geometry><box><size>1.00 0.05 0.05</size></box></geometry></collision>
+        <visual name="peripheral_bar_bump_visual_01"><pose>-41.00 11.50 0.025 0 0 0.14</pose><geometry><box><size>1.00 0.05 0.05</size></box></geometry><material><ambient>0.30 0.24 0.14 1</ambient><diffuse>0.54 0.42 0.24 1</diffuse></material></visual>
+        <collision name="peripheral_bar_bump_collision_02"><pose>-16.50 -12.50 0.166 0 -0.087266 -0.05</pose><geometry><box><size>1.00 0.05 0.05</size></box></geometry></collision>
+        <visual name="peripheral_bar_bump_visual_02"><pose>-16.50 -12.50 0.166 0 -0.087266 -0.05</pose><geometry><box><size>1.00 0.05 0.05</size></box></geometry><material><ambient>0.30 0.24 0.14 1</ambient><diffuse>0.54 0.42 0.24 1</diffuse></material></visual>
+        <collision name="peripheral_bar_bump_collision_03"><pose>22.50 -20.50 0.025 0 0 -0.16</pose><geometry><box><size>1.00 0.05 0.05</size></box></geometry></collision>
+        <visual name="peripheral_bar_bump_visual_03"><pose>22.50 -20.50 0.025 0 0 -0.16</pose><geometry><box><size>1.00 0.05 0.05</size></box></geometry><material><ambient>0.30 0.24 0.14 1</ambient><diffuse>0.54 0.42 0.24 1</diffuse></material></visual>
+        <collision name="peripheral_bar_bump_collision_04"><pose>37.50 9.50 0.025 0 0 -0.07</pose><geometry><box><size>1.00 0.05 0.05</size></box></geometry></collision>
+        <visual name="peripheral_bar_bump_visual_04"><pose>37.50 9.50 0.025 0 0 -0.07</pose><geometry><box><size>1.00 0.05 0.05</size></box></geometry><material><ambient>0.30 0.24 0.14 1</ambient><diffuse>0.54 0.42 0.24 1</diffuse></material></visual>
+      </link>
+    </model>
+
+    <!-- 中央帯の天井特徴は疎配置にまとめ、SLAM 用の高さ変化だけを残す。 -->
+    <model name="ceiling_pulley_center_sparse">
+      <static>true</static>
+      <link name="feature_link">
+        <!-- 天井接触を想定しないため、collision を持たせず visual のみで特徴点を供給する。 -->
+        <visual name="pulley_visual_01"><pose>-16 -8 1.893329 1.57079632679 0 0</pose><geometry><cylinder><radius>0.15</radius><length>0.03</length></cylinder></geometry><material><ambient>0.15 0.35 0.45 1</ambient><diffuse>0.15 0.35 0.45 1</diffuse></material></visual>
+        <visual name="pulley_visual_02"><pose>-8 -2.5 2.593238 1.57079632679 0 1.57079632679</pose><geometry><cylinder><radius>0.15</radius><length>0.03</length></cylinder></geometry><material><ambient>0.15 0.35 0.45 1</ambient><diffuse>0.15 0.35 0.45 1</diffuse></material></visual>
+        <visual name="pulley_visual_03"><pose>0 3 3.293147 1.57079632679 0 0.78539816339</pose><geometry><cylinder><radius>0.15</radius><length>0.03</length></cylinder></geometry><material><ambient>0.15 0.35 0.45 1</ambient><diffuse>0.15 0.35 0.45 1</diffuse></material></visual>
+        <visual name="pulley_visual_04"><pose>8 -2.5 2.593238 1.57079632679 0 0</pose><geometry><cylinder><radius>0.15</radius><length>0.03</length></cylinder></geometry><material><ambient>0.15 0.35 0.45 1</ambient><diffuse>0.15 0.35 0.45 1</diffuse></material></visual>
+        <visual name="pulley_visual_05"><pose>16 8.5 1.893329 1.57079632679 0 1.57079632679</pose><geometry><cylinder><radius>0.15</radius><length>0.03</length></cylinder></geometry><material><ambient>0.15 0.35 0.45 1</ambient><diffuse>0.15 0.35 0.45 1</diffuse></material></visual>
+        <visual name="pulley_visual_06"><pose>-16 8.5 1.893329 1.57079632679 0 0.78539816339</pose><geometry><cylinder><radius>0.15</radius><length>0.03</length></cylinder></geometry><material><ambient>0.15 0.35 0.45 1</ambient><diffuse>0.15 0.35 0.45 1</diffuse></material></visual>
+        <visual name="pulley_visual_07"><pose>0 -8 3.293147 1.57079632679 0 0</pose><geometry><cylinder><radius>0.15</radius><length>0.03</length></cylinder></geometry><material><ambient>0.15 0.35 0.45 1</ambient><diffuse>0.15 0.35 0.45 1</diffuse></material></visual>
+      </link>
+    </model>
+
+    <!-- 外周帯も少数の代表点に絞り、壁際と隅の観測変化だけを残す。 -->
+    <model name="ceiling_pulley_outer_sparse">
+      <static>true</static>
+      <link name="feature_link">
+        <visual name="pulley_visual_01"><pose>-40 19 1.835 1.57079632679 0 0</pose><geometry><cylinder><radius>0.15</radius><length>0.03</length></cylinder></geometry><material><ambient>0.15 0.35 0.45 1</ambient><diffuse>0.15 0.35 0.45 1</diffuse></material></visual>
+        <visual name="pulley_visual_02"><pose>-10 -18 2.418261 1.57079632679 0 0.78539816339</pose><geometry><cylinder><radius>0.15</radius><length>0.03</length></cylinder></geometry><material><ambient>0.15 0.35 0.45 1</ambient><diffuse>0.15 0.35 0.45 1</diffuse></material></visual>
+        <visual name="pulley_visual_03"><pose>32 21 1.835 1.57079632679 0 0.78539816339</pose><geometry><cylinder><radius>0.15</radius><length>0.03</length></cylinder></geometry><material><ambient>0.15 0.35 0.45 1</ambient><diffuse>0.15 0.35 0.45 1</diffuse></material></visual>
+        <visual name="pulley_visual_04"><pose>38 -21 1.835 1.57079632679 0 0.78539816339</pose><geometry><cylinder><radius>0.15</radius><length>0.03</length></cylinder></geometry><material><ambient>0.15 0.35 0.45 1</ambient><diffuse>0.15 0.35 0.45 1</diffuse></material></visual>
+        <visual name="pulley_visual_05"><pose>-46 8 1.835 1.57079632679 0 1.57079632679</pose><geometry><cylinder><radius>0.15</radius><length>0.03</length></cylinder></geometry><material><ambient>0.15 0.35 0.45 1</ambient><diffuse>0.15 0.35 0.45 1</diffuse></material></visual>
+      </link>
+    </model>
+
+    <scene>
+      <ambient>0.45 0.45 0.45 1</ambient>
+      <background>0.70 0.74 0.78 1</background>
+      <shadows>false</shadows>
+    </scene>
+  </world>
+</sdf>

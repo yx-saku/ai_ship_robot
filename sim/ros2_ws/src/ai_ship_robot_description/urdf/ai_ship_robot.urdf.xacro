@@ -8,10 +8,15 @@
   <xacro:property name="base_width" value="0.72" />
   <xacro:property name="base_height" value="0.30" />
   <xacro:property name="ground_clearance" value="0.03" />
-  <xacro:property name="omni_wheel_radius" value="0.05" />
-  <xacro:property name="omni_wheel_separation" value="${base_width - omni_wheel_radius * 2.0 -0.15}" />
-  <xacro:property name="omni_wheel_x_offset" value="${base_length / 2.0 - omni_wheel_radius - 0.02}" />
-  <xacro:property name="base_center_z" value="${ground_clearance - omni_wheel_radius + base_height / 2.0}" />
+  <xacro:property name="wheel_radius" value="0.04" />
+  <xacro:property name="wheel_width" value="0.08" />
+  <xacro:property name="wheel_mass" value="1.6" />
+  <xacro:property name="wheelbase" value="0.52" />
+  <xacro:property name="track_width" value="0.54" />
+  <xacro:property name="wheel_joint_damping" value="0.25" />
+  <!-- 本体中心と車輪中心の差を明示し、接地基準と見た目配置を同じ式系で扱えるようにする。 -->
+  <xacro:property name="wheel_center_z_from_base" value="${-base_height / 2.0 + wheel_radius - ground_clearance}" />
+  <xacro:property name="base_center_z" value="${wheel_radius + ground_clearance + base_height / 2.0}" />
   <xacro:property name="arm_robot_body_length" value="0.62" />
   <xacro:property name="arm_robot_body_width" value="0.62" />
   <xacro:property name="arm_robot_body_height" value="0.74" />
@@ -19,8 +24,31 @@
   <xacro:property name="arm_robot_upper_arm_length" value="0.60" />
   <xacro:property name="arm_robot_forearm_length" value="0.50" />
   <xacro:property name="arm_robot_wrist_length" value="0.40" />
-  <xacro:property name="arm_robot_first_arm_pitch" value="${45.0 * pi / 180.0}" />
-  <xacro:property name="arm_robot_second_arm_pitch" value="${115.0 * pi / 180.0}" />
+  <xacro:property name="arm_robot_shoulder_pitch" value="${5.0 * pi / 180.0}" />
+  <xacro:property name="arm_robot_elbow_pitch" value="${175.0 * pi / 180.0}" />
+  <xacro:property name="arm_robot_wrist_pitch" value="${-175.0 * pi / 180.0}" />
+  <!-- シミュレーション安定性を優先し、台車側へ質量と重心を集めて前のめりを抑える。 -->
+  <xacro:property name="base_mass" value="48.0" />
+  <xacro:property name="base_com_x" value="-0.03" />
+  <xacro:property name="base_com_y" value="0.0" />
+  <xacro:property name="base_com_z" value="-0.18" />
+  <!-- 上物の見た目と接触判定を維持したまま、転倒に効く慣性だけを大幅に軽くする。 -->
+  <xacro:property name="arm_robot_body_mass" value="2.0" />
+  <xacro:property name="arm_robot_body_com_x" value="0.0" />
+  <xacro:property name="arm_robot_body_com_y" value="0.0" />
+  <xacro:property name="arm_robot_body_com_z" value="-0.14" />
+  <xacro:property name="arm_robot_upper_arm_mass" value="0.5" />
+  <xacro:property name="arm_robot_upper_arm_com_x" value="-0.02" />
+  <xacro:property name="arm_robot_upper_arm_com_y" value="0.0" />
+  <xacro:property name="arm_robot_upper_arm_com_z" value="-0.04" />
+  <xacro:property name="arm_robot_forearm_mass" value="0.5" />
+  <xacro:property name="arm_robot_forearm_com_x" value="-0.015" />
+  <xacro:property name="arm_robot_forearm_com_y" value="0.0" />
+  <xacro:property name="arm_robot_forearm_com_z" value="-0.035" />
+  <xacro:property name="arm_robot_wrist_mass" value="0.3" />
+  <xacro:property name="arm_robot_wrist_com_x" value="-0.01" />
+  <xacro:property name="arm_robot_wrist_com_y" value="0.0" />
+  <xacro:property name="arm_robot_wrist_com_z" value="-0.03" />
 
   <xacro:macro name="box_inertia" params="mass x y z">
     <inertial>
@@ -61,43 +89,46 @@
     </inertial>
   </xacro:macro>
 
-  <xacro:macro name="support_omni_wheel" params="prefix x_position y_position">
-    <link name="${prefix}_omni_wheel_link">
+  <xacro:macro name="drive_wheel" params="prefix x_position y_position">
+    <link name="${prefix}_wheel_link">
       <visual>
-        <origin xyz="0 0 0" rpy="0 0 0" />
+        <origin xyz="0 0 0" rpy="1.57079632679 0 0" />
         <geometry>
-          <sphere radius="${omni_wheel_radius}" />
+          <cylinder radius="${wheel_radius}" length="${wheel_width}" />
         </geometry>
         <material name="dark_gray">
           <color rgba="0.02 0.02 0.02 1.0" />
         </material>
       </visual>
       <collision>
-        <origin xyz="0 0 0" rpy="0 0 0" />
+        <origin xyz="0 0 0" rpy="1.57079632679 0 0" />
         <geometry>
-          <sphere radius="${omni_wheel_radius}" />
+          <cylinder radius="${wheel_radius}" length="${wheel_width}" />
         </geometry>
       </collision>
-      <xacro:box_inertia
-        mass="1.2"
-        x="${omni_wheel_radius * 2.0}"
-        y="${omni_wheel_radius * 2.0}"
-        z="${omni_wheel_radius * 2.0}" />
+      <xacro:cylinder_inertia mass="${wheel_mass}" radius="${wheel_radius}" length="${wheel_width}" axis="y" />
     </link>
 
-    <joint name="${prefix}_omni_wheel_joint" type="fixed">
+    <joint name="${prefix}_wheel_joint" type="continuous">
       <parent link="base_link" />
-      <child link="${prefix}_omni_wheel_link" />
-      <origin xyz="${x_position} ${y_position} 0" rpy="0 0 0" />
+      <child link="${prefix}_wheel_link" />
+      <!-- 車輪上端が本体下面よりground_clearanceぶんだけ下に出る位置へ寄せ、埋め込み量を高さ定義と一致させる。 -->
+      <origin xyz="${x_position} ${y_position} ${wheel_center_z_from_base}" rpy="0 0 0" />
+      <axis xyz="0 1 0" />
+      <dynamics damping="${wheel_joint_damping}" friction="0.05" />
     </joint>
 
-    <!-- 理想オムニホイール相当として接地判定を残しつつ、横滑り抵抗は極小にする。 -->
-    <gazebo reference="${prefix}_omni_wheel_link">
+    <!-- 4輪接地の安定性を優先し、横滑りと跳ねを接触パラメータで抑える。 -->
+    <gazebo reference="${prefix}_wheel_link">
       <material>Gazebo/Black</material>
-      <mu1>0.001</mu1>
-      <mu2>0.001</mu2>
-      <slip1>1.0</slip1>
-      <slip2>1.0</slip2>
+      <mu1>0.85</mu1>
+      <mu2>0.85</mu2>
+      <slip1>0.04</slip1>
+      <slip2>0.04</slip2>
+      <kp>1000000.0</kp>
+      <kd>10.0</kd>
+      <minDepth>0.002</minDepth>
+      <maxVel>0.2</maxVel>
     </gazebo>
   </xacro:macro>
 
@@ -119,19 +150,23 @@
           <box size="${arm_robot_body_length} ${arm_robot_body_width} ${arm_robot_body_height}" />
         </geometry>
       </collision>
-      <xacro:box_inertia mass="18.0" x="${arm_robot_body_length}" y="${arm_robot_body_width}" z="${arm_robot_body_height}" />
+      <inertial>
+        <mass value="${arm_robot_body_mass}" />
+        <origin xyz="${arm_robot_body_com_x} ${arm_robot_body_com_y} ${arm_robot_body_com_z}" rpy="0 0 0" />
+        <inertia ixx="${arm_robot_body_mass * (arm_robot_body_width * arm_robot_body_width + arm_robot_body_height * arm_robot_body_height) / 12.0}" ixy="0" ixz="0" iyy="${arm_robot_body_mass * (arm_robot_body_length * arm_robot_body_length + arm_robot_body_height * arm_robot_body_height) / 12.0}" iyz="0" izz="${arm_robot_body_mass * (arm_robot_body_length * arm_robot_body_length + arm_robot_body_width * arm_robot_body_width) / 12.0}" />
+      </inertial>
     </link>
 
     <joint name="arm_robot_body_joint" type="fixed">
       <parent link="base_link" />
       <child link="arm_robot_body_link" />
-      <origin xyz="0 0 ${base_center_z + base_height / 2.0 + arm_robot_body_height / 2.0}" rpy="0 0 0" />
+      <origin xyz="0 0 ${base_height / 2.0 + arm_robot_body_height / 2.0}" rpy="0 0 0" />
     </joint>
 
-    <!-- 根元・肘・手首の3節を前方上がりに固定し、LiDARから見える外形を優先して再現する。 -->
+    <!-- 各リンク形状をローカル+Zへ揃え、姿勢表現をjoint側へ集約する。 -->
     <link name="arm_robot_upper_arm_link">
       <visual>
-        <origin xyz="${arm_robot_upper_arm_length * cos(45.0 * pi / 180.0) / 2.0} 0 ${arm_robot_upper_arm_length * sin(45.0 * pi / 180.0) / 2.0}" rpy="0 ${arm_robot_first_arm_pitch} 0" />
+        <origin xyz="0 0 ${arm_robot_upper_arm_length / 2.0}" rpy="0 0 0" />
         <geometry>
           <cylinder radius="${arm_robot_arm_radius}" length="${arm_robot_upper_arm_length}" />
         </geometry>
@@ -140,23 +175,28 @@
         </material>
       </visual>
       <collision>
-        <origin xyz="${arm_robot_upper_arm_length * cos(45.0 * pi / 180.0) / 2.0} 0 ${arm_robot_upper_arm_length * sin(45.0 * pi / 180.0) / 2.0}" rpy="0 ${arm_robot_first_arm_pitch} 0" />
+        <origin xyz="0 0 ${arm_robot_upper_arm_length / 2.0}" rpy="0 0 0" />
         <geometry>
           <cylinder radius="${arm_robot_arm_radius}" length="${arm_robot_upper_arm_length}" />
         </geometry>
       </collision>
-      <xacro:cylinder_inertia mass="4.0" radius="${arm_robot_arm_radius}" length="${arm_robot_upper_arm_length}" axis="z" />
+      <inertial>
+        <mass value="${arm_robot_upper_arm_mass}" />
+        <origin xyz="${arm_robot_upper_arm_com_x} ${arm_robot_upper_arm_com_y} ${arm_robot_upper_arm_com_z}" rpy="0 0 0" />
+        <inertia ixx="${arm_robot_upper_arm_mass * (3.0 * arm_robot_arm_radius * arm_robot_arm_radius + arm_robot_upper_arm_length * arm_robot_upper_arm_length) / 12.0}" ixy="0" ixz="0" iyy="${arm_robot_upper_arm_mass * (3.0 * arm_robot_arm_radius * arm_robot_arm_radius + arm_robot_upper_arm_length * arm_robot_upper_arm_length) / 12.0}" iyz="0" izz="${arm_robot_upper_arm_mass * arm_robot_arm_radius * arm_robot_arm_radius / 2.0}" />
+      </inertial>
     </link>
 
+    <!-- shoulderの立ち上がり角で胴体への近接を確保しつつ、親子座標系の向きを一致させる。 -->
     <joint name="arm_robot_shoulder_joint" type="fixed">
       <parent link="arm_robot_body_link" />
       <child link="arm_robot_upper_arm_link" />
-      <origin xyz="${arm_robot_body_length / 2.0} -0.10 ${0.20 - arm_robot_body_height / 2.0}" rpy="0 0 0" />
+      <origin xyz="${arm_robot_body_length / 2.0 + 0.1} 0 ${0.20 - arm_robot_body_height / 2.0}" rpy="0 ${arm_robot_shoulder_pitch} 0" />
     </joint>
 
     <link name="arm_robot_forearm_link">
       <visual>
-        <origin xyz="${arm_robot_forearm_length * cos(-25.0 * pi / 180.0) / 2.0} 0 ${arm_robot_forearm_length * sin(-25.0 * pi / 180.0) / 2.0}" rpy="0 ${arm_robot_second_arm_pitch} 0" />
+        <origin xyz="0 0 ${arm_robot_forearm_length / 2.0}" rpy="0 0 0" />
         <geometry>
           <cylinder radius="${arm_robot_arm_radius}" length="${arm_robot_forearm_length}" />
         </geometry>
@@ -165,19 +205,23 @@
         </material>
       </visual>
       <collision>
-        <origin xyz="${arm_robot_forearm_length * cos(-25.0 * pi / 180.0) / 2.0} 0 ${arm_robot_forearm_length * sin(-25.0 * pi / 180.0) / 2.0}" rpy="0 ${arm_robot_second_arm_pitch} 0" />
+        <origin xyz="0 0 ${arm_robot_forearm_length / 2.0}" rpy="0 0 0" />
         <geometry>
           <cylinder radius="${arm_robot_arm_radius}" length="${arm_robot_forearm_length}" />
         </geometry>
       </collision>
-      <xacro:cylinder_inertia mass="3.0" radius="${arm_robot_arm_radius}" length="${arm_robot_forearm_length}" axis="z" />
+      <inertial>
+        <mass value="${arm_robot_forearm_mass}" />
+        <origin xyz="${arm_robot_forearm_com_x} ${arm_robot_forearm_com_y} ${arm_robot_forearm_com_z}" rpy="0 0 0" />
+        <inertia ixx="${arm_robot_forearm_mass * (3.0 * arm_robot_arm_radius * arm_robot_arm_radius + arm_robot_forearm_length * arm_robot_forearm_length) / 12.0}" ixy="0" ixz="0" iyy="${arm_robot_forearm_mass * (3.0 * arm_robot_arm_radius * arm_robot_arm_radius + arm_robot_forearm_length * arm_robot_forearm_length) / 12.0}" iyz="0" izz="${arm_robot_forearm_mass * arm_robot_arm_radius * arm_robot_arm_radius / 2.0}" />
+      </inertial>
     </link>
 
-    <!-- 関節位置を各アーム先端へ一致させ、指定された内角と鉛直手首を維持する。 -->
+    <!-- 肘以降の接続位置を各リンク先端へ固定し、相対角だけで全体姿勢を説明できるようにする。 -->
     <joint name="arm_robot_elbow_joint" type="fixed">
       <parent link="arm_robot_upper_arm_link" />
       <child link="arm_robot_forearm_link" />
-      <origin xyz="${arm_robot_upper_arm_length * cos(45.0 * pi / 180.0)} 0 ${arm_robot_upper_arm_length * sin(45.0 * pi / 180.0)}" rpy="0 0 0" />
+      <origin xyz="0 0 ${arm_robot_upper_arm_length}" rpy="0 ${arm_robot_elbow_pitch} 0" />
     </joint>
 
     <link name="arm_robot_wrist_link">
@@ -196,13 +240,17 @@
           <cylinder radius="${arm_robot_arm_radius}" length="${arm_robot_wrist_length}" />
         </geometry>
       </collision>
-      <xacro:cylinder_inertia mass="2.0" radius="${arm_robot_arm_radius}" length="${arm_robot_wrist_length}" axis="z" />
+      <inertial>
+        <mass value="${arm_robot_wrist_mass}" />
+        <origin xyz="${arm_robot_wrist_com_x} ${arm_robot_wrist_com_y} ${arm_robot_wrist_com_z}" rpy="0 0 0" />
+        <inertia ixx="${arm_robot_wrist_mass * (3.0 * arm_robot_arm_radius * arm_robot_arm_radius + arm_robot_wrist_length * arm_robot_wrist_length) / 12.0}" ixy="0" ixz="0" iyy="${arm_robot_wrist_mass * (3.0 * arm_robot_arm_radius * arm_robot_arm_radius + arm_robot_wrist_length * arm_robot_wrist_length) / 12.0}" iyz="0" izz="${arm_robot_wrist_mass * arm_robot_arm_radius * arm_robot_arm_radius / 2.0}" />
+      </inertial>
     </link>
 
     <joint name="arm_robot_wrist_joint" type="fixed">
       <parent link="arm_robot_forearm_link" />
       <child link="arm_robot_wrist_link" />
-      <origin xyz="${arm_robot_forearm_length * cos(-25.0 * pi / 180.0)} 0 ${arm_robot_forearm_length * sin(-25.0 * pi / 180.0)}" rpy="0 0 0" />
+      <origin xyz="0 0 ${arm_robot_forearm_length}" rpy="0 ${arm_robot_wrist_pitch} 0" />
     </joint>
   </xacro:macro>
 
@@ -211,13 +259,14 @@
   <joint name="base_footprint_joint" type="fixed">
     <parent link="base_footprint" />
     <child link="base_link" />
-    <origin xyz="0 0 ${omni_wheel_radius}" rpy="0 0 0" />
+    <!-- base_linkを本体中心に固定し、本体下面がground_clearanceだけ地面から離れるようにする。 -->
+    <origin xyz="0 0 ${base_center_z}" rpy="0 0 0" />
   </joint>
 
   <link name="base_link">
     <visual>
       <!-- 本体の物理近似は箱のまま維持しつつ、表示だけ実機外形メッシュへ置き換える。 -->
-      <origin xyz="0 0 ${base_center_z - base_height / 2.0}" rpy="0 0 0" />
+      <origin xyz="0 0 -${base_height / 2.0}" rpy="0 0 0" />
       <geometry>
         <mesh filename="package://ai_ship_robot_description/mesh/AiTran500_L24970.stl"
               scale="0.001 0.001 0.001"/>
@@ -227,19 +276,23 @@
       </material>
     </visual>
     <collision>
-      <origin xyz="0 0 ${base_center_z}" rpy="0 0 0" />
+      <origin xyz="0 0 0" rpy="0 0 0" />
       <geometry>
         <box size="${base_length} ${base_width} ${base_height}" />
       </geometry>
     </collision>
-    <xacro:box_inertia mass="28.0" x="${base_length}" y="${base_width}" z="${base_height}" />
+    <inertial>
+      <mass value="${base_mass}" />
+      <origin xyz="${base_com_x} ${base_com_y} ${base_com_z}" rpy="0 0 0" />
+      <inertia ixx="${base_mass * (base_width * base_width + base_height * base_height) / 12.0}" ixy="0" ixz="0" iyy="${base_mass * (base_length * base_length + base_height * base_height) / 12.0}" iyz="0" izz="${base_mass * (base_length * base_length + base_width * base_width) / 12.0}" />
+    </inertial>
   </link>
 
-  <!-- 旧車輪位置に支持球を置き、本体高さを維持したままオムニホイール相当の外形に置き換える。 -->
-  <xacro:support_omni_wheel prefix="left_front" x_position="${omni_wheel_x_offset}" y_position="${omni_wheel_separation / 2.0}" />
-  <xacro:support_omni_wheel prefix="left_rear" x_position="${-omni_wheel_x_offset}" y_position="${omni_wheel_separation / 2.0}" />
-  <xacro:support_omni_wheel prefix="right_front" x_position="${omni_wheel_x_offset}" y_position="${-omni_wheel_separation / 2.0}" />
-  <xacro:support_omni_wheel prefix="right_rear" x_position="${-omni_wheel_x_offset}" y_position="${-omni_wheel_separation / 2.0}" />
+  <!-- 左右2グループの4輪を個別joint化し、planar moveではなく接地駆動へ切り替える。 -->
+  <xacro:drive_wheel prefix="left_front" x_position="${wheelbase / 2.0}" y_position="${track_width / 2.0}" />
+  <xacro:drive_wheel prefix="left_rear" x_position="${-wheelbase / 2.0}" y_position="${track_width / 2.0}" />
+  <xacro:drive_wheel prefix="right_front" x_position="${wheelbase / 2.0}" y_position="${-track_width / 2.0}" />
+  <xacro:drive_wheel prefix="right_rear" x_position="${-wheelbase / 2.0}" y_position="${-track_width / 2.0}" />
   <xacro:fixed_arm_robot_fixture />
 
   <!-- 起動時に指定された配置ファイルを読み込み、URDF編集なしでLiDARパターンを切り替える。 -->
@@ -274,23 +327,38 @@
     <material>Gazebo/Blue</material>
   </gazebo>
   <xacro:if value="$(arg use_sim)">
-    <!-- Gazebo Classic上で平面移動とodom/TFを再現する。 -->
     <gazebo>
-      <plugin filename="libgazebo_ros_planar_move.so" name="gazebo_ros_planar_move">
-        <ros>
-          <namespace>/</namespace>
-        </ros>
-        <command_topic>cmd_vel</command_topic>
-        <odometry_topic>odom</odometry_topic>
-        <odometry_frame>odom</odometry_frame>
-        <robot_base_frame>base_footprint</robot_base_frame>
-        <!-- 速度強制はphysics stepと同じ1kHzで行い、IMU有限差分に出る段差を抑える。 -->
-        <update_rate>1000</update_rate>
-        <publish_rate>200</publish_rate>
-        <publish_odom>true</publish_odom>
-        <publish_odom_tf>$(arg publish_odom_tf)</publish_odom_tf>
+      <plugin filename="libgazebo_ros2_control.so" name="gazebo_ros2_control">
+        <parameters>$(find ai_ship_robot_gazebo)/config/slope_drive_controller.yaml</parameters>
       </plugin>
     </gazebo>
+
+    <!-- 4輪 joint を velocity interface として公開し、外部 launch から controller spawn できるようにする。 -->
+    <ros2_control name="gazebo_system" type="system">
+      <hardware>
+        <plugin>gazebo_ros2_control/GazeboSystem</plugin>
+      </hardware>
+      <joint name="left_front_wheel_joint">
+        <command_interface name="velocity" />
+        <state_interface name="position" />
+        <state_interface name="velocity" />
+      </joint>
+      <joint name="left_rear_wheel_joint">
+        <command_interface name="velocity" />
+        <state_interface name="position" />
+        <state_interface name="velocity" />
+      </joint>
+      <joint name="right_front_wheel_joint">
+        <command_interface name="velocity" />
+        <state_interface name="position" />
+        <state_interface name="velocity" />
+      </joint>
+      <joint name="right_rear_wheel_joint">
+        <command_interface name="velocity" />
+        <state_interface name="position" />
+        <state_interface name="velocity" />
+      </joint>
+    </ros2_control>
 
     <!-- IMUはClassicのgazebo_ros sensor plugin経由でROS topicへ流す。 -->
     <gazebo reference="imu_link">

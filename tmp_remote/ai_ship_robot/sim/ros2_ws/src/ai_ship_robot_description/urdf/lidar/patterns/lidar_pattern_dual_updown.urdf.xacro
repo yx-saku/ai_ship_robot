@@ -1,0 +1,38 @@
+<?xml version="1.0"?>
+<robot xmlns:xacro="http://www.ros.org/wiki/xacro" name="lidar_pattern_03_dual_front_corners_down_yaw38">
+  <xacro:include filename="../models/mid360_lidar.urdf.xacro" />
+
+  <!-- Pattern 03: Pattern 01 with each LiDAR yawed 38 degrees outward. -->
+  <xacro:property name="deg_to_rad" value="${pi / 180.0}" />
+  <xacro:property name="lidar_front_x" value="${base_length / 2.0 + mid360_height / 2.0}" />
+  <xacro:property name="lidar_left_y" value="${base_width / 2.0 - mid360_width / 2.0}" />
+  <xacro:property name="lidar_right_y" value="${-lidar_left_y}" />
+  <xacro:property name="lidar_ground_height" value="0.150" />
+  <xacro:property name="lidar_z" value="${lidar_ground_height}" />
+  <xacro:property name="lidar_roll" value="0.0" />
+  <xacro:property name="lidar_yaw" value="0.0" />
+  <xacro:property name="lidar1_pitch" value="${120.0 * deg_to_rad}" />
+  <xacro:property name="lidar2_pitch" value="${30.0 * deg_to_rad}" />
+
+  <xacro:mid360_lidar
+    prefix="lidar1"
+    x="${lidar_front_x}"
+    y="${lidar_left_y}"
+    z="${lidar_z}"
+    roll="${lidar_roll}"
+    pitch="${lidar1_pitch}"
+    yaw="${lidar_yaw}"
+    enable_imu="true"
+    imu_topic="/lidar1/imu" />
+
+  <xacro:mid360_lidar
+    prefix="lidar2"
+    x="${lidar_front_x}"
+    y="${lidar_right_y}"
+    z="${lidar_z}"
+    roll="${lidar_roll}"
+    pitch="${lidar2_pitch}"
+    yaw="${lidar_yaw}"
+    enable_imu="true"
+    imu_topic="/lidar2/imu" />
+</robot>

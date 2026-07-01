@@ -1,0 +1,17 @@
+vars:
+  pi: 3.14159265359
+  turn_speed: ${pi / 5}
+
+steps:
+  - duration_sec: 5.0
+    commands:
+      - type: stop
+
+  - duration_sec: 10.0
+    commands:
+      - type: yaw_left
+        speed: ${turn_speed}
+
+  - duration_sec: 5.0
+    commands:
+      - type: stop

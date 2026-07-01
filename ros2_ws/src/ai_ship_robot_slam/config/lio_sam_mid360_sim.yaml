@@ -104,14 +104,105 @@
     deskewMode: "odom_interpolation"
     maxPointOffsetTimeSec: 0.2
 
-    # map保存はcloud_registered_rawを使い、旧hybrid点群生成は既定で止めて処理負荷を抑える。
+    # map保存拡張はLIO-SAM内部のdeskew済み全点群を使い、旧hybrid点群生成は既定で止める。
     hybridRegisteredCloudEnabled: false
     hybridRegisteredCloudRawNearRange: 3.0
     hybridRegisteredCloudRawNearLeafSize: 0.01
     hybridRegisteredCloudRawUpperMapZLimitEnabled: true
     hybridRegisteredCloudRawUpperMapZMax: 1.5
 
-    # raw登録点群はmap saver有効時にlaunchからtrueへ上書きし、通常時はpublishしない。
+    # map保存時はlaunchからsaveMapOutputsを有効化し、raw登録点群publishは診断用途に限定する。
+    saveMapOutputs: false
+    localizationSubmapLeafSize: 0.05
+    saveLioSamStandardPcds: false
+    trajectorySeedRingMinRadius: 0.0
+    trajectorySeedRingMaxRadius: 1.0
+    trajectorySeedRingAccumulationMode: "scan"
+    trajectorySeedRingSubmapVoxelSize: 0.005
+    trajectorySeedRingGlobalVoxelSize: 0.005
+
+    # ground_candidate_map_generatorで使うクラスタ連結方式の階層抽出設定。
+    groundCandidate:
+      clusteredRefinement:
+        enabled: true
+        writeDebugPng: true
+        coarse:
+          enabled: true
+          inputCloud: localization  # coarseはlocalization_map.pcdのみを使い、原点seedクラスタから連結を開始する。
+          gridResolution: 0.20
+          clusterTolerance: 0.20
+          minClusterPoints: 2
+          planeFitRadiusCells: 1
+          minPlanePoints: 2
+          connectionTolerance: 0.5  # 隣接クラスタ点が現在クラスタ局所平面へ接続する許容距離[m]。
+          minConnectionPoints: 1
+          maxSlopeDeg: 30.0
+          maxNormalDiffDeg: 30.0
+          maxNeighborHeightGap: 0.20
+          maxPlaneRmse: 0.10
+          seed:
+            originZ: 0.0
+            originSeedRadiusCells: 1
+          refinementTrigger:
+            maxPlaneRmse: 0.10
+            maxPlaneDistanceP95: 0.025
+            maxHeightRangeP95: 0.025
+            densityContrastEnabled: true
+            densityContrastRatio: 0.8
+            densityContrastMinHighDensity: 0.0
+            percentileLow: 5.0
+            percentileHigh: 95.0
+        detail:
+          enabled: false
+          inputCloud: localization_plus_nearby_detail  # detailは親の詳細化対象近傍だけtrajectory_seed_ring_cloud.pcdを合成する。
+          gridResolution: 0.05
+          detailExpansionCells: 1
+          clusterTolerance: 0.03
+          minClusterPoints: 5
+          planeFitRadiusCells: 1
+          minPlanePoints: 5
+          connectionTolerance: 0.05  # 親から継承した連結を詳細セルの局所平面で広げる許容距離[m]。
+          minConnectionPoints: 1
+          maxSlopeDeg: 25.0
+          maxNormalDiffDeg: 35.0
+          maxNeighborHeightGap: 0.025
+          maxPlaneRmse: 0.05
+          seedSource: parent_connected_boundary  # seedは原点ではなく親ステージのseed連結セルから継承する。
+          refinementTrigger:
+            maxPlaneRmse: 0.05
+            maxPlaneDistanceP95: 0.025
+            maxHeightRangeP95: 0.025
+            densityContrastEnabled: true
+            densityContrastRatio: 0.8
+            densityContrastMinHighDensity: 0.0
+            percentileLow: 5.0
+            percentileHigh: 95.0
+        fine:
+          enabled: false
+          inputCloud: localization_plus_nearby_detail  # fineも親の詳細化対象近傍だけ詳細点群を合成する。
+          gridResolution: 0.02
+          detailExpansionCells: 1
+          clusterTolerance: 0.015
+          minClusterPoints: 5
+          planeFitRadiusCells: 1
+          minPlanePoints: 5
+          connectionTolerance: 0.03
+          minConnectionPoints: 1
+          maxSlopeDeg: 25.0
+          maxNormalDiffDeg: 35.0
+          maxNeighborHeightGap: 0.025
+          maxPlaneRmse: 0.03
+          seedSource: parent_connected_boundary
+          refinementTrigger:
+            maxPlaneRmse: 0.03
+            maxPlaneDistanceP95: 0.015
+            maxHeightRangeP95: 0.015
+            densityContrastEnabled: true
+            densityContrastRatio: 0.8
+            densityContrastMinHighDensity: 0.0
+            percentileLow: 5.0
+            percentileHigh: 95.0
+
     publishDeskewedCloud: false
     publishFeatureClouds: false
     publishMapGlobalCloud: false

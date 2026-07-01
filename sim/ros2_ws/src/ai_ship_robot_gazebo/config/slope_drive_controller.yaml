@@ -1,0 +1,16 @@
+controller_manager:
+  ros__parameters:
+    update_rate: 200
+    joint_state_broadcaster:
+      type: joint_state_broadcaster/JointStateBroadcaster
+    slope_drive_controller:
+      type: velocity_controllers/JointGroupVelocityController
+
+slope_drive_controller:
+  ros__parameters:
+    joints:
+      - left_front_wheel_joint
+      - left_rear_wheel_joint
+      - right_front_wheel_joint
+      - right_rear_wheel_joint
+    interface_name: velocity

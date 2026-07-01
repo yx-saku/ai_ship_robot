@@ -1,0 +1,149 @@
+<?xml version="1.0"?>
+<robot xmlns:xacro="http://www.ros.org/wiki/xacro" name="mid360_lidar">
+  <xacro:arg name="half_lidar_resolution" default="false" />
+  <xacro:arg name="quarter_lidar_resolution" default="false" />
+
+  <xacro:property name="mid360_depth" value="0.065" />
+  <xacro:property name="mid360_width" value="0.065" />
+  <xacro:property name="mid360_height" value="0.060" />
+  <xacro:property name="mid360_samples" value="40000" />
+  <xacro:property name="mid360_downsample" value="1" />
+  <xacro:property name="mid360_half_downsample" value="2" />
+  <xacro:property name="mid360_quarter_downsample" value="4" />
+  <xacro:property name="mid360_imu_x" value="0.011" />
+  <xacro:property name="mid360_imu_y" value="0.02329" />
+  <xacro:property name="mid360_imu_z" value="-0.04412" />
+  <xacro:property name="mid360_imu_size" value="0.015" />
+
+  <xacro:macro name="mid360_gazebo_sensor" params="prefix">
+    <gazebo reference="${prefix}_link">
+      <sensor name="${prefix}_link" type="ray">
+        <always_on>true</always_on>
+        <visualize>false</visualize>
+        <update_rate>10</update_rate>
+        <!-- Livox pluginの要求に合わせ、可視化用のray設定とCSV走査設定を同居させる。 -->
+        <plugin name="${prefix}_livox_plugin" filename="libros2_livox.so">
+          <ray>
+            <scan>
+              <horizontal>
+                <samples>100</samples>
+                <resolution>1</resolution>
+                <min_angle>0</min_angle>
+                <max_angle>${2.0 * pi}</max_angle>
+              </horizontal>
+              <vertical>
+                <samples>360</samples>
+                <resolution>1</resolution>
+                <min_angle>${-7.22 * pi / 180.0}</min_angle>
+                <max_angle>${55.22 * pi / 180.0}</max_angle>
+              </vertical>
+            </scan>
+            <range>
+              <min>0.10</min>
+              <max>200.0</max>
+              <resolution>0.002</resolution>
+            </range>
+            <noise>
+              <type>gaussian</type>
+              <mean>0.0</mean>
+              <stddev>0.01</stddev>
+            </noise>
+          </ray>
+          <visualize>false</visualize>
+          <samples>${mid360_samples}</samples>
+          <!-- downsample値だけでLivox pluginの負荷を切り替え、topic構成は維持する。 -->
+          <xacro:if value="$(arg quarter_lidar_resolution)">
+            <downsample>${mid360_quarter_downsample}</downsample>
+          </xacro:if>
+          <xacro:unless value="$(arg half_lidar_resolution)">
+            <xacro:unless value="$(arg quarter_lidar_resolution)">
+              <downsample>${mid360_downsample}</downsample>
+            </xacro:unless>
+          </xacro:unless>
+          <xacro:if value="$(arg half_lidar_resolution)">
+            <downsample>${mid360_half_downsample}</downsample>
+          </xacro:if>
+          <csv_file_name>$(find ros2_livox_simulation)/scan_mode/mid360.csv</csv_file_name>
+          <topic>${prefix}_livox</topic>
+          <custom_topic>/${prefix}/custom</custom_topic>
+          <pointcloud2_topic>/${prefix}/points</pointcloud2_topic>
+          <enable_pointcloud2>false</enable_pointcloud2>
+        </plugin>
+      </sensor>
+    </gazebo>
+  </xacro:macro>
+
+  <xacro:macro name="mid360_gazebo_imu" params="prefix imu_topic">
+    <gazebo reference="${prefix}_imu_link">
+      <sensor name="${prefix}_imu" type="imu">
+        <always_on>true</always_on>
+        <update_rate>200</update_rate>
+        <!-- Mid-360内蔵IMUとして扱えるよう、IMU topicとframeをLiDAR個体に紐付ける。 -->
+        <plugin filename="libgazebo_ros_imu_sensor.so" name="${prefix}_gazebo_ros_imu_sensor">
+          <updateRateHZ>200.0</updateRateHZ>
+          <ros>
+            <namespace>/</namespace>
+            <remapping>~/out:=${imu_topic}</remapping>
+          </ros>
+          <frame_name>${prefix}_imu_link</frame_name>
+        </plugin>
+      </sensor>
+    </gazebo>
+  </xacro:macro>
+
+  <xacro:macro name="mid360_lidar" params="prefix x y z roll pitch yaw enable_imu:=false imu_topic:=/imu/data">
+    <link name="${prefix}_link">
+      <visual>
+        <!-- LiDAR配置用joint姿勢を変えずに済むよう、見た目の差し替えはvisual側だけで閉じ込める。 -->
+        <origin xyz="0 ${-mid360_width / 2.0} ${-mid360_height / 2.0}" rpy="${pi / 2.0} 0 ${pi / 2.0}" />
+        <geometry>
+          <mesh filename="package://ai_ship_robot_description/mesh/mid360.stl" 
+                scale="0.001 0.001 0.001" />
+        </geometry>
+        <material name="sensor_black">
+          <color rgba="0.0 0.0 0.0 1.0" />
+        </material>
+      </visual>
+      <collision>
+        <origin xyz="0 0 0" rpy="0 0 0" />
+        <geometry>
+          <box size="${mid360_depth} ${mid360_width} ${mid360_height}" />
+        </geometry>
+      </collision>
+      <xacro:box_inertia mass="0.265" x="${mid360_depth}" y="${mid360_width}" z="${mid360_height}" />
+    </link>
+
+    <link name="${prefix}_imu_link">
+      <visual>
+        <origin xyz="0 0 0" rpy="0 0 0" />
+        <geometry>
+          <box size="${mid360_imu_size} ${mid360_imu_size} ${mid360_imu_size}" />
+        </geometry>
+        <material name="imu_green">
+          <color rgba="0.0 0.35 0.18 1.0" />
+        </material>
+      </visual>
+      <xacro:box_inertia mass="0.01" x="${mid360_imu_size}" y="${mid360_imu_size}" z="${mid360_imu_size}" />
+    </link>
+
+    <joint name="${prefix}_joint" type="fixed">
+      <parent link="base_link" />
+      <child link="${prefix}_link" />
+      <origin xyz="${x} ${y} ${z}" rpy="${roll} ${pitch} ${yaw}" />
+    </joint>
+
+    <joint name="${prefix}_imu_joint" type="fixed">
+      <parent link="${prefix}_link" />
+      <child link="${prefix}_imu_link" />
+      <!-- 公式Mid-360 manual p.15のIMU chip位置をpoint cloud coordinates基準で反映する。 -->
+      <origin xyz="${mid360_imu_x} ${mid360_imu_y} ${mid360_imu_z}" rpy="0 0 0" />
+    </joint>
+
+    <xacro:if value="$(arg use_sim)">
+      <xacro:mid360_gazebo_sensor prefix="${prefix}" />
+      <xacro:if value="${enable_imu}">
+        <xacro:mid360_gazebo_imu prefix="${prefix}" imu_topic="${imu_topic}" />
+      </xacro:if>
+    </xacro:if>
+  </xacro:macro>
+</robot>

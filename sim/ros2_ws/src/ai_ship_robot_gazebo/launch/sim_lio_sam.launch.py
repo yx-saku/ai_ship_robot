@@ -118,7 +118,7 @@ def generate_launch_description():
                     [
                         FindPackageShare("ai_ship_robot_gazebo"),
                         "worlds",
-                        "shipyard_indoor_100x50.world",
+                        "shipyard_indoor_100x50_light.world",
                     ]
                 ),
             ),

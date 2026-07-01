@@ -1,6 +1,7 @@
 from launch import LaunchDescription
-from launch.actions import DeclareLaunchArgument, IncludeLaunchDescription
+from launch.actions import DeclareLaunchArgument, IncludeLaunchDescription, RegisterEventHandler
 from launch.conditions import IfCondition
+from launch.event_handlers import OnProcessExit
 from launch.launch_description_sources import PythonLaunchDescriptionSource
 from launch.substitutions import Command, LaunchConfiguration, PathJoinSubstitution, PythonExpression
 from launch_ros.actions import Node
@@ -22,11 +23,15 @@ def generate_launch_description():
     quarter_lidar_resolution = LaunchConfiguration("quarter_lidar_resolution")
     publish_odom_tf = LaunchConfiguration("publish_odom_tf")
     use_mid360_sim_adapter = LaunchConfiguration("use_mid360_sim_adapter")
+    cmd_vel_input_topic = LaunchConfiguration("cmd_vel_input_topic")
+    cmd_vel_internal_topic = LaunchConfiguration("cmd_vel_internal_topic")
     use_scan_pattern_line_lookup = LaunchConfiguration("use_scan_pattern_line_lookup")
     force_zero_offset_time = LaunchConfiguration("force_zero_offset_time")
     input_lidar_reliable = LaunchConfiguration("input_lidar_reliable")
     output_lidar_reliable = LaunchConfiguration("output_lidar_reliable")
     enable_imu_passthrough = LaunchConfiguration("enable_imu_passthrough")
+    max_linear_acceleration_mps2 = LaunchConfiguration("max_linear_acceleration_mps2")
+    max_angular_acceleration_radps2 = LaunchConfiguration("max_angular_acceleration_radps2")
     gazebo_params_file = PathJoinSubstitution(
         [FindPackageShare("ai_ship_robot_gazebo"), "config", "gazebo_ros.yaml"]
     )
@@ -110,7 +115,63 @@ def generate_launch_description():
             "-y",
             "0.0",
             "-z",
-            "0.05",
+            "0.22",
+        ],
+    )
+
+    # 外部 /cmd_vel を内部制限topicへ中継し、linear.y の無効化を一元化する。
+    cmd_vel_slope_adapter = Node(
+        package="ai_ship_robot_gazebo",
+        executable="cmd_vel_slope_adapter",
+        name="cmd_vel_slope_adapter",
+        output="screen",
+        parameters=[
+            {
+                "use_sim_time": use_sim_time,
+                "input_topic": cmd_vel_input_topic,
+                "output_topic": cmd_vel_internal_topic,
+                "max_linear_acceleration_mps2": max_linear_acceleration_mps2,
+                "max_angular_acceleration_radps2": max_angular_acceleration_radps2,
+            }
+        ],
+    )
+
+    # Gazebo 内の controller_manager に対して broadcaster と wheel velocity controller を順次spawnする。
+    joint_state_broadcaster_spawner = Node(
+        package="controller_manager",
+        executable="spawner",
+        arguments=["joint_state_broadcaster", "--controller-manager", "/controller_manager"],
+        output="screen",
+    )
+
+    slope_drive_controller_spawner = Node(
+        package="controller_manager",
+        executable="spawner",
+        arguments=["slope_drive_controller", "--controller-manager", "/controller_manager"],
+        output="screen",
+    )
+
+    # 内部 cmd_vel を wheel 速度へ配分し、wheel state から /odom と必要TFを生成する。
+    slope_drive_bridge = Node(
+        package="ai_ship_robot_gazebo",
+        executable="slope_drive_bridge",
+        name="slope_drive_bridge",
+        output="screen",
+        parameters=[
+            {
+                "use_sim_time": use_sim_time,
+                "cmd_vel_topic": cmd_vel_internal_topic,
+                "controller_command_topic": "/slope_drive_controller/commands",
+                "odom_topic": "/odom",
+                "odometry_frame": "odom",
+                "robot_base_frame": "base_footprint",
+                "publish_odom_tf": publish_odom_tf,
+                "wheel_radius": 0.04,
+                "wheelbase": 0.52,
+                "track_width": 0.54,
+                "left_wheels": ["left_front_wheel_joint", "left_rear_wheel_joint"],
+                "right_wheels": ["right_front_wheel_joint", "right_rear_wheel_joint"],
+            }
         ],
     )
 
@@ -187,6 +248,10 @@ def generate_launch_description():
             DeclareLaunchArgument("quarter_lidar_resolution", default_value="false"),
             DeclareLaunchArgument("publish_odom_tf", default_value="true"),
             DeclareLaunchArgument("use_mid360_sim_adapter", default_value="true"),
+            DeclareLaunchArgument("cmd_vel_input_topic", default_value="/cmd_vel"),
+            DeclareLaunchArgument("cmd_vel_internal_topic", default_value="/cmd_vel_slope_limited"),
+            DeclareLaunchArgument("max_linear_acceleration_mps2", default_value="0.3"),
+            DeclareLaunchArgument("max_angular_acceleration_radps2", default_value="0.9"),
             DeclareLaunchArgument("use_scan_pattern_line_lookup", default_value="false"),
             DeclareLaunchArgument("force_zero_offset_time", default_value="true"),
             DeclareLaunchArgument("input_lidar_reliable", default_value="true"),
@@ -204,13 +269,32 @@ def generate_launch_description():
                     [
                         FindPackageShare("ai_ship_robot_gazebo"),
                         "worlds",
-                        "shipyard_indoor_100x50.world",
+                        "shipyard_indoor_100x50_light.world",
                     ]
                  ),
              ),
             gazebo,
             robot_state_publisher,
             spawn_robot,
+            cmd_vel_slope_adapter,
+            RegisterEventHandler(
+                OnProcessExit(
+                    target_action=spawn_robot,
+                    on_exit=[joint_state_broadcaster_spawner],
+                )
+            ),
+            RegisterEventHandler(
+                OnProcessExit(
+                    target_action=joint_state_broadcaster_spawner,
+                    on_exit=[slope_drive_controller_spawner],
+                )
+            ),
+            RegisterEventHandler(
+                OnProcessExit(
+                    target_action=slope_drive_controller_spawner,
+                    on_exit=[slope_drive_bridge],
+                )
+            ),
             mid360_sim_adapter,
             rviz,
         ]

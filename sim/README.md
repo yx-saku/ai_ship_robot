@@ -123,7 +123,7 @@ bash sim/scripts/drive_robot.sh
 
 - `w` / `i`: 前進成分の切替
 - `s` / `,`: 後進成分の切替
-- `j` / `l`: 左右移動成分の切替
+- `j` / `l`: 左右移動コマンドの切替。ただし坂道検証モードでは内部で 0 に制限
 - `a` / `d`: yaw 回転成分の切替
 - `space` / `x` / `k`: 全停止
 - `Q` / `Esc`: 終了
@@ -134,8 +134,9 @@ bash sim/scripts/drive_robot.sh
 bash sim/scripts/drive_robot.sh --linear-speed 1.0 --lateral-speed 0.8 --angular-speed 0.5
 ```
 
-- 手動操縦の既定値は最大並進速度 `84 m/min = 1.4 m/s`、最大回転速度 `50 deg/s = 0.873 rad/s` です
-- `w` と `j` のような斜め入力では、`sqrt(vx^2 + vy^2) <= 1.4` を満たすよう publish 直前に正規化されます
+- 手動操縦の既定値は最大並進速度 `0.9 m/s`、最大回転速度 `1.2 rad/s` です
+- `w` と `j` のような斜め入力は送信できますが、simulation 側 adapter が `linear.y` を 0 にして controller へ渡します
+- `/cmd_vel` へ外部ノードが直接 publish した場合も、simulation 側 adapter が `linear.y` の 0 化と速度上限制約を再適用してから controller へ渡します
 
 シナリオ単体実行の例です。
 
@@ -154,7 +155,7 @@ bash sim/scripts/drive_robot.sh \
 - `move_to_pose.pos` または `yaw` を省略した場合、未指定側は step 開始時の現在値を維持します
 - `move_to_pose` の `duration_sec` は速度算出用の目標到達時間であり、超過しても timeout にはしません
 - シナリオの繰り返しは `--loop` ではなく YAML の `repeat` ブロックで指定します
-- シナリオ値が速度上限を超えた場合は、manual と同じ制約で補正され、warning ログが1回出ます
+- シナリオ値が速度上限を超えた場合は、manual と同じ制約で補正され、入力ノード側と simulation 側 adapter 側の両方で安全側へ再保証されます
 
 ```yaml
 steps:
@@ -194,7 +195,7 @@ LiDAR 本体モデルは `sim/ros2_ws/src/ai_ship_robot_description/urdf/lidar/m
 ## 主なトピック
 
 - `/cmd_vel`: 移動指令
-- `/odom`: Gazebo planar move のオドメトリ
+- `/odom`: `slope_drive_bridge` が `joint_states` から生成するオドメトリ
 - `/imu/data`: ベース IMU
 - `/lidar1/custom`, `/lidar2/custom`: 生 Livox `CustomMsg`
 - `/lidar1/livox/lidar/points`, `/lidar2/livox/lidar/points`: RViz 用 bridge が生成する PointCloud2
@@ -209,7 +210,7 @@ LiDAR 本体モデルは `sim/ros2_ws/src/ai_ship_robot_description/urdf/lidar/m
 ## 関連 launch
 
 - `sim/ros2_ws/src/ai_ship_robot_gazebo/launch/simulation.launch.py`
-  - Gazebo、robot_state_publisher、spawn、`mid360_sim_adapter`、RViz を起動します。
+  - Gazebo、robot_state_publisher、spawn、controller spawner、`cmd_vel_slope_adapter`、`slope_drive_bridge`、`mid360_sim_adapter`、RViz を起動します。
 - `sim/ros2_ws/src/ai_ship_robot_gazebo/launch/sim_lio_sam.launch.py`
   - simulation と `ai_ship_robot_slam` の `lio_sam.launch.py` をまとめて起動します。
 

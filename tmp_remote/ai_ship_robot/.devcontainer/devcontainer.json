@@ -1,0 +1,41 @@
+{
+  "name": "ai-ship-robot-ros2-humble",
+  "dockerComposeFile": [
+    "../docker-compose.yml"
+  ],
+  "service": "ai-ship-robot-dev",
+  "workspaceFolder": "/workspaces/ai_ship_robot",
+  "remoteUser": "ros",
+  "overrideCommand": true,
+  "containerEnv": {
+    "DISPLAY": "${localEnv:DISPLAY}"
+  },
+  "customizations": {
+    "vscode": {
+      "settings": {
+        "terminal.integrated.defaultProfile.linux": "bash",
+        "terminal.integrated.profiles.linux": {
+          "bash": {
+            "path": "/bin/bash"
+          }
+        }
+      },
+      "extensions": [
+        "ms-vscode.cpptools",
+        "ms-python.python",
+        "kilocode.kilo-code"
+      ]
+    }
+  },
+  "mounts": [
+    "source=${localWorkspaceFolder},target=/workspaces/ai_ship_robot,type=bind,consistency=cached",
+    "source=/tmp/.X11-unix,target=/tmp/.X11-unix,type=bind,consistency=cached",
+    "source=${localWorkspaceFolder}/.devcontainer/.config/kilo,target=/home/ros/.config/kilo,type=bind",
+    "source=${localWorkspaceFolder}/.devcontainer/.local/state/kilo,target=/home/ros/.local/state/kilo,type=bind",
+    "source=${localWorkspaceFolder}/.devcontainer/.local/share/kilo,target=/home/ros/.local/share/kilo,type=bind",
+    "source=${localWorkspaceFolder}/.devcontainer/.local/ros,target=/home/ros/.ros,type=bind",
+    "source=ai-ship-robot-apt-cache,target=/var/cache/apt,type=volume",
+    "source=ai-ship-robot-apt-lists,target=/var/lib/apt/lists,type=volume"
+  ],
+  "initializeCommand": "${localWorkspaceFolder}/.devcontainer/initializeCommand.sh"
+}

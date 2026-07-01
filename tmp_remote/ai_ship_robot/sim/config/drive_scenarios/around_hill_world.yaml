@@ -1,0 +1,63 @@
+vars:
+  pi: 3.14159265359
+
+steps:
+  - duration_sec: 10.0
+    commands:
+      - type: stop
+
+  - duration_sec: 26.0
+    move_to_pose:
+      pos: [13.0, 0.0]
+
+  - duration_sec: 2.0
+    move_to_pose:
+      yaw: 90.0
+
+  - duration_sec: 6.0
+    move_to_pose:
+      pos: [13.0, 3.0]
+
+  - duration_sec: 2.0
+    move_to_pose:
+      yaw: 180.0
+
+  - duration_sec: 40.0
+    move_to_pose:
+      pos: [-7.0, 3.0]
+
+  - duration_sec: 2.0
+    move_to_pose:
+      yaw: 270.0
+
+  - duration_sec: 12.0
+    move_to_pose:
+      pos: [-7.0, -3.0]
+
+  - duration_sec: 2.0
+    move_to_pose:
+      yaw: 0.0
+
+  - duration_sec: 40.0
+    move_to_pose:
+      pos: [13.0, -3.0]
+
+  - duration_sec: 2.0
+    move_to_pose:
+      yaw: 90.0
+
+  - duration_sec: 6.0
+    move_to_pose:
+      pos: [13.0, 0.0]
+
+  - duration_sec: 2.0
+    move_to_pose:
+      yaw: 180.0
+
+  - duration_sec: 26.0
+    move_to_pose:
+      pos: [0.0, 0.0]
+
+  - duration_sec: 10.0
+    commands:
+      - type: stop

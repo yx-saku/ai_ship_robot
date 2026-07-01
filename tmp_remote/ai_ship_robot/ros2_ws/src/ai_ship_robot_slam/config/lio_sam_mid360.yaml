@@ -1,0 +1,172 @@
+/**:
+  ros__parameters:
+    # --------------------------------------------------------------------------
+    # 上流LIO-SAM設定（元設定ファイルベース）
+    # --------------------------------------------------------------------------
+    # 上流LIO-SAMに元からある項目を先に並べ、値だけMid-360/台車ロボット向けに調整する。
+    # このプロジェクトで追加した項目は末尾の「AI_SHIP_ROBOT追加設定」に集約する。
+    imuTopic: /lidar1/livox/imu
+    odomTopic: odometry/imu
+    gpsTopic: odometry/gps
+
+    # LIO-SAMの推定LiDAR frameをURDFの実LiDAR frameから分離し、TF親子競合を避ける。
+    lidarFrame: lidar_odom
+    baselinkFrame: base_footprint
+    odometryFrame: lidar_init
+    mapFrame: map
+
+    # GPSとPCD保存は初期検証で不要な依存・副作用を避ける設定にする。
+    useImuHeadingInitialization: false
+    useGpsElevation: false
+    gpsCovThreshold: 2.0
+    poseCovThreshold: 25.0
+    savePCD: false
+    savePCDDirectory: /tmp/ai_ship_robot_lio_sam/
+
+    # Mid-360のLivox入力と内蔵IMUに合わせる。IMU noiseは実機静止ログで再調整する前提。
+    sensor: livox
+    N_SCAN: 8
+    Horizon_SCAN: 10000
+    downsampleRate: 1
+    lidarMinRange: 0.1
+    lidarMaxRange: 200.0
+    imuAccNoise: 0.05
+    imuGyrNoise: 0.02
+    imuAccBiasN: 0.001
+    imuGyrBiasN: 0.00001
+    imuGravity: 9.80511
+    imuRPYWeight: 0.0
+
+    # 現状既定の基準系は左LiDARと左IMUの組み合わせで、IMU->LiDAR相対回転はidentityになる。
+    extrinsicTrans: [0.011, 0.02329, -0.04412]
+    extrinsicRot: [1.0, 0.0, 0.0,
+                   0.0, 1.0, 0.0,
+                   0.0, 0.0, 1.0]
+    extrinsicRPY: [1.0, 0.0, 0.0,
+                   0.0, 1.0, 0.0,
+                   0.0, 0.0, 1.0]
+
+    # 屋内低速走行の特徴点不足とCPU負荷のバランスを取る。
+    edgeThreshold: 1.0
+    surfThreshold: 0.1
+    edgeFeatureMinValidNum: 10
+    surfFeatureMinValidNum: 100
+    odometrySurfLeafSize: 0.2
+    mappingCornerLeafSize: 0.1
+    mappingSurfLeafSize: 0.2
+
+    # 坂道を含む3D走行を想定し、LIO-SAM側の2D拘束は無効相当にする。
+    z_tollerance: 1000.0
+    rotation_tollerance: 1000.0
+
+    # 10Hz LiDARの各scanをmapOptimizationへ渡し、公開odometry/TFの更新頻度を保つ。
+    numberOfCores: 4
+    mappingProcessInterval: 0.0
+
+    # キーフレームとloop closureは初期検証で過剰追加・誤閉ループを避ける設定にする。
+    surroundingkeyframeAddingDistThreshold: 1.0
+    surroundingkeyframeAddingAngleThreshold: 0.2
+    surroundingKeyframeDensity: 2.0
+    surroundingKeyframeSearchRadius: 50.0
+    loopClosureEnableFlag: false
+    loopClosureFrequency: 1.0
+    surroundingKeyframeSize: 50
+    historyKeyframeSearchRadius: 15.0
+    historyKeyframeSearchTimeDiff: 30.0
+    historyKeyframeSearchNum: 25
+    historyKeyframeFitnessScore: 0.3
+
+    # RVizで全体マップを確認しやすいよう、表示用点群は軽めに間引く。
+    globalMapVisualizationSearchRadius: 1000.0
+    globalMapVisualizationPoseDensity: 10.0
+    globalMapVisualizationLeafSize: 1.0
+
+    # --------------------------------------------------------------------------
+    # AI_SHIP_ROBOT追加設定
+    # --------------------------------------------------------------------------
+    # 上流LIO-SAMにない拡張項目。移植・差分確認時はこのブロックを中心に確認する。
+    # 6軸IMU用に入力単位と静止初期化条件を定義する。
+    imuType: six_axis
+    imuAccelerationUnit: g
+    imuAccelerationScale: 1.0
+    imuFrequency: 500.0
+    imuDebug: false
+    waitForImuInitialization: true
+    initialImuExpectedAccelerationNorm: 1.0
+    initialImuAccelerationNormTolerance: 0.35
+    initialImuMaxAngularVelocity: 0.2
+    initialImuMinSamples: 50
+    initialImuMinDuration: 0.5
+
+    # 6軸IMU preintegrationの使い方とdeskew動作を明示する。
+    useImuPreintegrationInitialGuess: true
+    useImuTranslationInitialGuess: false
+    useImuRotationInitialGuess: true
+    deskewMode: "odom_interpolation"
+    maxPointOffsetTimeSec: 0.2
+
+    # map保存拡張はLIO-SAM内部のdeskew済み全点群を使い、旧hybrid点群生成は既定で止める。
+    hybridRegisteredCloudEnabled: false
+    hybridRegisteredCloudRawNearRange: 3.0
+    hybridRegisteredCloudRawNearLeafSize: 0.01
+    hybridRegisteredCloudRawUpperMapZLimitEnabled: true
+    hybridRegisteredCloudRawUpperMapZMax: 1.5
+
+    # map保存時はlaunchからsaveMapOutputsを有効化し、raw登録点群publishは診断用途に限定する。
+    saveMapOutputs: false
+    localizationSubmapLeafSize: 0.10
+    saveLioSamStandardPcds: false
+    trajectorySeedRingMinRadius: 0.30
+    trajectorySeedRingMaxRadius: 0.80
+    trajectorySeedRingAccumulationMode: "submap"
+    trajectorySeedRingSubmapVoxelSize: 0.001
+    trajectorySeedRingGlobalVoxelSize: 0.001
+
+    # ground_candidate_map_generatorで使う粗い地面連結と局所詳細化の設定。
+    groundCandidate:
+      coarseGround:
+        gridResolution: 0.30  # 粗い地面連結推定に使う大グリッドの解像度[m]。
+        connectionZWindow: 0.25  # 隣接セルへ地面連結を広げる際に許容する平面近傍z幅[m]。
+        planeFitRadius: 1  # 粗い局所平面fitで参照する周辺セル半径[cell]。
+        minPlanePoints: 8  # 粗い局所平面fitに必要な最小点数。
+        originSeedRadiusCells: 1  # 原点近傍を初期地面seedにする半径[cell]。
+        maxSlopeDeg: 20.0  # 粗い地面セルとして許容する最大勾配[deg]。
+        maxNormalDiffDeg: 12.0  # 隣接地面セル間で許容する最大法線角度差[deg]。
+        maxNeighborHeightGap: 0.08  # 隣接地面セル境界で許容する最大高さ差[m]。
+        maxPlaneRmse: 0.03  # 粗い局所平面fitで許容する最大RMSE[m]。
+        writeDebugPng: true  # PGMに加えてPNGデバッグ画像を出力するか。
+      detailRefinement:
+        enabled: true  # 粗いセルの局所詳細化と5cm級通行可否判定を有効にするか。
+        gridResolution: 0.05  # 詳細化後の小グリッド解像度[m]。
+        coarseMinDensity: 40.0  # 粗いセルを詳細化対象にする地面高さ帯の最小点密度[points/m^2]。
+        coarseDensityContrastEnabled: true  # 粗いセル内の小グリッド密度差で詳細化対象を追加するか。
+        coarseDensityContrastRatio: 0.35  # 小グリッド密度の低percentile/高percentile比がこれ未満なら詳細化する。
+        coarseDensityContrastMinHighDensity: 50.0  # 密度差判定を有効にする高密度側の最小密度[points/m^2]。
+        minPointHeightBelowGround: 0.10  # 詳細評価用点として採用する地面平面より下側の許容幅[m]。
+        maxPointHeightAboveGround: 0.20  # 詳細評価用点として採用する地面平面より上側の許容幅[m]。
+        coarseMaxPlaneDistanceP95: 0.05  # 粗いセル内点の地面平面距離p95がこれを超えたら詳細化する[m]。
+        coarseMaxHeightRangeP95: 0.08  # 粗いセル内点の高さp95-p05がこれを超えたら詳細化する[m]。
+        percentileLow: 5.0  # 高さレンジや密度差で使う低側percentile[%]。
+        percentileHigh: 95.0  # 高さレンジや平面距離で使う高側percentile[%]。
+        minDensity: 20.0  # 小グリッドを通行可能候補にする最小点密度[points/m^2]。
+        planeFitRadiusCells: 1  # 小グリッド局所平面fitで参照する周辺セル半径[cell]。
+        minPlanePoints: 5  # 小グリッド局所平面fitに必要な最小点数。
+        maxHeightRangeP95: 0.05  # 小グリッド内点の高さp95-p05がこれを超えたら通行不可[m]。
+        maxSlopeDeg: 25.0  # 小グリッドの局所平面として許容する最大勾配[deg]。
+        maxPlaneRmse: 0.05  # 小グリッド局所平面fitで許容する最大RMSE[m]。
+        maxNormalDiffDeg: 35.0  # 小グリッド連結時に許容する最大法線角度差[deg]。
+        maxNeighborHeightGap: 0.08  # 小グリッド連結時に許容する隣接境界高さ差[m]。
+
+    publishDeskewedCloud: false
+    publishFeatureClouds: false
+    publishMapGlobalCloud: false
+    publishMapLocalCloud: false
+    publishTrajectoryCloud: false
+    publishCloudRegistered: true
+    publishCloudRegisteredRaw: false
+    publishLoopClosureClouds: false
+
+    # 高負荷時のimageProjection処理数と処理時間ログを制御する。
+    imageProjectionMaxScansPerTimer: 5
+    imageProjectionBacklogLogThreshold: 10
+    processingTimeLogIntervalSec: 5.0

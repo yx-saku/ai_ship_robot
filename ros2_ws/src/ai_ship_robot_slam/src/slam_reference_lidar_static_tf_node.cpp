@@ -122,9 +122,9 @@ public:
 
     validate_parameters(lookup_period_sec);
 
-    // 基準LiDARのCustomMsgから実frameを取得し、設定ファイルとの二重管理を避ける。
+    // self_filter後のreliableなCustomMsg系統へ合わせ、基準LiDAR frame解決をQoS不一致で取りこぼさないようにする。
     reference_cloud_subscription_ = create_subscription<CustomMsg>(
-      reference_custom_topic_, rclcpp::SensorDataQoS(),
+      reference_custom_topic_, rclcpp::QoS(rclcpp::KeepLast(200)).reliable().durability_volatile(),
       [this](const CustomMsg::SharedPtr message) {handle_reference_cloud(message);});
 
     // CustomMsgと/tf_staticの到着順が前後しても、両方そろった時点でTFを確定する。

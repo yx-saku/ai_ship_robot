@@ -20,8 +20,8 @@ struct DriveLimitResult
   bool angular_limited{};
 };
 
-constexpr double kMaxTranslationSpeedMps = 1.4;
-constexpr double kMaxYawRateRadPerSec = 0.873;  // 50 deg/s
+constexpr double kMaxTranslationSpeedMps = 1.6;
+constexpr double kMaxYawRateRadPerSec = 80.0 * M_PI / 180.0;
 
 inline DriveLimitResult apply_drive_limits(
   const double linear_x,
