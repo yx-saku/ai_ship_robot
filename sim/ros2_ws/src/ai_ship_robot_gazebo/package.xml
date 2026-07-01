@@ -10,11 +10,16 @@
   <buildtool_depend>ament_cmake</buildtool_depend>
 
   <build_depend>ament_index_cpp</build_depend>
+  <build_depend>controller_manager</build_depend>
   <build_depend>geometry_msgs</build_depend>
   <build_depend>livox_ros_driver2</build_depend>
   <build_depend>nav_msgs</build_depend>
   <build_depend>rclcpp</build_depend>
   <build_depend>sensor_msgs</build_depend>
+  <build_depend>std_msgs</build_depend>
+  <build_depend>tf2</build_depend>
+  <build_depend>tf2_geometry_msgs</build_depend>
+  <build_depend>tf2_ros</build_depend>
   <build_depend>yaml-cpp</build_depend>
 
   <exec_depend>ai_ship_robot_description</exec_depend>
@@ -23,6 +28,7 @@
   <exec_depend>geometry_msgs</exec_depend>
   <exec_depend>gazebo_plugins</exec_depend>
   <exec_depend>gazebo_ros</exec_depend>
+  <exec_depend>gazebo_ros2_control</exec_depend>
   <exec_depend>launch</exec_depend>
   <exec_depend>launch_ros</exec_depend>
   <exec_depend>livox_ros_driver2</exec_depend>
@@ -31,6 +37,12 @@
   <exec_depend>robot_state_publisher</exec_depend>
   <exec_depend>rviz2</exec_depend>
   <exec_depend>sensor_msgs</exec_depend>
+  <exec_depend>std_msgs</exec_depend>
+  <exec_depend>tf2</exec_depend>
+  <exec_depend>tf2_geometry_msgs</exec_depend>
+  <exec_depend>tf2_ros</exec_depend>
+  <exec_depend>joint_state_broadcaster</exec_depend>
+  <exec_depend>velocity_controllers</exec_depend>
   <exec_depend>xacro</exec_depend>
   <exec_depend>yaml-cpp</exec_depend>
 

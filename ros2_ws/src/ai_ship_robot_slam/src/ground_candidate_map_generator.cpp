@@ -96,6 +96,61 @@ enum class RefineReason : std::uint8_t
   LowCoarseDensity,
   PlaneDistance,
   CoarseHeightRange,
+  MixedConnection,
+};
+
+enum class StageInputCloud
+{
+  Localization,
+  LocalizationPlusNearbyDetail,
+};
+
+struct RefinementTriggerOptions
+{
+  double max_plane_rmse{0.10};
+  double max_plane_distance_p95{0.025};
+  double max_height_range_p95{0.025};
+  bool density_contrast_enabled{true};
+  double density_contrast_ratio{0.8};
+  double density_contrast_min_high_density{0.0};
+  double percentile_low{5.0};
+  double percentile_high{95.0};
+};
+
+struct OriginSeedOptions
+{
+  double origin_z{0.0};
+  std::size_t origin_seed_radius_cells{0};
+};
+
+struct StageOptions
+{
+  bool enabled{true};
+  StageInputCloud input_cloud{StageInputCloud::Localization};
+  double grid_resolution{0.20};
+  std::size_t detail_expansion_cells{1};
+  double cluster_tolerance{0.08};
+  std::size_t min_cluster_points{5};
+  std::size_t plane_fit_radius_cells{1};
+  std::size_t min_plane_points{5};
+  double connection_tolerance{0.12};
+  std::size_t min_connection_points{1};
+  double max_slope_deg{30.0};
+  double max_normal_diff_deg{30.0};
+  double max_neighbor_height_gap{0.20};
+  double max_plane_rmse{0.10};
+  std::string seed_source{"parent_connected_boundary"};
+  RefinementTriggerOptions refinement_trigger;
+};
+
+struct ClusteredRefinementOptions
+{
+  bool enabled{true};
+  bool write_debug_png{false};
+  StageOptions coarse;
+  StageOptions detail;
+  StageOptions fine;
+  OriginSeedOptions coarse_seed;
 };
 
 struct Options
@@ -105,36 +160,7 @@ struct Options
   std::filesystem::path detail_path;
   std::filesystem::path output_dir;
   std::filesystem::path config_path;
-  double coarse_resolution{0.20};
-  double coarse_connection_z_window{0.25};
-  std::size_t coarse_plane_fit_radius{1};
-  std::size_t coarse_min_plane_points{8};
-  std::size_t coarse_origin_seed_radius_cells{1};
-  double coarse_max_slope_deg{30.0};
-  double coarse_max_normal_diff_deg{30.0};
-  double coarse_max_neighbor_height_gap{0.20};
-  double coarse_max_plane_rmse{0.10};
-  bool write_debug_png{false};
-  bool refinement_enabled{true};
-  double refinement_resolution{0.05};
-  double refinement_coarse_min_density{40.0};
-  bool refinement_coarse_density_contrast_enabled{true};
-  double refinement_coarse_density_contrast_ratio{0.35};
-  double refinement_coarse_density_contrast_min_high_density{50.0};
-  double refinement_min_point_height_below_ground{0.10};
-  double refinement_max_point_height_above_ground{0.20};
-  double refinement_coarse_max_plane_distance_p95{0.05};
-  double refinement_coarse_max_height_range_p95{0.08};
-  double refinement_percentile_low{5.0};
-  double refinement_percentile_high{95.0};
-  double refinement_min_density{20.0};
-  std::size_t refinement_plane_fit_radius_cells{1};
-  std::size_t refinement_min_plane_points{5};
-  double refinement_max_height_range_p95{0.05};
-  double refinement_max_slope_deg{25.0};
-  double refinement_max_plane_rmse{0.05};
-  double refinement_max_normal_diff_deg{35.0};
-  double refinement_max_neighbor_height_gap{0.08};
+  ClusteredRefinementOptions clustered_refinement;
 };
 
 struct Bounds
@@ -149,6 +175,7 @@ struct Cell
 {
   std::vector<std::size_t> point_indices;
   std::vector<std::size_t> ground_indices;
+  std::vector<std::size_t> cluster_indices;
   bool enabled{true};
   bool refine_target{false};
   RefineReason refine_reason{RefineReason::None};
@@ -159,6 +186,19 @@ struct Cell
   double slope_deg{std::numeric_limits<double>::infinity()};
   double representative_z{std::numeric_limits<double>::quiet_NaN()};
   CellState state{CellState::Unknown};
+};
+
+struct Cluster
+{
+  std::vector<std::size_t> point_indices;
+  std::size_t cell_index{};
+  Eigen::Vector3d centroid{Eigen::Vector3d::Zero()};
+  Eigen::Vector3d normal{Eigen::Vector3d::UnitZ()};
+  double representative_z{std::numeric_limits<double>::quiet_NaN()};
+  double plane_rmse{std::numeric_limits<double>::infinity()};
+  double slope_deg{std::numeric_limits<double>::infinity()};
+  bool plane_valid{false};
+  bool connected_to_seed{false};
 };
 
 struct Grid
@@ -189,6 +229,17 @@ struct CoarseResult
 {
   Grid grid;
   CloudT cloud;
+};
+
+struct StageResult
+{
+  std::string name;
+  Grid grid;
+  CloudT evaluation_cloud;
+  CloudT connected_cloud;
+  std::vector<Cluster> clusters;
+  std::size_t connected_clusters{};
+  std::size_t refinement_target_cells{};
 };
 
 struct RefinementResult
@@ -314,97 +365,36 @@ std::string canonical_config_key(const std::string & key)
     canonical_key = canonical_key.substr(nested_root);
   }
 
-  if (canonical_key == "groundCandidate.coarseGround.gridResolution") {
-    return "coarseResolution";
-  }
-  if (canonical_key == "groundCandidate.coarseGround.connectionZWindow") {
-    return "coarseConnectionZWindow";
-  }
-  if (canonical_key == "groundCandidate.coarseGround.planeFitRadius") {
-    return "coarsePlaneFitRadius";
-  }
-  if (canonical_key == "groundCandidate.coarseGround.minPlanePoints") {
-    return "coarseMinPlanePoints";
-  }
-  if (canonical_key == "groundCandidate.coarseGround.originSeedRadiusCells") {
-    return "coarseOriginSeedRadiusCells";
-  }
-  if (canonical_key == "groundCandidate.coarseGround.maxSlopeDeg") {
-    return "coarseMaxSlopeDeg";
-  }
-  if (canonical_key == "groundCandidate.coarseGround.maxNormalDiffDeg") {
-    return "coarseMaxNormalDiffDeg";
-  }
-  if (canonical_key == "groundCandidate.coarseGround.maxNeighborHeightGap") {
-    return "coarseMaxNeighborHeightGap";
-  }
-  if (canonical_key == "groundCandidate.coarseGround.maxPlaneRmse") {
-    return "coarseMaxPlaneRmse";
-  }
-  if (canonical_key == "groundCandidate.coarseGround.writeDebugPng") {
-    return "writeDebugPng";
-  }
-  if (canonical_key == "groundCandidate.detailRefinement.enabled") {
-    return "refinementEnabled";
-  }
-  if (canonical_key == "groundCandidate.detailRefinement.gridResolution") {
-    return "refinementResolution";
-  }
-  if (canonical_key == "groundCandidate.detailRefinement.coarseMinDensity") {
-    return "refinementCoarseMinDensity";
-  }
-  if (canonical_key == "groundCandidate.detailRefinement.coarseDensityContrastEnabled") {
-    return "refinementCoarseDensityContrastEnabled";
-  }
-  if (canonical_key == "groundCandidate.detailRefinement.coarseDensityContrastRatio") {
-    return "refinementCoarseDensityContrastRatio";
-  }
-  if (canonical_key == "groundCandidate.detailRefinement.coarseDensityContrastMinHighDensity") {
-    return "refinementCoarseDensityContrastMinHighDensity";
-  }
-  if (canonical_key == "groundCandidate.detailRefinement.coarseMaxPlaneDistanceP95") {
-    return "refinementCoarseMaxPlaneDistanceP95";
-  }
-  if (canonical_key == "groundCandidate.detailRefinement.minPointHeightBelowGround") {
-    return "refinementMinPointHeightBelowGround";
-  }
-  if (canonical_key == "groundCandidate.detailRefinement.maxPointHeightAboveGround") {
-    return "refinementMaxPointHeightAboveGround";
-  }
-  if (canonical_key == "groundCandidate.detailRefinement.coarseMaxHeightRangeP95") {
-    return "refinementCoarseMaxHeightRangeP95";
-  }
-  if (canonical_key == "groundCandidate.detailRefinement.percentileLow") {
-    return "refinementPercentileLow";
-  }
-  if (canonical_key == "groundCandidate.detailRefinement.percentileHigh") {
-    return "refinementPercentileHigh";
-  }
-  if (canonical_key == "groundCandidate.detailRefinement.minDensity") {
-    return "refinementMinDensity";
-  }
-  if (canonical_key == "groundCandidate.detailRefinement.planeFitRadiusCells") {
-    return "refinementPlaneFitRadiusCells";
-  }
-  if (canonical_key == "groundCandidate.detailRefinement.minPlanePoints") {
-    return "refinementMinPlanePoints";
-  }
-  if (canonical_key == "groundCandidate.detailRefinement.maxHeightRangeP95") {
-    return "refinementMaxHeightRangeP95";
-  }
-  if (canonical_key == "groundCandidate.detailRefinement.maxSlopeDeg") {
-    return "refinementMaxSlopeDeg";
-  }
-  if (canonical_key == "groundCandidate.detailRefinement.maxPlaneRmse") {
-    return "refinementMaxPlaneRmse";
-  }
-  if (canonical_key == "groundCandidate.detailRefinement.maxNormalDiffDeg") {
-    return "refinementMaxNormalDiffDeg";
-  }
-  if (canonical_key == "groundCandidate.detailRefinement.maxNeighborHeightGap") {
-    return "refinementMaxNeighborHeightGap";
-  }
   return canonical_key;
+}
+
+StageInputCloud parse_stage_input_cloud(const std::string & value, const std::string & name)
+{
+  if (value == "localization") {
+    return StageInputCloud::Localization;
+  }
+  if (value == "localization_plus_nearby_detail") {
+    return StageInputCloud::LocalizationPlusNearbyDetail;
+  }
+  throw std::invalid_argument(name + " must be localization or localization_plus_nearby_detail: " + value);
+}
+
+StageOptions * stage_options_for_key(Options & options, const std::string & key, std::string & suffix)
+{
+  const std::string root = "groundCandidate.clusteredRefinement.";
+  if (key.rfind(root + "coarse.", 0) == 0) {
+    suffix = key.substr((root + "coarse.").size());
+    return &options.clustered_refinement.coarse;
+  }
+  if (key.rfind(root + "detail.", 0) == 0) {
+    suffix = key.substr((root + "detail.").size());
+    return &options.clustered_refinement.detail;
+  }
+  if (key.rfind(root + "fine.", 0) == 0) {
+    suffix = key.substr((root + "fine.").size());
+    return &options.clustered_refinement.fine;
+  }
+  return nullptr;
 }
 
 void apply_config_value(Options & options, const std::string & key, const std::string & value)
@@ -414,67 +404,69 @@ void apply_config_value(Options & options, const std::string & key, const std::s
   }
   const auto canonical_key = canonical_config_key(key);
 
-  // ROS parameter YAML内の地面地図生成キーだけを読み、LIO-SAM本体設定は無視する。
-  if (canonical_key == "coarseResolution" || canonical_key == "groundGridResolution") {
-    options.coarse_resolution = parse_positive_double(value, canonical_key);
-  } else if (canonical_key == "coarseConnectionZWindow" || canonical_key == "groundConnectionZWindow") {
-    options.coarse_connection_z_window = parse_nonnegative_double(value, canonical_key);
-  } else if (canonical_key == "coarsePlaneFitRadius" || canonical_key == "groundPlaneFitRadius") {
-    options.coarse_plane_fit_radius = parse_size(value, canonical_key, true);
-  } else if (canonical_key == "coarseMinPlanePoints" || canonical_key == "groundMinPlanePoints") {
-    options.coarse_min_plane_points = parse_size(value, canonical_key, false);
-  } else if (canonical_key == "coarseOriginSeedRadiusCells" || canonical_key == "groundOriginSeedRadiusCells") {
-    options.coarse_origin_seed_radius_cells = parse_size(value, canonical_key, true);
-  } else if (canonical_key == "coarseMaxSlopeDeg" || canonical_key == "groundMaxSlopeDeg") {
-    options.coarse_max_slope_deg = parse_nonnegative_double(value, canonical_key);
-  } else if (canonical_key == "coarseMaxNormalDiffDeg" || canonical_key == "groundMaxNormalDiffDeg") {
-    options.coarse_max_normal_diff_deg = parse_nonnegative_double(value, canonical_key);
-  } else if (canonical_key == "coarseMaxNeighborHeightGap" || canonical_key == "groundMaxNeighborHeightGap") {
-    options.coarse_max_neighbor_height_gap = parse_nonnegative_double(value, canonical_key);
-  } else if (canonical_key == "coarseMaxPlaneRmse" || canonical_key == "groundMaxPlaneRmse") {
-    options.coarse_max_plane_rmse = parse_nonnegative_double(value, canonical_key);
-  } else if (canonical_key == "writeDebugPng" || canonical_key == "groundWriteDebugPng") {
-    options.write_debug_png = parse_bool(value, canonical_key);
-  } else if (canonical_key == "refinementEnabled") {
-    options.refinement_enabled = parse_bool(value, canonical_key);
-  } else if (canonical_key == "refinementResolution") {
-    options.refinement_resolution = parse_positive_double(value, canonical_key);
-  } else if (canonical_key == "refinementCoarseMinDensity") {
-    options.refinement_coarse_min_density = parse_nonnegative_double(value, canonical_key);
-  } else if (canonical_key == "refinementCoarseDensityContrastEnabled") {
-    options.refinement_coarse_density_contrast_enabled = parse_bool(value, canonical_key);
-  } else if (canonical_key == "refinementCoarseDensityContrastRatio") {
-    options.refinement_coarse_density_contrast_ratio = parse_nonnegative_double(value, canonical_key);
-  } else if (canonical_key == "refinementCoarseDensityContrastMinHighDensity") {
-    options.refinement_coarse_density_contrast_min_high_density = parse_nonnegative_double(value, canonical_key);
-  } else if (canonical_key == "refinementMinPointHeightBelowGround") {
-    options.refinement_min_point_height_below_ground = parse_nonnegative_double(value, canonical_key);
-  } else if (canonical_key == "refinementMaxPointHeightAboveGround") {
-    options.refinement_max_point_height_above_ground = parse_nonnegative_double(value, canonical_key);
-  } else if (canonical_key == "refinementCoarseMaxPlaneDistanceP95") {
-    options.refinement_coarse_max_plane_distance_p95 = parse_nonnegative_double(value, canonical_key);
-  } else if (canonical_key == "refinementCoarseMaxHeightRangeP95") {
-    options.refinement_coarse_max_height_range_p95 = parse_nonnegative_double(value, canonical_key);
-  } else if (canonical_key == "refinementPercentileLow") {
-    options.refinement_percentile_low = parse_nonnegative_double(value, canonical_key);
-  } else if (canonical_key == "refinementPercentileHigh") {
-    options.refinement_percentile_high = parse_nonnegative_double(value, canonical_key);
-  } else if (canonical_key == "refinementMinDensity") {
-    options.refinement_min_density = parse_nonnegative_double(value, canonical_key);
-  } else if (canonical_key == "refinementPlaneFitRadiusCells") {
-    options.refinement_plane_fit_radius_cells = parse_size(value, canonical_key, true);
-  } else if (canonical_key == "refinementMinPlanePoints") {
-    options.refinement_min_plane_points = parse_size(value, canonical_key, false);
-  } else if (canonical_key == "refinementMaxHeightRangeP95") {
-    options.refinement_max_height_range_p95 = parse_nonnegative_double(value, canonical_key);
-  } else if (canonical_key == "refinementMaxSlopeDeg") {
-    options.refinement_max_slope_deg = parse_nonnegative_double(value, canonical_key);
-  } else if (canonical_key == "refinementMaxPlaneRmse") {
-    options.refinement_max_plane_rmse = parse_nonnegative_double(value, canonical_key);
-  } else if (canonical_key == "refinementMaxNormalDiffDeg") {
-    options.refinement_max_normal_diff_deg = parse_nonnegative_double(value, canonical_key);
-  } else if (canonical_key == "refinementMaxNeighborHeightGap") {
-    options.refinement_max_neighbor_height_gap = parse_nonnegative_double(value, canonical_key);
+  // 新方式ではgroundCandidate.clusteredRefinement配下だけを読み、廃止済み設定は意図的に無視する。
+  if (canonical_key == "groundCandidate.clusteredRefinement.enabled") {
+    options.clustered_refinement.enabled = parse_bool(value, canonical_key);
+  } else if (canonical_key == "groundCandidate.clusteredRefinement.writeDebugPng") {
+    options.clustered_refinement.write_debug_png = parse_bool(value, canonical_key);
+  } else if (canonical_key == "groundCandidate.clusteredRefinement.coarse.seed.originZ") {
+    options.clustered_refinement.coarse_seed.origin_z = parse_double(value, canonical_key);
+  } else if (canonical_key == "groundCandidate.clusteredRefinement.coarse.seed.originSeedRadiusCells") {
+    options.clustered_refinement.coarse_seed.origin_seed_radius_cells = parse_size(value, canonical_key, true);
+  } else {
+    std::string suffix;
+    auto * stage = stage_options_for_key(options, canonical_key, suffix);
+    if (stage == nullptr) {
+      return;
+    }
+    auto & trigger = stage->refinement_trigger;
+    if (suffix == "enabled") {
+      stage->enabled = parse_bool(value, canonical_key);
+    } else if (suffix == "inputCloud") {
+      stage->input_cloud = parse_stage_input_cloud(value, canonical_key);
+    } else if (suffix == "gridResolution") {
+      stage->grid_resolution = parse_positive_double(value, canonical_key);
+    } else if (suffix == "detailExpansionCells") {
+      stage->detail_expansion_cells = parse_size(value, canonical_key, true);
+    } else if (suffix == "clusterTolerance") {
+      stage->cluster_tolerance = parse_positive_double(value, canonical_key);
+    } else if (suffix == "minClusterPoints") {
+      stage->min_cluster_points = parse_size(value, canonical_key, false);
+    } else if (suffix == "planeFitRadiusCells") {
+      stage->plane_fit_radius_cells = parse_size(value, canonical_key, true);
+    } else if (suffix == "minPlanePoints") {
+      stage->min_plane_points = parse_size(value, canonical_key, false);
+    } else if (suffix == "connectionTolerance") {
+      stage->connection_tolerance = parse_positive_double(value, canonical_key);
+    } else if (suffix == "minConnectionPoints") {
+      stage->min_connection_points = parse_size(value, canonical_key, false);
+    } else if (suffix == "maxSlopeDeg") {
+      stage->max_slope_deg = parse_nonnegative_double(value, canonical_key);
+    } else if (suffix == "maxNormalDiffDeg") {
+      stage->max_normal_diff_deg = parse_nonnegative_double(value, canonical_key);
+    } else if (suffix == "maxNeighborHeightGap") {
+      stage->max_neighbor_height_gap = parse_nonnegative_double(value, canonical_key);
+    } else if (suffix == "maxPlaneRmse") {
+      stage->max_plane_rmse = parse_nonnegative_double(value, canonical_key);
+    } else if (suffix == "seedSource") {
+      stage->seed_source = value;
+    } else if (suffix == "refinementTrigger.maxPlaneRmse") {
+      trigger.max_plane_rmse = parse_nonnegative_double(value, canonical_key);
+    } else if (suffix == "refinementTrigger.maxPlaneDistanceP95") {
+      trigger.max_plane_distance_p95 = parse_nonnegative_double(value, canonical_key);
+    } else if (suffix == "refinementTrigger.maxHeightRangeP95") {
+      trigger.max_height_range_p95 = parse_nonnegative_double(value, canonical_key);
+    } else if (suffix == "refinementTrigger.densityContrastEnabled") {
+      trigger.density_contrast_enabled = parse_bool(value, canonical_key);
+    } else if (suffix == "refinementTrigger.densityContrastRatio") {
+      trigger.density_contrast_ratio = parse_nonnegative_double(value, canonical_key);
+    } else if (suffix == "refinementTrigger.densityContrastMinHighDensity") {
+      trigger.density_contrast_min_high_density = parse_nonnegative_double(value, canonical_key);
+    } else if (suffix == "refinementTrigger.percentileLow") {
+      trigger.percentile_low = parse_nonnegative_double(value, canonical_key);
+    } else if (suffix == "refinementTrigger.percentileHigh") {
+      trigger.percentile_high = parse_nonnegative_double(value, canonical_key);
+    }
   }
 }
 
@@ -532,8 +524,8 @@ void print_usage(std::ostream & stream)
   stream << "  --seed PATH                      Input trajectory_seed_ring_cloud.pcd path.\n";
   stream << "  --output-dir DIR                 Output directory. Default: map-dir or localization parent.\n";
   stream << "  --config PATH                    YAML containing groundCandidate parameters.\n";
-  stream << "  --resolution M                   Coarse grid resolution in meters. Default: 0.20\n";
-  stream << "  --origin-seed-radius-cells N     Coarse seed radius around map origin. Default: 1\n";
+  stream << "  --resolution M                   Override clusteredRefinement.coarse.gridResolution.\n";
+  stream << "  --origin-seed-radius-cells N     Override clusteredRefinement.coarse.seed.originSeedRadiusCells.\n";
   stream << "  -h, --help                       Show this help.\n";
 }
 
@@ -607,10 +599,21 @@ void validate_options(const Options & options)
   if (options.output_dir.empty()) {
     throw std::invalid_argument("output directory is empty");
   }
-  if (options.refinement_percentile_low < 0.0 || options.refinement_percentile_high > 100.0 ||
-    options.refinement_percentile_low >= options.refinement_percentile_high)
-  {
-    throw std::invalid_argument("detailRefinement percentileLow/High must satisfy 0 <= low < high <= 100");
+  const auto validate_stage = [](const char * name, const StageOptions & stage) {
+    if (stage.refinement_trigger.percentile_low < 0.0 || stage.refinement_trigger.percentile_high > 100.0 ||
+      stage.refinement_trigger.percentile_low >= stage.refinement_trigger.percentile_high)
+    {
+      throw std::invalid_argument(std::string(name) + " percentileLow/High must satisfy 0 <= low < high <= 100");
+    }
+  };
+  validate_stage("coarse", options.clustered_refinement.coarse);
+  validate_stage("detail", options.clustered_refinement.detail);
+  validate_stage("fine", options.clustered_refinement.fine);
+  if (!options.clustered_refinement.coarse.enabled) {
+    throw std::invalid_argument("groundCandidate.clusteredRefinement.coarse.enabled must be true");
+  }
+  if (options.clustered_refinement.fine.enabled && !options.clustered_refinement.detail.enabled) {
+    throw std::invalid_argument("fine.enabled requires detail.enabled");
   }
 }
 
@@ -663,9 +666,10 @@ Options parse_options(int argc, char ** argv)
       options.config_path = take_option_value(argument, inline_value, index, argc, argv);
       load_config_file(options, options.config_path);
     } else if (argument == "--resolution") {
-      options.coarse_resolution = parse_positive_double(take_option_value(argument, inline_value, index, argc, argv), argument);
+      options.clustered_refinement.coarse.grid_resolution = parse_positive_double(
+        take_option_value(argument, inline_value, index, argc, argv), argument);
     } else if (argument == "--origin-seed-radius-cells") {
-      options.coarse_origin_seed_radius_cells = parse_size(
+      options.clustered_refinement.coarse_seed.origin_seed_radius_cells = parse_size(
         take_option_value(argument, inline_value, index, argc, argv), argument, true);
     } else {
       throw std::invalid_argument("unknown option: " + argument);
@@ -830,6 +834,7 @@ double percentile_height_range(
   return percentile_from_sorted(z_values, high_percentile) - percentile_from_sorted(z_values, low_percentile);
 }
 
+#if 0
 double density_contrast_ratio_in_coarse_cell(
   const Grid & coarse_grid, const CloudT & cloud, const Cell & coarse_cell, const std::size_t coarse_x,
   const std::size_t coarse_y, const Options & options, double & high_density)
@@ -866,6 +871,7 @@ double density_contrast_ratio_in_coarse_cell(
   const auto low_density = percentile_from_sorted(densities, options.refinement_percentile_low);
   return low_density / high_density;
 }
+#endif
 
 double mean_z(const CloudT & cloud, const std::vector<std::size_t> & point_indices)
 {
@@ -917,6 +923,7 @@ bool fit_plane_from_indices(
   return std::isfinite(rmse) && std::isfinite(slope_deg);
 }
 
+#if 0
 double plane_z_at(const Cell & cell, const double x, const double y)
 {
   if (!cell.plane_valid || std::abs(cell.normal.z()) < 1.0e-6) {
@@ -1547,6 +1554,390 @@ RefinementResult run_detail_refinement(
   result.traversable_cloud = build_cloud_from_ground_cells(result.traversable_grid, merged_cloud);
   return result;
 }
+#endif
+
+double point_distance(const PointT & left, const PointT & right)
+{
+  const auto dx = static_cast<double>(left.x) - static_cast<double>(right.x);
+  const auto dy = static_cast<double>(left.y) - static_cast<double>(right.y);
+  const auto dz = static_cast<double>(left.z) - static_cast<double>(right.z);
+  return std::sqrt(dx * dx + dy * dy + dz * dz);
+}
+
+double point_plane_distance(const Eigen::Vector3d & centroid, const Eigen::Vector3d & normal, const PointT & point)
+{
+  return std::abs(normal.dot(to_vector3d(point) - centroid));
+}
+
+double normal_angle_deg(const Eigen::Vector3d & left, const Eigen::Vector3d & right)
+{
+  return std::acos(std::clamp(left.dot(right), -1.0, 1.0)) * 180.0 / kPi;
+}
+
+double density_contrast_ratio_in_cell(
+  const Grid & grid, const CloudT & cloud, const Cell & cell, const std::size_t cell_x, const std::size_t cell_y,
+  const StageOptions & stage, double & high_density)
+{
+  const auto sub_resolution = std::max(stage.grid_resolution * 0.5, stage.grid_resolution / 4.0);
+  const auto sub_divisions = std::max<std::size_t>(2U, static_cast<std::size_t>(std::ceil(grid.resolution / sub_resolution)));
+  std::vector<double> counts(sub_divisions * sub_divisions, 0.0);
+  const auto min_x = grid.origin_x + static_cast<double>(cell_x) * grid.resolution;
+  const auto min_y = grid.origin_y + static_cast<double>(cell_y) * grid.resolution;
+  const auto subcell_size = grid.resolution / static_cast<double>(sub_divisions);
+  const auto subcell_area = subcell_size * subcell_size;
+
+  // セル内をさらに細分化し、局所的な観測密度の偏りを詳細化トリガとして扱う。
+  for (const auto point_index : cell.ground_indices) {
+    const auto & point = cloud.points[point_index];
+    const auto sub_x = static_cast<std::int64_t>(std::floor((point.x - min_x) / subcell_size));
+    const auto sub_y = static_cast<std::int64_t>(std::floor((point.y - min_y) / subcell_size));
+    if (sub_x < 0 || sub_y < 0 || sub_x >= static_cast<std::int64_t>(sub_divisions) ||
+      sub_y >= static_cast<std::int64_t>(sub_divisions))
+    {
+      continue;
+    }
+    counts[flatten_index(static_cast<std::size_t>(sub_x), static_cast<std::size_t>(sub_y), sub_divisions)] += 1.0;
+  }
+
+  std::vector<double> densities;
+  densities.reserve(counts.size());
+  for (const auto count : counts) {
+    densities.push_back(count / subcell_area);
+  }
+  std::sort(densities.begin(), densities.end());
+  high_density = percentile_from_sorted(densities, stage.refinement_trigger.percentile_high);
+  if (high_density <= 0.0) {
+    return 1.0;
+  }
+  return percentile_from_sorted(densities, stage.refinement_trigger.percentile_low) / high_density;
+}
+
+void build_cell_clusters(Grid & grid, const CloudT & cloud, const StageOptions & stage, std::vector<Cluster> & clusters)
+{
+  for (std::size_t cell_index = 0; cell_index < grid.cells.size(); ++cell_index) {
+    auto & cell = grid.cells[cell_index];
+    cell.state = cell.point_indices.empty() ? CellState::Unknown : CellState::Candidate;
+    std::vector<std::uint8_t> visited(cell.point_indices.size(), 0);
+
+    // セル内の3D近接点だけをBFSでまとめ、同一XYセル内の床・天井混在をクラスタで分離する。
+    for (std::size_t local_index = 0; local_index < cell.point_indices.size(); ++local_index) {
+      if (visited[local_index] != 0) {
+        continue;
+      }
+      std::deque<std::size_t> queue{local_index};
+      visited[local_index] = 1;
+      Cluster cluster;
+      cluster.cell_index = cell_index;
+      while (!queue.empty()) {
+        const auto current_local = queue.front();
+        queue.pop_front();
+        const auto current_point_index = cell.point_indices[current_local];
+        cluster.point_indices.push_back(current_point_index);
+        for (std::size_t other_local = 0; other_local < cell.point_indices.size(); ++other_local) {
+          if (visited[other_local] != 0) {
+            continue;
+          }
+          if (point_distance(cloud.points[current_point_index], cloud.points[cell.point_indices[other_local]]) <=
+            stage.cluster_tolerance)
+          {
+            visited[other_local] = 1;
+            queue.push_back(other_local);
+          }
+        }
+      }
+      if (cluster.point_indices.size() < stage.min_cluster_points) {
+        continue;
+      }
+      cluster.representative_z = mean_z(cloud, cluster.point_indices);
+      cluster.plane_valid = fit_plane_from_indices(
+        cloud, cluster.point_indices, stage.min_plane_points, cluster.centroid, cluster.normal, cluster.plane_rmse,
+        cluster.slope_deg);
+      if (!cluster.plane_valid) {
+        cluster.centroid = Eigen::Vector3d::Zero();
+        for (const auto point_index : cluster.point_indices) {
+          cluster.centroid += to_vector3d(cloud.points[point_index]);
+        }
+        cluster.centroid /= static_cast<double>(cluster.point_indices.size());
+      }
+      cell.cluster_indices.push_back(clusters.size());
+      clusters.push_back(std::move(cluster));
+    }
+  }
+}
+
+std::vector<std::size_t> coarse_seed_clusters(const Grid & grid, const std::vector<Cluster> & clusters, const Options & options)
+{
+  std::size_t origin_x = 0;
+  std::size_t origin_y = 0;
+  if (!locate_cell(grid, 0.0, 0.0, origin_x, origin_y)) {
+    throw std::runtime_error("map grid does not contain origin for coarse ground seed");
+  }
+  const auto radius = static_cast<std::int64_t>(options.clustered_refinement.coarse_seed.origin_seed_radius_cells);
+  std::vector<std::size_t> seeds;
+  double best_z_error = std::numeric_limits<double>::infinity();
+
+  // 原点近傍の候補から、設定された原点zに代表高さが最も近いクラスタだけを初期seedにする。
+  for (std::int64_t offset_y = -radius; offset_y <= radius; ++offset_y) {
+    const auto y = static_cast<std::int64_t>(origin_y) + offset_y;
+    if (y < 0 || y >= static_cast<std::int64_t>(grid.height)) {
+      continue;
+    }
+    for (std::int64_t offset_x = -radius; offset_x <= radius; ++offset_x) {
+      const auto x = static_cast<std::int64_t>(origin_x) + offset_x;
+      if (x < 0 || x >= static_cast<std::int64_t>(grid.width)) {
+        continue;
+      }
+      const auto cell_index = flatten_index(static_cast<std::size_t>(x), static_cast<std::size_t>(y), grid.width);
+      for (const auto cluster_index : grid.cells[cell_index].cluster_indices) {
+        const auto z_error = std::abs(clusters[cluster_index].representative_z - options.clustered_refinement.coarse_seed.origin_z);
+        if (z_error < best_z_error) {
+          best_z_error = z_error;
+          seeds = {cluster_index};
+        }
+      }
+    }
+  }
+  if (seeds.empty()) {
+    throw std::runtime_error("failed to find coarse origin seed cluster");
+  }
+  return seeds;
+}
+
+std::vector<std::size_t> inherited_seed_clusters(
+  const Grid & grid, const std::vector<Cluster> & clusters, const StageResult & parent)
+{
+  std::vector<std::size_t> seeds;
+  for (std::size_t cluster_index = 0; cluster_index < clusters.size(); ++cluster_index) {
+    const auto & cluster = clusters[cluster_index];
+    bool inherited = false;
+    const auto cell_x = cluster.cell_index % grid.width;
+    const auto cell_y = cluster.cell_index / grid.width;
+    const auto [center_x, center_y] = cell_center(grid, cell_x, cell_y);
+    std::size_t parent_x = 0;
+    std::size_t parent_y = 0;
+    if (locate_cell(parent.grid, center_x, center_y, parent_x, parent_y)) {
+      inherited = is_ground_state(parent.grid.cells[flatten_index(parent_x, parent_y, parent.grid.width)].state);
+    }
+    if (inherited) {
+      seeds.push_back(cluster_index);
+    }
+  }
+  return seeds;
+}
+
+bool clusters_connected(const CloudT & cloud, const Cluster & left, const Cluster & right, const StageOptions & stage)
+{
+  if (!left.plane_valid || !right.plane_valid) {
+    return false;
+  }
+  if (right.plane_rmse > stage.max_plane_rmse || right.slope_deg > stage.max_slope_deg) {
+    return false;
+  }
+  if (normal_angle_deg(left.normal, right.normal) > stage.max_normal_diff_deg) {
+    return false;
+  }
+  if (std::abs(left.representative_z - right.representative_z) > stage.max_neighbor_height_gap) {
+    return false;
+  }
+
+  std::size_t support_points = 0;
+  for (const auto point_index : right.point_indices) {
+    if (point_plane_distance(left.centroid, left.normal, cloud.points[point_index]) <= stage.connection_tolerance) {
+      ++support_points;
+      if (support_points >= stage.min_connection_points) {
+        return true;
+      }
+    }
+  }
+  return false;
+}
+
+void grow_connected_clusters(
+  Grid & grid, const CloudT & cloud, const StageOptions & stage, std::vector<Cluster> & clusters,
+  const std::vector<std::size_t> & seed_clusters)
+{
+  static constexpr std::array<std::pair<int, int>, 8> kNeighborOffsets{{
+    {-1, -1}, {0, -1}, {1, -1}, {-1, 0}, {1, 0}, {-1, 1}, {0, 1}, {1, 1},
+  }};
+  std::deque<std::size_t> queue;
+  for (const auto cluster_index : seed_clusters) {
+    clusters[cluster_index].connected_to_seed = true;
+    grid.cells[clusters[cluster_index].cell_index].state = CellState::Seed;
+    queue.push_back(cluster_index);
+  }
+
+  // seedから隣接セルのクラスタへ、境界近傍点の3D距離だけで連結を広げる。
+  while (!queue.empty()) {
+    const auto current_index = queue.front();
+    queue.pop_front();
+    const auto current_cell = clusters[current_index].cell_index;
+    const auto current_x = current_cell % grid.width;
+    const auto current_y = current_cell / grid.width;
+    for (const auto & [offset_x, offset_y] : kNeighborOffsets) {
+      const auto nx = static_cast<std::int64_t>(current_x) + offset_x;
+      const auto ny = static_cast<std::int64_t>(current_y) + offset_y;
+      if (nx < 0 || ny < 0 || nx >= static_cast<std::int64_t>(grid.width) || ny >= static_cast<std::int64_t>(grid.height)) {
+        continue;
+      }
+      auto & neighbor_cell = grid.cells[flatten_index(static_cast<std::size_t>(nx), static_cast<std::size_t>(ny), grid.width)];
+      for (const auto neighbor_cluster_index : neighbor_cell.cluster_indices) {
+        if (clusters[neighbor_cluster_index].connected_to_seed) {
+          continue;
+        }
+        if (clusters_connected(cloud, clusters[current_index], clusters[neighbor_cluster_index], stage)) {
+          clusters[neighbor_cluster_index].connected_to_seed = true;
+          neighbor_cell.state = CellState::Ground;
+          queue.push_back(neighbor_cluster_index);
+        }
+      }
+    }
+  }
+}
+
+void evaluate_connected_cells(Grid & grid, const CloudT & cloud, const StageOptions & stage, std::vector<Cluster> & clusters)
+{
+  for (std::size_t cell_index = 0; cell_index < grid.cells.size(); ++cell_index) {
+    auto & cell = grid.cells[cell_index];
+    cell.ground_indices.clear();
+    bool has_connected = false;
+    bool has_disconnected = false;
+    for (const auto cluster_index : cell.cluster_indices) {
+      const auto & cluster = clusters[cluster_index];
+      if (cluster.connected_to_seed) {
+        has_connected = true;
+        cell.ground_indices.insert(cell.ground_indices.end(), cluster.point_indices.begin(), cluster.point_indices.end());
+      } else {
+        has_disconnected = true;
+      }
+    }
+    if (!has_connected) {
+      cell.state = cell.point_indices.empty() ? CellState::Unknown : CellState::Disconnected;
+      continue;
+    }
+
+    // seed連結済みクラスタを統合し、壁・柱を含む形状複雑さをPCA残差と高さレンジで評価する。
+    cell.plane_valid = fit_plane_from_indices(
+      cloud, cell.ground_indices, stage.min_plane_points, cell.centroid, cell.normal, cell.plane_rmse, cell.slope_deg);
+    cell.representative_z = mean_z(cloud, cell.ground_indices);
+    std::vector<double> distances;
+    distances.reserve(cell.ground_indices.size());
+    if (cell.plane_valid) {
+      for (const auto point_index : cell.ground_indices) {
+        distances.push_back(point_plane_distance(cell.centroid, cell.normal, cloud.points[point_index]));
+      }
+    }
+    const auto distance_p95 = percentile(std::move(distances), stage.refinement_trigger.percentile_high);
+    const auto height_range = percentile_height_range(
+      cloud, cell.ground_indices, stage.refinement_trigger.percentile_low, stage.refinement_trigger.percentile_high);
+    double high_density = 0.0;
+    const auto density_contrast = density_contrast_ratio_in_cell(
+      grid, cloud, cell, cell_index % grid.width, cell_index / grid.width, stage, high_density);
+    const auto density_trigger = stage.refinement_trigger.density_contrast_enabled &&
+      high_density >= stage.refinement_trigger.density_contrast_min_high_density &&
+      density_contrast < stage.refinement_trigger.density_contrast_ratio;
+    cell.refine_target = !cell.plane_valid || cell.plane_rmse > stage.refinement_trigger.max_plane_rmse ||
+      distance_p95 > stage.refinement_trigger.max_plane_distance_p95 ||
+      height_range > stage.refinement_trigger.max_height_range_p95 || density_trigger || has_disconnected;
+    cell.refine_reason = density_trigger ? RefineReason::DensityContrast :
+      (has_disconnected ? RefineReason::MixedConnection :
+        (height_range > stage.refinement_trigger.max_height_range_p95 ? RefineReason::CoarseHeightRange :
+          (distance_p95 > stage.refinement_trigger.max_plane_distance_p95 ? RefineReason::PlaneDistance :
+            (!cell.plane_valid ? RefineReason::NoCoarsePlane : RefineReason::None))));
+    if (cell.state != CellState::Seed) {
+      cell.state = cell.refine_target ? CellState::RefineTarget : CellState::Ground;
+    }
+  }
+}
+
+CloudT build_cloud_from_connected_clusters(const CloudT & source_cloud, const std::vector<Cluster> & clusters)
+{
+  CloudT output;
+  for (const auto & cluster : clusters) {
+    if (!cluster.connected_to_seed) {
+      continue;
+    }
+    for (const auto point_index : cluster.point_indices) {
+      output.push_back(source_cloud.points[point_index]);
+    }
+  }
+  output.width = static_cast<std::uint32_t>(output.size());
+  output.height = 1;
+  output.is_dense = false;
+  return output;
+}
+
+CloudT build_stage_input_cloud(
+  const CloudT & localization_cloud, const CloudT & detail_cloud, const StageOptions & stage,
+  const StageResult * parent)
+{
+  if (stage.input_cloud == StageInputCloud::Localization || parent == nullptr) {
+    return localization_cloud;
+  }
+  CloudT merged;
+  merged.points.reserve(localization_cloud.size() + detail_cloud.size());
+  merged.points.insert(merged.points.end(), localization_cloud.points.begin(), localization_cloud.points.end());
+  for (const auto & point : detail_cloud.points) {
+    std::size_t parent_x = 0;
+    std::size_t parent_y = 0;
+    if (!locate_cell(parent->grid, point.x, point.y, parent_x, parent_y)) {
+      continue;
+    }
+    bool near_target = false;
+    const auto radius = static_cast<std::int64_t>(stage.detail_expansion_cells);
+    for (std::int64_t dy = -radius; dy <= radius && !near_target; ++dy) {
+      for (std::int64_t dx = -radius; dx <= radius; ++dx) {
+        const auto tx = static_cast<std::int64_t>(parent_x) + dx;
+        const auto ty = static_cast<std::int64_t>(parent_y) + dy;
+        if (tx < 0 || ty < 0 || tx >= static_cast<std::int64_t>(parent->grid.width) ||
+          ty >= static_cast<std::int64_t>(parent->grid.height))
+        {
+          continue;
+        }
+        if (parent->grid.cells[flatten_index(static_cast<std::size_t>(tx), static_cast<std::size_t>(ty), parent->grid.width)].refine_target) {
+          near_target = true;
+          break;
+        }
+      }
+    }
+    if (near_target) {
+      merged.push_back(point);
+    }
+  }
+  merged.width = static_cast<std::uint32_t>(merged.size());
+  merged.height = 1;
+  merged.is_dense = false;
+  return merged;
+}
+
+StageResult run_clustered_stage(
+  const std::string & name, const CloudT & localization_cloud, const CloudT & detail_cloud, const Bounds & bounds,
+  const Options & options, const StageOptions & stage, const StageResult * parent)
+{
+  StageResult result;
+  result.name = name;
+  result.evaluation_cloud = build_stage_input_cloud(localization_cloud, detail_cloud, stage, parent);
+  result.grid = build_grid(bounds, result.evaluation_cloud, stage.grid_resolution);
+  build_cell_clusters(result.grid, result.evaluation_cloud, stage, result.clusters);
+  const auto seeds = parent == nullptr ? coarse_seed_clusters(result.grid, result.clusters, options) :
+    inherited_seed_clusters(result.grid, result.clusters, *parent);
+  if (seeds.empty()) {
+    throw std::runtime_error(name + " stage has no inherited seed clusters");
+  }
+  grow_connected_clusters(result.grid, result.evaluation_cloud, stage, result.clusters, seeds);
+  evaluate_connected_cells(result.grid, result.evaluation_cloud, stage, result.clusters);
+  result.connected_cloud = build_cloud_from_connected_clusters(result.evaluation_cloud, result.clusters);
+  for (const auto & cluster : result.clusters) {
+    if (cluster.connected_to_seed) {
+      ++result.connected_clusters;
+    }
+  }
+  for (const auto & cell : result.grid.cells) {
+    if (cell.refine_target) {
+      ++result.refinement_target_cells;
+    }
+  }
+  return result;
+}
 
 void ensure_output_directory(const std::filesystem::path & output_dir)
 {
@@ -1669,6 +2060,8 @@ cv::Vec3b color_for_refine_reason(const RefineReason reason)
       return cv::Vec3b(0, 165, 255);  // orange
     case RefineReason::CoarseHeightRange:
       return cv::Vec3b(0, 0, 255);  // red
+    case RefineReason::MixedConnection:
+      return cv::Vec3b(0, 255, 0);  // green
     case RefineReason::None:
     default:
       return cv::Vec3b(0, 0, 0);  // black
@@ -1732,7 +2125,7 @@ void save_map_outputs(
 {
   save_ground_cloud(cloud, options.output_dir, cloud_name);
   write_pgm(grid, options.output_dir, pgm_name);
-  if (options.write_debug_png) {
+  if (options.clustered_refinement.write_debug_png) {
     write_png(grid, options.output_dir, png_name);
   }
   write_yaml(grid, options.output_dir, yaml_name, pgm_name);
@@ -1742,7 +2135,7 @@ void save_grid_outputs(
   const Grid & grid, const Options & options, const char * pgm_name, const char * png_name, const char * yaml_name)
 {
   write_pgm(grid, options.output_dir, pgm_name);
-  if (options.write_debug_png) {
+  if (options.clustered_refinement.write_debug_png) {
     write_png(grid, options.output_dir, png_name);
   }
   write_yaml(grid, options.output_dir, yaml_name, pgm_name);
@@ -1792,7 +2185,7 @@ void print_summary(
             << "  output_cloud: " << (options.output_dir / cloud_name) << '\n'
             << "  output_pgm: " << (options.output_dir / pgm_name) << '\n'
             << "  output_png: "
-            << (options.write_debug_png ? (options.output_dir / png_name).string() : std::string("<disabled>")) << '\n'
+            << (options.clustered_refinement.write_debug_png ? (options.output_dir / png_name).string() : std::string("<disabled>")) << '\n'
             << "  resolution: " << grid.resolution << " m\n"
             << "  size: " << grid.width << " x " << grid.height << " cells\n"
             << "  origin: [" << grid.origin_x << ", " << grid.origin_y << "]\n"
@@ -1804,6 +2197,7 @@ void print_summary(
             << stats.rejected_cells << '\n';
 }
 
+#if 0
 void print_refinement_summary(const RefinementResult & result)
 {
   std::cout << "Detail refinement summary\n"
@@ -1814,6 +2208,7 @@ void print_refinement_summary(const RefinementResult & result)
             << result.slope_rejections << '/' << result.roughness_rejections << '/'
             << result.disconnected_cells << '\n';
 }
+#endif
 
 }  // namespace
 }  // namespace ai_ship_robot_slam
@@ -1826,44 +2221,57 @@ int main(int argc, char ** argv)
     const auto detail_cloud = ai_ship_robot_slam::load_pcd(options.detail_path);
     const auto bounds = ai_ship_robot_slam::compute_bounds(*localization_cloud);
 
-    auto coarse_result = ai_ship_robot_slam::run_coarse_detection(*localization_cloud, bounds, options);
+    auto coarse_result = ai_ship_robot_slam::run_clustered_stage(
+      "coarse", *localization_cloud, *detail_cloud, bounds, options, options.clustered_refinement.coarse, nullptr);
     ai_ship_robot_slam::save_map_outputs(
-      coarse_result.grid, coarse_result.cloud, options, ai_ship_robot_slam::kGroundCoarseCloudName,
+      coarse_result.grid, coarse_result.connected_cloud, options, ai_ship_robot_slam::kGroundCoarseCloudName,
       ai_ship_robot_slam::kGroundCoarsePgmName, ai_ship_robot_slam::kGroundCoarsePngName,
       ai_ship_robot_slam::kGroundCoarseYamlName);
     const auto coarse_stats = ai_ship_robot_slam::compute_stats(
-      coarse_result.grid, *localization_cloud, *detail_cloud, coarse_result.cloud);
+      coarse_result.grid, *localization_cloud, *detail_cloud, coarse_result.connected_cloud);
     ai_ship_robot_slam::print_summary(
       "coarse", options, coarse_result.grid, coarse_stats, ai_ship_robot_slam::kGroundCoarseCloudName,
       ai_ship_robot_slam::kGroundCoarsePgmName, ai_ship_robot_slam::kGroundCoarsePngName);
 
-    auto refinement_result = ai_ship_robot_slam::run_detail_refinement(
-      std::move(coarse_result.grid), *localization_cloud, *detail_cloud, bounds, options);
+    auto final_result = coarse_result;
+    if (options.clustered_refinement.detail.enabled) {
+      final_result = ai_ship_robot_slam::run_clustered_stage(
+        "detail", *localization_cloud, *detail_cloud, bounds, options, options.clustered_refinement.detail, &coarse_result);
+    }
+    if (options.clustered_refinement.fine.enabled) {
+      const auto detail_parent = final_result;
+      final_result = ai_ship_robot_slam::run_clustered_stage(
+        "fine", *localization_cloud, *detail_cloud, bounds, options, options.clustered_refinement.fine, &detail_parent);
+    }
+
     ai_ship_robot_slam::save_map_outputs(
-      refinement_result.candidate_grid, refinement_result.candidate_cloud, options,
+      final_result.grid, final_result.connected_cloud, options,
       ai_ship_robot_slam::kGroundCandidateCloudName, ai_ship_robot_slam::kGroundCandidatePgmName,
       ai_ship_robot_slam::kGroundCandidatePngName, ai_ship_robot_slam::kGroundCandidateYamlName);
     ai_ship_robot_slam::save_map_outputs(
-      refinement_result.traversable_grid, refinement_result.traversable_cloud, options,
+      final_result.grid, final_result.connected_cloud, options,
       ai_ship_robot_slam::kGroundTraversableCloudName, ai_ship_robot_slam::kGroundTraversablePgmName,
       ai_ship_robot_slam::kGroundTraversablePngName, ai_ship_robot_slam::kGroundTraversableYamlName);
     ai_ship_robot_slam::save_grid_outputs(
-      refinement_result.refine_target_grid, options, ai_ship_robot_slam::kGroundRefineTargetPgmName,
+      coarse_result.grid, options, ai_ship_robot_slam::kGroundRefineTargetPgmName,
       ai_ship_robot_slam::kGroundRefineTargetPngName, ai_ship_robot_slam::kGroundRefineTargetYamlName);
-    if (options.write_debug_png) {
+    if (options.clustered_refinement.write_debug_png) {
       ai_ship_robot_slam::write_traversable_reason_png(
-        refinement_result.traversable_grid, options.output_dir, ai_ship_robot_slam::kGroundTraversableReasonPngName);
+        final_result.grid, options.output_dir, ai_ship_robot_slam::kGroundTraversableReasonPngName);
       ai_ship_robot_slam::write_refine_reason_png(
-        refinement_result.refine_target_grid, options.output_dir, ai_ship_robot_slam::kGroundRefineReasonPngName);
+        coarse_result.grid, options.output_dir, ai_ship_robot_slam::kGroundRefineReasonPngName);
     }
 
     const auto traversable_stats = ai_ship_robot_slam::compute_stats(
-      refinement_result.traversable_grid, *localization_cloud, *detail_cloud, refinement_result.traversable_cloud);
+      final_result.grid, *localization_cloud, *detail_cloud, final_result.connected_cloud);
     ai_ship_robot_slam::print_summary(
-      "traversable", options, refinement_result.traversable_grid, traversable_stats,
+      final_result.name, options, final_result.grid, traversable_stats,
       ai_ship_robot_slam::kGroundTraversableCloudName, ai_ship_robot_slam::kGroundTraversablePgmName,
       ai_ship_robot_slam::kGroundTraversablePngName);
-    ai_ship_robot_slam::print_refinement_summary(refinement_result);
+    std::cout << "Clustered refinement summary\n"
+              << "  final_stage: " << final_result.name << '\n'
+              << "  connected_clusters: " << final_result.connected_clusters << '\n'
+              << "  refinement_target_cells: " << final_result.refinement_target_cells << '\n';
   } catch (const std::exception & error) {
     std::cerr << "ground_candidate_map_generator failed: " << error.what() << '\n';
     ai_ship_robot_slam::print_usage(std::cerr);

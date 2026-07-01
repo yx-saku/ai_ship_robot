@@ -21,16 +21,16 @@ Options:
   --scenario FILE          Run scripted drive with a YAML scenario file.
                            Scenario steps support commands and move_to_pose.
   --start-delay SEC        Wait before starting scripted drive. Default: 0.0
-  --linear-speed VALUE     Forward/backward speed in m/s. Default: 1.4
-  --lateral-speed VALUE    Left/right strafe speed in m/s. Default: 1.4
-  --angular-speed VALUE    Yaw speed in rad/s. Default: 0.873
+  --linear-speed VALUE     Forward/backward speed in m/s. Default: 0.9
+  --lateral-speed VALUE    Left/right command magnitude in m/s. Adapter clamps it to 0 in slope validation mode. Default: 0.9
+  --angular-speed VALUE    Yaw speed in rad/s. Default: 1.2
   --publish-rate VALUE     Command publish rate in Hz. Default: 10.0
   --cmd-vel-topic TOPIC    cmd_vel topic. Default: cmd_vel
   -h, --help               Show this help.
 
 Keys:
   w/i: toggle forward, s/,: toggle backward
-  j/l: toggle strafe left/right, a/d: toggle yaw left/right
+  j/l: toggle left/right command, a/d: toggle yaw left/right
   Combine keys sequentially, e.g. w then a for a forward-left arc.
   Press the same component key again to clear only that component.
   space/x/k: stop all, Q/Esc: quit
@@ -126,9 +126,9 @@ BUILD_WORKSPACE=false
 CLEAN_BUILD_WORKSPACE=false
 SCENARIO_FILE=""
 START_DELAY_SEC="0.0"
-LINEAR_SPEED="1.4"
-LATERAL_SPEED="1.4"
-ANGULAR_SPEED="0.873"
+LINEAR_SPEED="0.9"
+LATERAL_SPEED="0.9"
+ANGULAR_SPEED="1.2"
 PUBLISH_RATE="10.0"
 CMD_VEL_TOPIC="cmd_vel"
 

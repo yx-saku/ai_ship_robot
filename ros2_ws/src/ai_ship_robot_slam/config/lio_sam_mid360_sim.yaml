@@ -121,40 +121,87 @@
     trajectorySeedRingSubmapVoxelSize: 0.005
     trajectorySeedRingGlobalVoxelSize: 0.005
 
-    # ground_candidate_map_generatorで使う粗い地面連結と局所詳細化の設定。
+    # ground_candidate_map_generatorで使うクラスタ連結方式の階層抽出設定。
     groundCandidate:
-      coarseGround:
-        gridResolution: 0.20  # 粗い地面連結推定に使う大グリッドの解像度[m]。
-        connectionZWindow: 0.25  # 隣接セルへ地面連結を広げる際に許容する平面近傍z幅[m]。
-        planeFitRadius: 1  # 粗い局所平面fitで参照する周辺セル半径[cell]。
-        minPlanePoints: 5  # 粗い局所平面fitに必要な最小点数。
-        originSeedRadiusCells: 1  # 原点近傍を初期地面seedにする半径[cell]。
-        maxSlopeDeg: 30.0  # 粗い地面セルとして許容する最大勾配[deg]。
-        maxNormalDiffDeg: 30.0  # 隣接地面セル間で許容する最大法線角度差[deg]。
-        maxNeighborHeightGap: 0.20  # 隣接地面セル境界で許容する最大高さ差[m]。
-        maxPlaneRmse: 0.10  # 粗い局所平面fitで許容する最大RMSE[m]。
-        writeDebugPng: true  # PGMに加えてPNGデバッグ画像を出力するか。
-      detailRefinement:
-        enabled: true  # 粗いセルの局所詳細化と5cm級通行可否判定を有効にするか。
-        gridResolution: 0.05  # 詳細化後の小グリッド解像度[m]。
-        coarseMinDensity: 0.0  # 粗いセルを詳細化対象にする地面高さ帯の最小点密度[points/m^2]。
-        coarseDensityContrastEnabled: true  # 粗いセル内の小グリッド密度差で詳細化対象を追加するか。
-        coarseDensityContrastRatio: 0.8  # 小グリッド密度の低percentile/高percentile比がこれ未満なら詳細化する。
-        coarseDensityContrastMinHighDensity: 0.0  # 密度差判定を有効にする高密度側の最小密度[points/m^2]。
-        minPointHeightBelowGround: 0.10  # 詳細評価用点として採用する地面平面より下側の許容幅[m]。
-        maxPointHeightAboveGround: 0.20  # 詳細評価用点として採用する地面平面より上側の許容幅[m]。
-        coarseMaxPlaneDistanceP95: 0.025  # 粗いセル内点の地面平面距離p95がこれを超えたら詳細化する[m]。
-        coarseMaxHeightRangeP95: 0.025  # 粗いセル内点の高さp95-p05がこれを超えたら詳細化する[m]。
-        percentileLow: 5.0  # 高さレンジや密度差で使う低側percentile[%]。
-        percentileHigh: 95.0  # 高さレンジや平面距離で使う高側percentile[%]。
-        minDensity: 80.0  # 小グリッドを通行可能候補にする最小点密度[points/m^2]。
-        planeFitRadiusCells: 1  # 小グリッド局所平面fitで参照する周辺セル半径[cell]。
-        minPlanePoints: 5  # 小グリッド局所平面fitに必要な最小点数。
-        maxHeightRangeP95: 0.025  # 小グリッド内点の高さp95-p05がこれを超えたら通行不可[m]。
-        maxSlopeDeg: 25.0  # 小グリッドの局所平面として許容する最大勾配[deg]。
-        maxPlaneRmse: 0.05  # 小グリッド局所平面fitで許容する最大RMSE[m]。
-        maxNormalDiffDeg: 35.0  # 小グリッド連結時に許容する最大法線角度差[deg]。
-        maxNeighborHeightGap: 0.025  # 小グリッド連結時に許容する隣接境界高さ差[m]。
+      clusteredRefinement:
+        enabled: true
+        writeDebugPng: true
+        coarse:
+          enabled: true
+          inputCloud: localization  # coarseはlocalization_map.pcdのみを使い、原点seedクラスタから連結を開始する。
+          gridResolution: 0.20
+          clusterTolerance: 0.20
+          minClusterPoints: 2
+          planeFitRadiusCells: 1
+          minPlanePoints: 2
+          connectionTolerance: 0.5  # 隣接クラスタ点が現在クラスタ局所平面へ接続する許容距離[m]。
+          minConnectionPoints: 1
+          maxSlopeDeg: 30.0
+          maxNormalDiffDeg: 30.0
+          maxNeighborHeightGap: 0.20
+          maxPlaneRmse: 0.10
+          seed:
+            originZ: 0.0
+            originSeedRadiusCells: 1
+          refinementTrigger:
+            maxPlaneRmse: 0.10
+            maxPlaneDistanceP95: 0.025
+            maxHeightRangeP95: 0.025
+            densityContrastEnabled: true
+            densityContrastRatio: 0.8
+            densityContrastMinHighDensity: 0.0
+            percentileLow: 5.0
+            percentileHigh: 95.0
+        detail:
+          enabled: false
+          inputCloud: localization_plus_nearby_detail  # detailは親の詳細化対象近傍だけtrajectory_seed_ring_cloud.pcdを合成する。
+          gridResolution: 0.05
+          detailExpansionCells: 1
+          clusterTolerance: 0.03
+          minClusterPoints: 5
+          planeFitRadiusCells: 1
+          minPlanePoints: 5
+          connectionTolerance: 0.05  # 親から継承した連結を詳細セルの局所平面で広げる許容距離[m]。
+          minConnectionPoints: 1
+          maxSlopeDeg: 25.0
+          maxNormalDiffDeg: 35.0
+          maxNeighborHeightGap: 0.025
+          maxPlaneRmse: 0.05
+          seedSource: parent_connected_boundary  # seedは原点ではなく親ステージのseed連結セルから継承する。
+          refinementTrigger:
+            maxPlaneRmse: 0.05
+            maxPlaneDistanceP95: 0.025
+            maxHeightRangeP95: 0.025
+            densityContrastEnabled: true
+            densityContrastRatio: 0.8
+            densityContrastMinHighDensity: 0.0
+            percentileLow: 5.0
+            percentileHigh: 95.0
+        fine:
+          enabled: false
+          inputCloud: localization_plus_nearby_detail  # fineも親の詳細化対象近傍だけ詳細点群を合成する。
+          gridResolution: 0.02
+          detailExpansionCells: 1
+          clusterTolerance: 0.015
+          minClusterPoints: 5
+          planeFitRadiusCells: 1
+          minPlanePoints: 5
+          connectionTolerance: 0.03
+          minConnectionPoints: 1
+          maxSlopeDeg: 25.0
+          maxNormalDiffDeg: 35.0
+          maxNeighborHeightGap: 0.025
+          maxPlaneRmse: 0.03
+          seedSource: parent_connected_boundary
+          refinementTrigger:
+            maxPlaneRmse: 0.03
+            maxPlaneDistanceP95: 0.015
+            maxHeightRangeP95: 0.015
+            densityContrastEnabled: true
+            densityContrastRatio: 0.8
+            densityContrastMinHighDensity: 0.0
+            percentileLow: 5.0
+            percentileHigh: 95.0
 
     publishDeskewedCloud: false
     publishFeatureClouds: false

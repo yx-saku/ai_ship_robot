@@ -307,15 +307,15 @@
     <model name="ceiling_beams_and_lights">
       <static>true</static>
       <link name="overhead_features">
-        <!-- 梁は勾配天井の直下へ沿わせ、最も低い位置でも床から梁下面まで 2m を確保する。 -->
-        <collision name="beam_west_collision"><pose>24 0 1.87 0 0 0</pose><geometry><box><size>1.0 42 0.16</size></box></geometry></collision>
-        <visual name="beam_west_visual"><pose>24 0 1.87 0 0 0</pose><geometry><box><size>1.0 42 0.16</size></box></geometry><material><ambient>0.25 0.22 0.18 1</ambient><diffuse>0.45 0.39 0.30 1</diffuse></material></visual>
-        <collision name="beam_center_collision"><pose>50 0 2.39186859166217 0 0.0872664625997165 0</pose><geometry><box><size>1.0 38 0.16</size></box></geometry></collision>
-        <visual name="beam_center_visual"><pose>50 0 2.39186859166217 0 0.0872664625997165 0</pose><geometry><box><size>1.0 38 0.16</size></box></geometry><material><ambient>0.25 0.22 0.18 1</ambient><diffuse>0.45 0.39 0.30 1</diffuse></material></visual>
-        <collision name="beam_east_collision"><pose>76 2 1.87 0 0 0</pose><geometry><box><size>1.0 34 0.16</size></box></geometry></collision>
-        <visual name="beam_east_visual"><pose>76 2 1.87 0 0 0</pose><geometry><box><size>1.0 34 0.16</size></box></geometry><material><ambient>0.25 0.22 0.18 1</ambient><diffuse>0.45 0.39 0.30 1</diffuse></material></visual>
-        <visual name="light_strip_north"><pose>36 9 1.66 0 0 0</pose><geometry><box><size>18 0.35 0.15</size></box></geometry><material><ambient>0.7 0.7 0.5 1</ambient><diffuse>0.9 0.9 0.6 1</diffuse></material></visual>
-        <visual name="light_strip_south"><pose>64 -8 1.92040272064102 0 0 0</pose><geometry><box><size>22 0.35 0.15</size></box></geometry><material><ambient>0.7 0.7 0.5 1</ambient><diffuse>0.9 0.9 0.6 1</diffuse></material></visual>
+        <!-- 梁は天井形状に概ね沿わせつつ、中央梁のみ坂道通過のため上方へ退避する。 -->
+        <collision name="beam_west_collision"><pose>-20 0 1.87 0 0 0</pose><geometry><box><size>1.0 42 0.16</size></box></geometry></collision>
+        <visual name="beam_west_visual"><pose>-20 0 1.87 0 0 0</pose><geometry><box><size>1.0 42 0.16</size></box></geometry><material><ambient>0.25 0.22 0.18 1</ambient><diffuse>0.45 0.39 0.30 1</diffuse></material></visual>
+        <collision name="beam_center_collision"><pose>6 0 2.8 0 0.0872664625997165 0</pose><geometry><box><size>1.0 38 0.16</size></box></geometry></collision>
+        <visual name="beam_center_visual"><pose>6 0 2.8 0 0.0872664625997165 0</pose><geometry><box><size>1.0 38 0.16</size></box></geometry><material><ambient>0.25 0.22 0.18 1</ambient><diffuse>0.45 0.39 0.30 1</diffuse></material></visual>
+        <collision name="beam_east_collision"><pose>32 2 1.87 0 0 0</pose><geometry><box><size>1.0 34 0.16</size></box></geometry></collision>
+        <visual name="beam_east_visual"><pose>32 2 1.87 0 0 0</pose><geometry><box><size>1.0 34 0.16</size></box></geometry><material><ambient>0.25 0.22 0.18 1</ambient><diffuse>0.45 0.39 0.30 1</diffuse></material></visual>
+        <visual name="light_strip_north"><pose>-8 9 1.66 0 0 0</pose><geometry><box><size>18 0.35 0.15</size></box></geometry><material><ambient>0.7 0.7 0.5 1</ambient><diffuse>0.9 0.9 0.6 1</diffuse></material></visual>
+        <visual name="light_strip_south"><pose>20 -8 1.92040272064102 0 0 0</pose><geometry><box><size>22 0.35 0.15</size></box></geometry><material><ambient>0.7 0.7 0.5 1</ambient><diffuse>0.9 0.9 0.6 1</diffuse></material></visual>
       </link>
     </model>
 

@@ -1,33 +1,20 @@
-// Copyright 2026 AI Ship Robot Developers
-//
-// Licensed under the Apache License, Version 2.0 (the "License");
-// you may not use this file except in compliance with the License.
-// You may obtain a copy of the License at
-//
-//     http://www.apache.org/licenses/LICENSE-2.0
-//
-// Unless required by applicable law or agreed to in writing, software
-// distributed under the License is distributed on an "AS IS" BASIS,
-// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-// See the License for the specific language governing permissions and
-// limitations under the License.
+#include <rclcpp/rclcpp.hpp>
 
-#include <cstdio>
-#include <cstdint>
-#include <cstring>
+#include <livox_ros_driver2/msg/custom_msg.hpp>
+#include <sensor_msgs/msg/point_cloud2.hpp>
+#include <sensor_msgs/msg/point_field.hpp>
 
 #include <algorithm>
 #include <chrono>
+#include <cstdio>
+#include <cstdint>
+#include <cstring>
+#include <stdexcept>
 #include <string>
 #include <unordered_map>
 #include <unordered_set>
 #include <utility>
 #include <vector>
-
-#include <livox_ros_driver2/msg/custom_msg.hpp>
-#include <rclcpp/rclcpp.hpp>
-#include <sensor_msgs/msg/point_cloud2.hpp>
-#include <sensor_msgs/msg/point_field.hpp>
 
 namespace ai_ship_robot_slam
 {
@@ -39,12 +26,22 @@ public:
   : Node("livox_custommsg_to_pointcloud2_node")
   {
     discovery_period_sec_ = declare_parameter<double>("discovery_period_sec", 1.0);
+    qos_reliable_ = declare_parameter<bool>("qos_reliable", false);
+    qos_depth_ = declare_parameter<int>("qos_depth", 10);
+
+    if (qos_depth_ <= 0) {
+      throw std::invalid_argument("qos_depth must be greater than 0.");
+    }
+
+    RCLCPP_INFO(
+      get_logger(), "Dynamic CustomMsg->PointCloud2 bridge QoS: mode=%s depth=%d",
+      qos_reliable_ ? "reliable" : "best_effort", qos_depth_);
 
     // 可視化要求があるtopicだけをbridgeするため、ROS graphを周期探索して動的に接続を更新する。
     discovery_timer_ = create_wall_timer(
       std::chrono::duration_cast<std::chrono::nanoseconds>(
         std::chrono::duration<double>(std::max(discovery_period_sec_, 0.1))),
-      [this]() {this->update_bridges();});
+      [this]() { this->update_bridges(); });
   }
 
 private:
@@ -81,9 +78,7 @@ private:
     return output_topic.substr(0, output_topic.size() - std::strlen(kPointsSuffix));
   }
 
-  static PointField make_field(
-    const std::string & name, const std::uint32_t offset,
-    const std::uint8_t datatype)
+  static PointField make_field(const std::string & name, const std::uint32_t offset, const std::uint8_t datatype)
   {
     PointField field;
     field.name = name;
@@ -93,23 +88,17 @@ private:
     return field;
   }
 
-  static void write_float32(
-    std::vector<std::uint8_t> & data, const std::size_t offset,
-    const float value)
+  static void write_float32(std::vector<std::uint8_t> & data, const std::size_t offset, const float value)
   {
     std::memcpy(data.data() + offset, &value, sizeof(value));
   }
 
-  static void write_uint16(
-    std::vector<std::uint8_t> & data, const std::size_t offset,
-    const std::uint16_t value)
+  static void write_uint16(std::vector<std::uint8_t> & data, const std::size_t offset, const std::uint16_t value)
   {
     std::memcpy(data.data() + offset, &value, sizeof(value));
   }
 
-  static void write_uint32(
-    std::vector<std::uint8_t> & data, const std::size_t offset,
-    const std::uint32_t value)
+  static void write_uint32(std::vector<std::uint8_t> & data, const std::size_t offset, const std::uint32_t value)
   {
     std::memcpy(data.data() + offset, &value, sizeof(value));
   }
@@ -126,21 +115,33 @@ private:
     };
   }
 
+  rclcpp::QoS bridge_qos() const
+  {
+    // 上流publisherとの接続性と可視化出力のQoSを同一パラメータで制御する。
+    auto qos = rclcpp::QoS(
+      rclcpp::KeepLast(static_cast<std::size_t>(qos_depth_))).durability_volatile();
+    return qos_reliable_ ? qos.reliable() : qos.best_effort();
+  }
+
   void create_bridge(const std::string & input_topic, const std::string & output_topic)
   {
+    const auto qos = bridge_qos();
+
     Channel channel;
     channel.input_topic = input_topic;
     channel.output_topic = output_topic;
-    channel.publisher = create_publisher<PointCloud2>(output_topic, rclcpp::SensorDataQoS());
+    channel.publisher = create_publisher<PointCloud2>(output_topic, qos);
     channel.subscription = create_subscription<CustomMsg>(
-      input_topic, rclcpp::SensorDataQoS(),
+      input_topic, qos,
       [this, output_topic](const CustomMsg::SharedPtr message) {
         this->handle_custom(output_topic, message);
       });
     channels_.emplace(output_topic, std::move(channel));
     RCLCPP_INFO(
-      get_logger(), "Activated dynamic CustomMsg->PointCloud2 bridge: %s -> %s",
-      input_topic.c_str(), output_topic.c_str());
+      get_logger(),
+      "Activated dynamic CustomMsg->PointCloud2 bridge: %s -> %s (mode=%s depth=%d)",
+      input_topic.c_str(), output_topic.c_str(), qos_reliable_ ? "reliable" : "best_effort",
+      qos_depth_);
   }
 
   void remove_bridge(const std::string & output_topic)
@@ -249,6 +250,8 @@ private:
   }
 
   double discovery_period_sec_{};
+  bool qos_reliable_{false};
+  int qos_depth_{10};
   std::unordered_map<std::string, Channel> channels_;
   rclcpp::TimerBase::SharedPtr discovery_timer_;
 };
